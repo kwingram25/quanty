@@ -29,3 +29,10 @@ build/
 .DS_Store
 .idea/
 .vscode/
+
+# user strategies and experiments: only the README and template are tracked
+strategies/*
+!strategies/README.md
+!strategies/_template.py
+experiments/*
+!experiments/README.md

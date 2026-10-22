@@ -1,7 +1,9 @@
-"""Discover strategy modules from the bundled examples and the user's strategy_paths.
+"""Discover strategy modules from the bundled examples, ./strategies and the user's strategy_paths.
 
 Every non-underscore *.py file in a search path is a strategy module, named after its file.
-A user module shadows a bundled example of the same name.
+Search order, later shadowing earlier: bundled examples, ./strategies (gitignored; run from the
+repo root), its immediate subfolders (e.g. a private repo cloned into strategies/private), then
+strategy_paths from the user config.
 """
 
 import importlib.util
@@ -10,12 +12,20 @@ from pathlib import Path
 from types import ModuleType
 
 EXAMPLES = Path(__file__).parent / "strategies"
+LOCAL = Path("strategies")
 
 
 def _module_files(path: Path) -> list[Path]:
     if not path.is_dir():
         raise FileNotFoundError(f"strategy path is not a directory: {path}")
     return sorted(p for p in path.glob("*.py") if not p.name.startswith("_"))
+
+
+def _local_paths(local: Path) -> list[Path]:
+    if not local.is_dir():
+        return []
+    subdirs = sorted(p for p in local.iterdir() if p.is_dir() and not p.name.startswith(("_", ".")))
+    return [local, *subdirs]
 
 
 def _import(file: Path) -> ModuleType:
@@ -29,9 +39,11 @@ def _import(file: Path) -> ModuleType:
     return module
 
 
-def discover(paths: list[Path], include_examples: bool = True) -> dict[str, ModuleType]:
+def discover(
+    paths: list[Path], include_examples: bool = True, local: Path | None = LOCAL
+) -> dict[str, ModuleType]:
     """Map strategy name -> module; later paths shadow earlier ones."""
-    search = ([EXAMPLES] if include_examples else []) + paths
+    search = ([EXAMPLES] if include_examples else []) + (_local_paths(local) if local else []) + paths
     files: dict[str, Path] = {}
     for path in search:
         for file in _module_files(path):
