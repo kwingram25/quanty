@@ -1,0 +1,31 @@
+# secrets and local config
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# data, ledgers, recordings — never committed
+data/
+*.jsonl
+*.jsonl.gz
+*.parquet
+*.sqlite
+*.db
+
+# python
+__pycache__/
+*.py[cod]
+.venv/
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+.hypothesis/
+dist/
+build/
+*.egg-info/
+
+# editors / os
+.DS_Store
+.idea/
+.vscode/
