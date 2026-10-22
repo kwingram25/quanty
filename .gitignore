@@ -36,3 +36,4 @@ strategies/*
 !strategies/_template.py
 experiments/*
 !experiments/README.md
+!experiments/example.toml

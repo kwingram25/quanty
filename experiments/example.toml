@@ -1,0 +1,28 @@
+# Example experiment: two variants of the example strategy side by side on one simulated broker.
+#   uv run quanty backtest experiments/example.toml --hours 24
+
+clock_ms = 1000
+
+[limits]                       # account-wide, across all instances
+max_open_risk = 200
+
+[brokers.sim]
+kind = "sim"
+latency_ms = 50
+
+[[instances]]
+id = "fav_90"
+strategy = "example_favourite"
+[instances.params]
+min_conf = 0.90
+max_price = 0.95
+[instances.limits]
+max_order_qty = 10
+
+[[instances]]
+id = "fav_97"
+strategy = "example_favourite"
+[instances.params]
+min_conf = 0.97
+max_price = 0.98
+enter_last_s = 30
