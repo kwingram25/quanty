@@ -20,7 +20,7 @@ uv run quanty list                                    # strategies quanty can fi
 
 ## Design in one paragraph
 
-Venue and data-feed adapters turn every input into one normalised event stream. A strategy sees
+Venue and data-feed adapters turn every input into one normalized event stream. A strategy sees
 only those events and acts only through a context (buy, sell, cancel). A broker decides what an
 order means: a simulated fill in backtest and paper, an order preview in shadow, a real order in live.
 The same strategy file runs unchanged in all four modes. Risk limits, the ledger, reconciliation
@@ -68,7 +68,7 @@ brokers and risk limits; see `experiments/example.toml`.
 
 | | |
 |---|---|
-| `core/events.py` | normalised events: books, trades, external data, lifecycle, fills |
+| `core/events.py` | normalized events: books, trades, external data, lifecycle, fills |
 | `core/engine.py` | the loop: time-ordered events, strategy dispatch, order validation |
 | `core/risk.py` | per-instance and account limits: order size, position, open risk, group risk, daily loss, kill switch |
 | `core/portfolio.py`, `core/ledger.py` | positions and P&L from fills and settlements; SQLite record |

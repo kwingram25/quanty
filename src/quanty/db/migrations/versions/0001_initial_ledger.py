@@ -78,7 +78,7 @@ def upgrade() -> None:
                 "pending",
                 "open",
                 "filled",
-                "cancelled",
+                "canceled",
                 "rejected",
                 "expired",
                 name="orderstatus",

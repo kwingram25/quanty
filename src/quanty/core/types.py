@@ -22,7 +22,7 @@ class Action(StrEnum):
 
 
 class Tif(StrEnum):
-    GTC = "gtc"  # rest until filled, cancelled or the market closes
+    GTC = "gtc"  # rest until filled, canceled or the market closes
     IOC = "ioc"  # take what is available on arrival, cancel the rest
 
 
@@ -30,7 +30,7 @@ class OrderStatus(StrEnum):
     PENDING = "pending"  # sent, not yet acknowledged by the venue
     OPEN = "open"
     FILLED = "filled"
-    CANCELLED = "cancelled"
+    CANCELED = "canceled"
     REJECTED = "rejected"
     EXPIRED = "expired"  # the market closed while the order rested
 

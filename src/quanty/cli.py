@@ -52,7 +52,7 @@ def params(strategy: Annotated[str, typer.Argument(help="Strategy name, as `quan
 
 @app.command()
 def demo(
-    strategy: Annotated[str, typer.Option(help="Strategy to run")] = "example_favourite",
+    strategy: Annotated[str, typer.Option(help="Strategy to run")] = "example_favorite",
     param: Annotated[list[str] | None, typer.Option(help="Override a parameter: KEY=VALUE")] = None,
     latency_ms: Annotated[int, typer.Option(help="Simulated order latency")] = 50,
     hours: Hours = 6.0,

@@ -26,11 +26,11 @@ def test_taker_walks_levels_at_level_prices() -> None:
     assert pos.cost == pytest.approx(0.40 * 5 + 0.41 * 7)
 
 
-def test_ioc_remainder_is_cancelled() -> None:
+def test_ioc_remainder_is_canceled() -> None:
     s = buy(Side.YES, 0.41, 20, tif=Tif.IOC)
     make(s).run([*opened(), book(1, [], [(0.40, 5), (0.41, 10)])])
     assert sum(f.qty for f in s.fills()) == 15
-    assert s.statuses() == ["cancelled"]
+    assert s.statuses() == ["canceled"]
 
 
 def test_buying_no_takes_yes_bids() -> None:
@@ -84,7 +84,7 @@ def test_latency_order_meets_the_book_at_arrival() -> None:
     s = buy(Side.YES, 0.42, 5, tif=Tif.IOC)
     make(s, latency_ms=100).run([*opened(), book(1000, [], [(0.40, 50)]), book(1050, [], [(0.45, 50)])])
     assert s.fills() == []
-    assert s.statuses() == ["cancelled"]
+    assert s.statuses() == ["canceled"]
 
 
 def test_taken_liquidity_is_not_available_twice() -> None:
@@ -99,7 +99,7 @@ def test_cancel_and_late_cancel() -> None:
 
     s = Hooks(book=once(place_then_cancel))
     make(s, latency_ms=10).run([*opened(), book(1, [(0.30, 1)], [(0.35, 1)])])
-    assert s.statuses() == ["open", "cancelled"]
+    assert s.statuses() == ["open", "canceled"]
 
     filled = Hooks(book=once(lambda ctx, b: ctx.cancel(ctx.buy(M.id, Side.YES, 0.35, 1, tif=Tif.IOC))))
     make(filled, latency_ms=10).run([*opened(), book(1, [], [(0.35, 1)])])

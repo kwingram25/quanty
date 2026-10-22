@@ -31,7 +31,7 @@ def test_example_experiment_loads_and_runs(strategies: dict[str, ModuleType]) ->
 
 
 def inst(**kw: object) -> dict[str, object]:
-    return {"instances": [{"id": "a", "strategy": "example_favourite", **kw}]}
+    return {"instances": [{"id": "a", "strategy": "example_favorite", **kw}]}
 
 
 @pytest.mark.parametrize(
@@ -40,7 +40,7 @@ def inst(**kw: object) -> dict[str, object]:
         ({}, "exp.instances: Field required"),
         ({"instances": []}, "exp.instances: List should have at least 1 item"),
         ({"instances": [{"strategy": "x"}]}, "exp.instances.0.id: Field required"),
-        (inst(colour="red"), "exp.instances.0.colour: Extra inputs are not permitted"),
+        (inst(color="red"), "exp.instances.0.color: Extra inputs are not permitted"),
         (inst(broker="nope"), "broker 'nope' is not defined"),
         ({**inst(), "brokers": {"a": {}, "b": {}}}, "broker None is not defined"),  # must name one
         ({"instances": [{"id": "a", "strategy": "s"}, {"id": "a", "strategy": "s"}]}, "unique"),

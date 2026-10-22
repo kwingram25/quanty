@@ -13,7 +13,7 @@ Example (TOML)::
 
     [[instances]]
     id = "fav_paper"
-    strategy = "example_favourite"
+    strategy = "example_favorite"
     broker = "sim"               # optional when there is one broker
     [instances.params]
     min_conf = 0.9

@@ -43,7 +43,7 @@ def run(*argv: str) -> Result:
 
 def test_demo_is_reproducible() -> None:
     first = run("demo", "--hours", "1", "--seed", "2")
-    assert first.exit_code == 0 and "example_favourite" in first.stdout
+    assert first.exit_code == 0 and "example_favorite" in first.stdout
     assert run("demo", "--hours", "1", "--seed", "2").stdout == first.stdout
 
 
@@ -65,7 +65,7 @@ def test_backtest_writes_ledger(tmp_path: Path) -> None:
 
 
 def test_list_and_params() -> None:
-    assert "example_favourite" in run("list").stdout
-    res = run("params", "example_favourite")
+    assert "example_favorite" in run("list").stdout
+    res = run("params", "example_favorite")
     assert res.exit_code == 0 and "min_conf" in res.stdout and "Model probability" in res.stdout
     assert run("params", "nope").exit_code == 2

@@ -6,16 +6,16 @@ from quanty import plugins
 
 
 def test_examples_are_discovered(tmp_path: Path) -> None:
-    assert "example_favourite" in plugins.discover([], local=tmp_path)
+    assert "example_favorite" in plugins.discover([], local=tmp_path)
 
 
 def test_user_paths_add_and_shadow(tmp_path: Path) -> None:
     (tmp_path / "mine.py").write_text("X = 1\n")
-    (tmp_path / "example_favourite.py").write_text("X = 2\n")
+    (tmp_path / "example_favorite.py").write_text("X = 2\n")
     (tmp_path / "_helper.py").write_text("raise RuntimeError\n")
     found = plugins.discover([tmp_path], local=None)
     assert found["mine"].X == 1
-    assert found["example_favourite"].X == 2
+    assert found["example_favorite"].X == 2
     assert "_helper" not in found
 
 

@@ -258,7 +258,7 @@ class Engine:
             self.instances[order.instance].broker.cancel(order)
 
     def halt(self, instance_id: str | None = None, reason: str = "") -> None:
-        """Kill switch: no new buys and resting buys cancelled, for one instance or all.
+        """Kill switch: no new buys and resting buys canceled, for one instance or all.
 
         Sells (exits, stops) still go through so positions can be closed.
         """

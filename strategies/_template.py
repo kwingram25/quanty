@@ -3,7 +3,7 @@
 A strategy module defines one Strategy subclass. The same file runs in backtest, paper, shadow
 and live; it only sees events and only acts through ctx. Hooks you can override: on_start,
 on_market_open, on_book, on_trade, on_data, on_clock, on_fill, on_order, on_market_close,
-on_settled. See src/quanty/strategies/example_favourite.py for a working example.
+on_settled. See src/quanty/strategies/example_favorite.py for a working example.
 """
 
 from pydantic import Field

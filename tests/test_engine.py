@@ -105,7 +105,7 @@ def test_strategy_errors_halt_when_not_strict() -> None:
     e = make(Hooks(book=first_rest_then_boom), strict=False)
     e.run([*opened(), book(1, [], [(0.4, 1)]), book(2, [], [(0.4, 1)])])
     assert "s0" in e.halted
-    assert got[0].status is OrderStatus.CANCELLED
+    assert got[0].status is OrderStatus.CANCELED
     levels = list(e.ledger.execute(select(LogRow.level).order_by(LogRow.id)).scalars())
     assert levels == ["error", "warning"]
 

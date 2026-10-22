@@ -91,7 +91,7 @@ class SimBroker(Broker):
             case _CancelArrive():
                 w = self._working.pop(event.order_id, None)
                 if w is not None:  # else already filled, expired or never accepted
-                    self._update(w, OrderStatus.CANCELLED)
+                    self._update(w, OrderStatus.CANCELED)
             case _:
                 raise TypeError(f"unexpected {event!r}")
 
@@ -127,7 +127,7 @@ class SimBroker(Broker):
         if w.remaining == 0:
             self._update(w, OrderStatus.FILLED)
         elif order.tif is Tif.IOC:
-            self._update(w, OrderStatus.CANCELLED)
+            self._update(w, OrderStatus.CANCELED)
         else:
             w.queue_ahead = sum(lv.size for lv in same if abs(lv.price - yes_px) < EPS)
             self._working[order.id] = w

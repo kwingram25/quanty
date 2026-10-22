@@ -12,7 +12,7 @@ latency_ms = 50
 
 [[instances]]
 id = "fav_90"
-strategy = "example_favourite"
+strategy = "example_favorite"
 [instances.params]
 min_conf = 0.90
 max_price = 0.95
@@ -21,7 +21,7 @@ max_order_qty = 10
 
 [[instances]]
 id = "fav_97"
-strategy = "example_favourite"
+strategy = "example_favorite"
 [instances.params]
 min_conf = 0.97
 max_price = 0.98
