@@ -8,6 +8,7 @@
 # data, ledgers, recordings — never committed
 data/
 *.jsonl
+!tests/fixtures/*.jsonl
 *.jsonl.gz
 *.parquet
 *.sqlite
