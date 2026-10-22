@@ -141,7 +141,7 @@ def _print_summary(rows: list[Summary], ids: list[str]) -> None:
                f"{'won':>5} {'lost':>5} {'P&L':>10}")  # fmt: skip
     for iid in ids:
         r = by_id.get(iid, Summary(iid, 0, 0, 0, 0, 0.0, 0.0, 0, 0))
-        typer.echo(f"{iid:24} {r.orders:7} {r.rejected:5} {r.fills:6} {r.contracts:10} {r.fees:8.2f} "
+        typer.echo(f"{iid:24} {r.orders:7} {r.rejected:5} {r.fills:6} {r.contracts:10g} {r.fees:8.2f} "
                    f"{r.wins:5} {r.losses:5} {r.pnl:10.2f}")  # fmt: skip
 
 

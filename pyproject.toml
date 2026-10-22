@@ -9,10 +9,13 @@ authors = [{ name = "Keith Ingram" }]
 requires-python = ">=3.12"
 dependencies = [
     "alembic>=1.13",
+    "cryptography>=43",
     "hdrhistogram>=0.10",
     "httpx>=0.27",
     "orjson>=3.10",
     "pydantic>=2.8",
+    "pydantic-settings>=2.4",
+    "sortedcontainers>=2.4",
     "sqlalchemy>=2.0",
     "structlog>=24",
     "tenacity>=9",
@@ -53,7 +56,7 @@ files = ["src", "tests", "scripts"]
 plugins = ["pydantic.mypy"]
 
 [[tool.mypy.overrides]]
-module = ["hdrh.*"]
+module = ["hdrh.*", "sortedcontainers.*"]
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]

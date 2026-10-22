@@ -6,7 +6,7 @@ from quanty.core import Action, Fill, Liquidity, Side
 from quanty.core.portfolio import DAY_MS, Portfolio
 
 
-def fill(action: Action, side: Side, price: float, qty: int, fee: float = 0.0, ts: int = 0) -> Fill:
+def fill(action: Action, side: Side, price: float, qty: float, fee: float = 0.0, ts: int = 0) -> Fill:
     return Fill(ts=ts, order_id="o", market_id="m", side=side, action=action, price=price, qty=qty, fee=fee,
                 liquidity=Liquidity.TAKER)  # fmt: skip
 
@@ -57,7 +57,7 @@ trade = st.tuples(
 
 @given(st.lists(trade, max_size=40), st.sampled_from([Side.YES, Side.NO]))
 def test_realized_pnl_equals_cash_flow(
-    trades: list[tuple[Side, bool, float, int, float]], outcome: Side
+    trades: list[tuple[Side, bool, float, float, float]], outcome: Side
 ) -> None:
     """After settlement, every dollar in or out is realized P&L: nothing lost or double counted."""
     p = Portfolio()

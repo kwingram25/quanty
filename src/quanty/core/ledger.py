@@ -29,7 +29,7 @@ class Summary:
     orders: int
     rejected: int
     fills: int
-    contracts: int  # bought
+    contracts: float  # bought
     fees: float
     pnl: float  # realized: sells + settlements
     wins: int  # settled positions with positive P&L

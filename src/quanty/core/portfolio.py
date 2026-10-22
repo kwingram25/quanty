@@ -3,14 +3,14 @@ from collections.abc import Iterator
 from dataclasses import dataclass
 
 from quanty.core.events import Fill
-from quanty.core.types import Action, Side
+from quanty.core.types import EPS, Action, Side
 
 DAY_MS = 86_400_000
 
 
 @dataclass
 class Position:
-    qty: int = 0
+    qty: float = 0.0
     cost: float = 0.0  # cash paid for the open qty, fees included
 
     @property
@@ -23,7 +23,7 @@ class Settlement:
     instance: str
     market_id: str
     side: Side
-    qty: int
+    qty: float
     payout: float
     pnl: float
     ts: int
@@ -56,16 +56,16 @@ class Portfolio:
         key = (instance, fill.market_id, fill.side)
         pos = self._pos.setdefault(key, Position())
         if fill.action is Action.BUY:
-            pos.qty += fill.qty
+            pos.qty = round(pos.qty + fill.qty, 9)
             pos.cost += fill.price * fill.qty + fill.fee
             return 0.0
-        if fill.qty > pos.qty:
+        if fill.qty > pos.qty + EPS:
             raise ValueError(f"{instance}: sell of {fill.qty} {fill.side} exceeds position {pos.qty}")
         basis = pos.avg_cost * fill.qty
         pnl = fill.price * fill.qty - fill.fee - basis
-        pos.qty -= fill.qty
+        pos.qty = round(pos.qty - fill.qty, 9)
         pos.cost -= basis
-        if pos.qty == 0:
+        if pos.qty <= EPS:
             del self._pos[key]
         self._book(instance, fill.ts, pnl)
         return pnl

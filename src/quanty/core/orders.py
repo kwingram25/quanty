@@ -13,18 +13,18 @@ class Order:
     side: Side
     action: Action
     price: float  # limit, in `side` terms
-    qty: int
+    qty: float
     tif: Tif = Tif.GTC
     post_only: bool = False
     tag: str = ""
     created_ts: int = 0
     status: OrderStatus = OrderStatus.PENDING
-    filled: int = 0
+    filled: float = 0.0
     reason: str = ""
 
     @property
-    def remaining(self) -> int:
-        return self.qty - self.filled
+    def remaining(self) -> float:
+        return max(0.0, round(self.qty - self.filled, 9))
 
     @property
     def live(self) -> bool:

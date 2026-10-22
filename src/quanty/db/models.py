@@ -30,13 +30,13 @@ class OrderRow(Base):
     side: Mapped[Side]
     action: Mapped[Action]
     price: Mapped[float]
-    qty: Mapped[int]
+    qty: Mapped[float]
     tif: Mapped[Tif]
     post_only: Mapped[bool]
     tag: Mapped[str]
     created_ts: Mapped[int]
     status: Mapped[OrderStatus]
-    filled: Mapped[int]
+    filled: Mapped[float]
     reason: Mapped[str]
 
 
@@ -52,7 +52,7 @@ class FillRow(Base):
     side: Mapped[Side]
     action: Mapped[Action]
     price: Mapped[float]
-    qty: Mapped[int]
+    qty: Mapped[float]
     fee: Mapped[float]
     liquidity: Mapped[Liquidity]
     realized: Mapped[float]
@@ -67,7 +67,7 @@ class SettlementRow(Base):
     instance: Mapped[str]
     market_id: Mapped[str]
     side: Mapped[Side]
-    qty: Mapped[int]
+    qty: Mapped[float]
     payout: Mapped[float]
     pnl: Mapped[float]
 

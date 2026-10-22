@@ -9,7 +9,7 @@ from dataclasses import dataclass
 
 from quanty.core.types import Action, Liquidity, Market, OrderStatus, Side, from_yes
 
-Level = tuple[float, int]  # (price, size)
+Level = tuple[float, float]  # (price, size); sizes may be fractional
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -66,7 +66,7 @@ class Book(Event):
 class MarketTrade(Event):
     market_id: str
     price: float  # YES price
-    qty: int
+    qty: float
     taker: Action | None = None  # BUY = the taker bought YES
 
 
@@ -129,7 +129,7 @@ class Status(DataEvent):
 class OrderUpdate(Event):
     order_id: str
     status: OrderStatus
-    filled: int
+    filled: float
     reason: str = ""
 
 
@@ -140,7 +140,7 @@ class Fill(Event):
     side: Side
     action: Action
     price: float  # in the order's own side terms
-    qty: int
+    qty: float
     fee: float  # negative = rebate
     liquidity: Liquidity
 

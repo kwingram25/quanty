@@ -86,7 +86,7 @@ class Context:
         """Current value of a configured signal; None until it has enough data."""
         return self._e.signals[name].value
 
-    def position(self, market_id: str, side: Side) -> int:
+    def position(self, market_id: str, side: Side) -> float:
         return self._e.portfolio.position(self._i.id, market_id, side).qty
 
     def orders(self, market_id: str | None = None) -> list[Order]:
@@ -97,14 +97,14 @@ class Context:
         ]  # fmt: skip
 
     def buy(
-        self, market_id: str, side: Side, price: float, qty: int, *,
+        self, market_id: str, side: Side, price: float, qty: float, *,
         tif: Tif = Tif.GTC, post_only: bool = False, tag: str = "",
     ) -> Order:  # fmt: skip
         """Place a buy; the returned order is REJECTED (with a reason) if it fails checks."""
         return self._e.place(self._i, market_id, side, Action.BUY, price, qty, tif, post_only, tag)
 
     def sell(
-        self, market_id: str, side: Side, price: float, qty: int, *,
+        self, market_id: str, side: Side, price: float, qty: float, *,
         tif: Tif = Tif.GTC, post_only: bool = False, tag: str = "",
     ) -> Order:  # fmt: skip
         """Sell contracts you hold (no shorting: to bet against YES, buy NO)."""
@@ -167,6 +167,8 @@ class Engine:
         self._seq = itertools.count()
         self._order_seq = itertools.count(1)
         self._next_clock: int | None = None
+        self._opens: list[tuple[int, str]] = []
+        self._closes: list[tuple[int, str]] = []
         self._started = False
 
     # --- running ---
@@ -201,6 +203,7 @@ class Engine:
         if not self._started:
             self._start(ev.ts)
         self.now = max(self.now, ev.ts)
+        self._open_and_close_due()
         match ev:
             case BrokerEvent():
                 self._brokers[ev.broker].handle(ev)
@@ -209,10 +212,7 @@ class Engine:
             case OrderUpdate():
                 self._on_update(ev)
             case MarketOpen():
-                m = ev.market
-                self.markets[m.id] = self.open_markets[m.id] = m
-                self._to_brokers(ev)
-                self._each(m.id, lambda s, c: s.on_market_open(c, m))
+                self._announce(ev)
             case Book():
                 self.books[ev.market_id] = ev
                 self._to_brokers(ev)
@@ -249,7 +249,7 @@ class Engine:
     # --- orders ---
 
     def place(
-        self, inst: Instance, market_id: str, side: Side, action: Action, price: float, qty: int,
+        self, inst: Instance, market_id: str, side: Side, action: Action, price: float, qty: float,
         tif: Tif, post_only: bool, tag: str,
     ) -> Order:  # fmt: skip
         order = Order(
@@ -295,13 +295,12 @@ class Engine:
         m = self.open_markets.get(o.market_id)
         if m is None:
             return f"market {o.market_id} is not open"
-        if not isinstance(o.qty, int) or o.qty <= 0:
-            return "qty must be a positive whole number"
+        if not m.valid_qty(o.qty):
+            return f"qty must be a positive multiple of {m.qty_step:g}"
         if not 0 < o.price < 1:
             return "price must be between 0 and 1"
-        steps = o.price / m.tick
-        if abs(steps - round(steps)) > 1e-6:
-            return f"price {o.price} is not on the {m.tick} tick"
+        if not m.on_tick(o.price):
+            return f"price {o.price} is not on the {m.tick_at(o.price):g} tick"
         return None
 
     def _risk(self, inst: Instance, o: Order) -> str | None:
@@ -328,6 +327,44 @@ class Engine:
         self._guard(self.instances[order.instance], lambda s, c: s.on_order(c, order))
 
     # --- lifecycle ---
+
+    def _announce(self, ev: MarketOpen) -> None:
+        """A market is known from its announcement and open only between open_ts and close_ts.
+
+        Venues list markets ahead of time; a repeat announcement updates the terms (e.g. a strike
+        published at the open) without reopening it.
+        """
+        m = ev.market
+        known = m.id in self.markets
+        self.markets[m.id] = m
+        if m.id in self.open_markets:
+            self.open_markets[m.id] = m
+        if known:
+            return
+        self._to_brokers(ev)
+        if m.close_ts <= self.now:
+            return  # already over: known only for its settlement
+        heapq.heappush(self._closes, (m.close_ts, m.id))
+        if m.open_ts <= self.now:
+            self._open(m.id)
+        else:
+            heapq.heappush(self._opens, (m.open_ts, m.id))
+
+    def _open(self, market_id: str) -> None:
+        m = self.markets[market_id]
+        self.open_markets[market_id] = m
+        self._each(market_id, lambda s, c: s.on_market_open(c, m))
+
+    def _open_and_close_due(self) -> None:
+        """Markets open and close on time even when no event marks the moment."""
+        while self._opens and self._opens[0][0] <= self.now:
+            _, mid = heapq.heappop(self._opens)
+            if self.markets[mid].close_ts > self.now and mid not in self.open_markets:
+                self._open(mid)
+        while self._closes and self._closes[0][0] <= self.now:
+            _, mid = heapq.heappop(self._closes)
+            if mid in self.open_markets:
+                self._close(MarketClose(ts=self.now, market_id=mid))
 
     def _close(self, ev: MarketClose) -> None:
         m = self.open_markets.pop(ev.market_id, None)
