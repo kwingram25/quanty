@@ -9,9 +9,15 @@ authors = [{ name = "Keith Ingram" }]
 requires-python = ">=3.12"
 dependencies = [
     "alembic>=1.13",
+    "hdrhistogram>=0.10",
+    "httpx>=0.27",
+    "orjson>=3.10",
     "pydantic>=2.8",
     "sqlalchemy>=2.0",
+    "structlog>=24",
+    "tenacity>=9",
     "typer>=0.12",
+    "websockets>=13",
 ]
 
 [project.scripts]
@@ -45,6 +51,10 @@ python_version = "3.12"
 strict = true
 files = ["src", "tests", "scripts"]
 plugins = ["pydantic.mypy"]
+
+[[tool.mypy.overrides]]
+module = ["hdrh.*"]
+ignore_missing_imports = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

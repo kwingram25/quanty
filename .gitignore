@@ -38,3 +38,6 @@ experiments/*
 !experiments/README.md
 !experiments/example.toml
 .alembic-dev.sqlite
+
+# local feed config (feeds.example.toml is the template)
+feeds.toml

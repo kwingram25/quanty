@@ -36,6 +36,8 @@ from quanty.core.fees import FeeModel
 from quanty.core.risk import Limits
 from quanty.core.strategy import Strategy
 from quanty.core.validate import ConfigModel
+from quanty.signals import AnySignalConfig, Signal
+from quanty.signals import make as make_signal
 
 
 class SimBrokerConfig(ConfigModel):
@@ -59,6 +61,7 @@ class Experiment(ConfigModel):
     limits: Limits = Limits()
     brokers: dict[str, BrokerConfig] = Field(default_factory=lambda: {"sim": SimBrokerConfig()}, min_length=1)
     instances: list[InstanceSpec] = Field(min_length=1)
+    signals: list[AnySignalConfig] = Field(default_factory=list)
 
     @model_validator(mode="after")
     def _brokers_resolve(self) -> Self:
@@ -110,3 +113,7 @@ def build(
         params = cls.params_type.from_config(spec.params, where=f"{spec.id}.params")
         out.append(Instance(spec.id, cls(params), brokers[exp.broker_of(spec)], spec.limits))
     return out
+
+
+def signals(exp: Experiment) -> list[Signal]:
+    return [make_signal(cfg) for cfg in exp.signals]

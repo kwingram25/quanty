@@ -1,6 +1,7 @@
 """quanty: record, backtest, paper and live trade repeated prediction markets."""
 
 import tomllib
+from collections.abc import Iterable
 from pathlib import Path
 from types import ModuleType
 from typing import Annotated, Any
@@ -8,9 +9,14 @@ from typing import Annotated, Any
 import typer
 
 from quanty import config, experiment, plugins, synthetic
-from quanty.core import Engine, Ledger, Summary
+from quanty.core import Engine, Event, Ledger, Summary
+from quanty.feeds.cli import feeds_app, load_feeds, record, recorded, recorded_range, replay
+from quanty.feeds.replay import Replay
 
 app = typer.Typer(help=__doc__, no_args_is_help=True, add_completion=False)
+app.command()(record)
+app.command()(replay)
+app.add_typer(feeds_app, name="feeds")
 
 Hours = Annotated[float, typer.Option(help="Synthetic hours to simulate")]
 Seed = Annotated[int, typer.Option(help="Random seed for the synthetic markets")]
@@ -76,10 +82,15 @@ def backtest(
     hours: Hours = 6.0,
     seed: Seed = 0,
     ledger: LedgerPath = None,
+    data: Annotated[
+        Path | None, typer.Option(help="Replay these recordings instead of synthetic markets")
+    ] = None,
+    start: Annotated[str | None, typer.Option(help="UTC start of the replay (with --data)")] = None,
+    end: Annotated[str | None, typer.Option(help="UTC end of the replay (with --data)")] = None,
 ) -> None:
-    """Run an experiment config on synthetic markets."""
+    """Run an experiment config on synthetic markets, or on recordings with --data."""
     try:
-        _backtest(experiment.load(path), hours, seed, ledger)
+        _backtest(experiment.load(path), hours, seed, ledger, data, start, end)
     except ValueError as exc:
         raise _fail(exc) from None
 
@@ -97,16 +108,30 @@ def _params(pairs: list[str]) -> dict[str, Any]:
     return out
 
 
-def _backtest(exp: experiment.Experiment, hours: float, seed: int, ledger_path: Path | None) -> None:
+def _backtest(
+    exp: experiment.Experiment, hours: float, seed: int, ledger_path: Path | None,
+    data: Path | None = None, start: str | None = None, end: str | None = None,
+) -> None:  # fmt: skip
     if ledger_path and ledger_path.exists():
         raise ValueError(f"{ledger_path} already exists")
     instances = experiment.build(exp, _strategies(), synthetic.FEES)
+    signals = experiment.signals(exp)
     ledger = Ledger(ledger_path or ":memory:")
-    engine = Engine(instances, ledger=ledger, limits=exp.limits, clock_ms=exp.clock_ms)
-    spec = synthetic.Spec(hours=hours, seed=seed)
-    engine.run(synthetic.events(spec))
-    typer.echo(f"synthetic {spec.series}: {hours:g} h, seed {seed}")
+    engine = Engine(instances, ledger=ledger, limits=exp.limits, clock_ms=exp.clock_ms, signals=signals)
+    events: Iterable[Event]
+    if data is not None:
+        feeds = load_feeds(None, recorded(data))
+        lo, hi = recorded_range(data, list(feeds), start, end)
+        events = Replay(feeds, data, lo, hi)
+        typer.echo(f"replay {', '.join(feeds)} from {data}/")
+    else:
+        spec = synthetic.Spec(hours=hours, seed=seed)
+        events = synthetic.events(spec)
+        typer.echo(f"synthetic {spec.series}: {hours:g} h, seed {seed}")
+    engine.run(events)
     _print_summary(ledger.summary(), [i.id for i in instances])
+    for sig in signals:
+        typer.echo(f"signal {sig.name}: {sig.value}")
     ledger.close()
 
 

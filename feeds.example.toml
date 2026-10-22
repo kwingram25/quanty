@@ -1,0 +1,12 @@
+# Feed config for `quanty record --config feeds.toml`. Copy to feeds.toml (gitignored) to edit.
+# Every table is one feed; `kind` defaults to the table name. Run `quanty feeds list` for kinds.
+
+[feeds.coinbase]
+products = ["BTC-USD", "ETH-USD"]
+channels = ["market_trades", "ticker"]
+expect_every_s = 5          # health: silence longer than this is a gap
+
+[feeds.binance]
+symbols = ["btcusdt"]
+streams = ["bookTicker", "trade"]
+required = false            # health: a stale optional feed doesn't make the host unhealthy

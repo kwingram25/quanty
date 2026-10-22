@@ -4,8 +4,8 @@ A self-hosted framework for recording, backtesting, paper trading and live tradi
 prediction markets** on Polymarket US and Kalshi: crypto up/down windows, daily weather highs,
 economic releases, or any market that recurs on a schedule and settles against a known source.
 
-> **Status: early development.** The engine, simulated broker and backtests on synthetic data
-> work; venue adapters, recording, live trading and the web UI are next. Nothing here trades yet.
+> **Status: early development.** The engine, simulated broker, feed recording/replay and
+> backtests work; venue adapters, live trading and the web UI are next. Nothing here trades yet.
 
 ## Quickstart
 
@@ -17,6 +17,24 @@ uv run quanty demo --param min_conf=0.97 --seed 3     # override a parameter
 uv run quanty backtest experiments/example.toml --hours 24 --ledger run.sqlite
 uv run quanty list                                    # strategies quanty can find
 ```
+
+## Recording data
+
+Feeds record every message exactly as received, so recordings can be re-parsed when a parser
+improves and replayed through the engine with the same results as live.
+
+```sh
+uv run quanty feeds list                                 # feed kinds
+uv run quanty record --feed coinbase --feed binance      # public data, no keys; Ctrl-C to stop
+uv run quanty record --config feeds.toml                 # see feeds.example.toml
+uv run quanty feeds health --data data                   # gaps, reconnects, receive lag p50/p99
+uv run quanty replay --data data --show 5                # parse recordings back into events
+uv run quanty backtest experiment.toml --data data       # run strategies and signals on recordings
+```
+
+Recordings live in `data/<feed>/<date>/<hour>.jsonl.gz` (gitignored); per-minute health and
+latency metrics go to `data/quanty.sqlite`. Signals (`last`, `ewma`, `realized_vol`) are declared
+in experiments and read by strategies with `ctx.signal(name)`.
 
 ## Design in one paragraph
 
@@ -73,6 +91,9 @@ brokers and risk limits; see `experiments/example.toml`.
 | `core/risk.py` | per-instance and account limits: order size, position, open risk, group risk, daily loss, kill switch |
 | `core/portfolio.py`, `core/ledger.py` | positions and P&L from fills and settlements; SQLite record |
 | `brokers/sim.py` | simulated venue: latency, taker fills, queue position, post-only |
+| `feeds/` | WebSocket and polling transports, Coinbase and Binance adapters, raw recording, replay, health and latency |
+| `signals.py` | derived values (last, EWMA, realized vol) rebuilt identically in replay |
+| `db/` | SQLAlchemy models and Alembic migrations (ledger, feed metrics) |
 | `synthetic.py` | deterministic synthetic markets for demos and tests |
 
 ## Development

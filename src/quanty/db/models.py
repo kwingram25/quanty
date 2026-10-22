@@ -9,7 +9,7 @@ from enum import StrEnum
 from sqlalchemy import JSON, Enum, Index
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
-from quanty.core.types import Action, Liquidity, OrderStatus, Side, Tif
+from quanty.enums import Action, Liquidity, OrderStatus, Side, Tif
 
 
 def _enum(cls: type[StrEnum]) -> Enum:
@@ -82,3 +82,27 @@ class LogRow(Base):
     level: Mapped[str] = mapped_column(index=True)
     msg: Mapped[str]
     fields: Mapped[dict[str, object]] = mapped_column(JSON)
+
+
+class FeedMetricRow(Base):
+    """One feed's health and receive-lag stats over a window (normally a minute)."""
+
+    __tablename__ = "feed_metrics"
+    __table_args__ = (Index("ix_feed_metrics_feed_start", "feed", "start"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    feed: Mapped[str]
+    start: Mapped[int]
+    end: Mapped[int]
+    messages: Mapped[int]
+    events: Mapped[int]
+    parse_errors: Mapped[int]
+    lag_count: Mapped[int]
+    lag_p50: Mapped[float | None]
+    lag_p90: Mapped[float | None]
+    lag_p99: Mapped[float | None]
+    lag_max: Mapped[float | None]
+    negative_lags: Mapped[int]
+    gaps: Mapped[int]
+    max_gap_ms: Mapped[int]
+    reconnects: Mapped[int]

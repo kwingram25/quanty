@@ -11,7 +11,7 @@ import heapq
 import itertools
 from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass, field
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from quanty.core.broker import Broker
 from quanty.core.events import (
@@ -33,6 +33,9 @@ from quanty.core.portfolio import Portfolio
 from quanty.core.risk import Limits, Risk
 from quanty.core.strategy import Strategy
 from quanty.core.types import Action, Market, OrderStatus, Side, Tif
+
+if TYPE_CHECKING:
+    from quanty.signals import Signal
 
 Call = Callable[[Strategy[Any], "Context"], None]
 
@@ -79,6 +82,10 @@ class Context:
         """The most recent data event with this key, e.g. "coinbase:BTC-USD"."""
         return self._e.latest.get(key)
 
+    def signal(self, name: str) -> float | None:
+        """Current value of a configured signal; None until it has enough data."""
+        return self._e.signals[name].value
+
     def position(self, market_id: str, side: Side) -> int:
         return self._e.portfolio.position(self._i.id, market_id, side).qty
 
@@ -123,6 +130,7 @@ class Engine:
         limits: Limits | None = None,
         clock_ms: int | None = 1000,
         strict: bool = True,
+        signals: Sequence["Signal"] = (),
     ) -> None:
         """strict re-raises strategy errors (backtests); otherwise the instance is logged and halted."""
         self.instances = {i.id: i for i in instances}
@@ -142,6 +150,12 @@ class Engine:
         self.portfolio = Portfolio()
         self.risk = Risk(self.portfolio, self.live, self.markets)
         self.halted: set[str] = set()
+        self.signals = {s.name: s for s in signals}
+        if len(self.signals) != len(signals):
+            raise ValueError("signal names must be unique")
+        self._signals_by_key: dict[str, list[Signal]] = {}
+        for sig in signals:
+            self._signals_by_key.setdefault(sig.key, []).append(sig)
         self._ctx = {i.id: Context(self, i) for i in instances}
         self._brokers: dict[str, Broker] = {}
         for inst in instances:
@@ -208,6 +222,8 @@ class Engine:
                 self._each(ev.market_id, lambda s, c: s.on_trade(c, ev))
             case DataEvent():
                 self.latest[ev.key] = ev
+                for sig in self._signals_by_key.get(ev.key, ()):
+                    sig.update(ev)
                 self._each(None, lambda s, c: s.on_data(c, ev))
             case Clock():
                 self._each(None, lambda s, c: s.on_clock(c, ev))
