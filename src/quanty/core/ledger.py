@@ -1,29 +1,26 @@
-"""SQLite record of every order, fill, settlement and strategy log line, per strategy instance."""
+"""Record of every order, fill, settlement and strategy log line, per strategy instance.
 
-import json
-import sqlite3
+Writes are buffered and flushed in bulk (fast backtests); `durable=True` flushes on every write
+(live). Reads flush first, so they always see everything written.
+"""
+
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
+from sqlalchemy import Executable, Result, case, func, insert, select
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
+from sqlalchemy.orm import Session
+
+from quanty import db
 from quanty.core.events import Fill
 from quanty.core.orders import Order
 from quanty.core.portfolio import Settlement
+from quanty.core.types import Action, OrderStatus
+from quanty.db.models import FillRow, LogRow, OrderRow, SettlementRow
 
-SCHEMA = """
-CREATE TABLE IF NOT EXISTS orders (
-    id TEXT PRIMARY KEY, instance TEXT, market_id TEXT, side TEXT, action TEXT, price REAL,
-    qty INTEGER, tif TEXT, post_only INTEGER, tag TEXT, created_ts INTEGER, status TEXT,
-    filled INTEGER, reason TEXT);
-CREATE TABLE IF NOT EXISTS fills (
-    id INTEGER PRIMARY KEY, ts INTEGER, instance TEXT, order_id TEXT, market_id TEXT, side TEXT,
-    action TEXT, price REAL, qty INTEGER, fee REAL, liquidity TEXT, realized REAL);
-CREATE TABLE IF NOT EXISTS settlements (
-    id INTEGER PRIMARY KEY, ts INTEGER, instance TEXT, market_id TEXT, side TEXT, qty INTEGER,
-    payout REAL, pnl REAL);
-CREATE TABLE IF NOT EXISTS logs (
-    id INTEGER PRIMARY KEY, ts INTEGER, instance TEXT, level TEXT, msg TEXT, fields TEXT);
-"""
+FLUSH_EVERY = 5000
 
 
 @dataclass(frozen=True)
@@ -41,30 +38,34 @@ class Summary:
 
 class Ledger:
     def __init__(self, path: str | Path = ":memory:", durable: bool = False) -> None:
-        """durable commits after every write (live); otherwise call commit() (backtests)."""
-        self.db = sqlite3.connect(str(path))
-        self.db.executescript(SCHEMA)
+        self.engine = db.connect(path)
         self.durable = durable
+        self._orders: dict[str, dict[str, Any]] = {}  # latest state per order id
+        self._rows: dict[type[Any], list[dict[str, Any]]] = {FillRow: [], SettlementRow: [], LogRow: []}
+        self._pending = 0
+
+    # --- writes ---
 
     def order(self, o: Order) -> None:
-        self._write(
-            "INSERT OR REPLACE INTO orders VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-            (o.id, o.instance, o.market_id, o.side, o.action, o.price, o.qty, o.tif, o.post_only,
-             o.tag, o.created_ts, o.status, o.filled, o.reason),
-        )  # fmt: skip
+        self._orders[o.id] = {
+            "id": o.id, "instance": o.instance, "market_id": o.market_id, "side": o.side,
+            "action": o.action, "price": o.price, "qty": o.qty, "tif": o.tif, "post_only": o.post_only,
+            "tag": o.tag, "created_ts": o.created_ts, "status": o.status, "filled": o.filled,
+            "reason": o.reason,
+        }  # fmt: skip
+        self._wrote()
 
     def fill(self, instance: str, f: Fill, realized: float) -> None:
-        self._write(
-            "INSERT INTO fills VALUES (NULL,?,?,?,?,?,?,?,?,?,?,?)",
-            (f.ts, instance, f.order_id, f.market_id, f.side, f.action, f.price, f.qty, f.fee,
-             f.liquidity, realized),
+        self._add(
+            FillRow, ts=f.ts, instance=instance, order_id=f.order_id, market_id=f.market_id, side=f.side,
+            action=f.action, price=f.price, qty=f.qty, fee=f.fee, liquidity=f.liquidity, realized=realized,
         )  # fmt: skip
 
     def settlement(self, s: Settlement) -> None:
-        self._write(
-            "INSERT INTO settlements VALUES (NULL,?,?,?,?,?,?,?)",
-            (s.ts, s.instance, s.market_id, s.side, s.qty, s.payout, s.pnl),
-        )
+        self._add(
+            SettlementRow, ts=s.ts, instance=s.instance, market_id=s.market_id, side=s.side, qty=s.qty,
+            payout=s.payout, pnl=s.pnl,
+        )  # fmt: skip
 
     def log(
         self,
@@ -74,48 +75,105 @@ class Ledger:
         fields: Mapping[str, object] | None = None,
         level: str = "info",
     ) -> None:
-        self._write(
-            "INSERT INTO logs VALUES (NULL,?,?,?,?,?)",
-            (ts, instance, level, msg, json.dumps(dict(fields or {}), default=str)),
-        )
+        self._add(LogRow, ts=ts, instance=instance, level=level, msg=msg, fields=_jsonable(fields or {}))
 
     def commit(self) -> None:
-        self.db.commit()
+        """Write everything buffered."""
+        if not self._pending:
+            return
+        with self.engine.begin() as conn:
+            if self._orders:
+                stmt = sqlite_insert(OrderRow)
+                updates = {
+                    c.name: stmt.excluded[c.name] for c in OrderRow.__table__.columns if c.name != "id"
+                }
+                conn.execute(
+                    stmt.on_conflict_do_update(index_elements=["id"], set_=updates),
+                    list(self._orders.values()),
+                )
+            for model, rows in self._rows.items():
+                if rows:
+                    conn.execute(insert(model), rows)
+        self._orders.clear()
+        for rows in self._rows.values():
+            rows.clear()
+        self._pending = 0
 
     def close(self) -> None:
-        self.db.commit()
-        self.db.close()
+        self.commit()
+        self.engine.dispose()
+
+    # --- reads ---
+
+    def execute(self, stmt: Executable) -> Result[Any]:
+        """Run a query, e.g. select(FillRow).where(...), against everything written so far."""
+        self.commit()
+        with Session(self.engine) as session:
+            return session.execute(stmt).freeze()()  # detached, usable after the session closes
 
     def summary(self) -> list[Summary]:
-        q = self.db.execute
-        orders = dict(q("SELECT instance, COUNT(*) FROM orders GROUP BY instance").fetchall())
-        rejected = dict(
-            q("SELECT instance, COUNT(*) FROM orders WHERE status='rejected' GROUP BY instance").fetchall()
-        )
+        orders = {
+            r.instance: r
+            for r in self.execute(
+                select(
+                    OrderRow.instance,
+                    func.count().label("n"),
+                    func.sum(case((OrderRow.status == OrderStatus.REJECTED, 1), else_=0)).label("rejected"),
+                ).group_by(OrderRow.instance)
+            )
+        }
         fills = {
-            r[0]: r[1:]
-            for r in q(
-                "SELECT instance, COUNT(*), SUM(CASE WHEN action='buy' THEN qty ELSE 0 END), SUM(fee),"
-                " SUM(realized) FROM fills GROUP BY instance"
+            r.instance: r
+            for r in self.execute(
+                select(
+                    FillRow.instance,
+                    func.count().label("n"),
+                    func.sum(case((FillRow.action == Action.BUY, FillRow.qty), else_=0)).label("contracts"),
+                    func.sum(FillRow.fee).label("fees"),
+                    func.sum(FillRow.realized).label("realized"),
+                ).group_by(FillRow.instance)
             )
         }
         settled = {
-            r[0]: r[1:]
-            for r in q(
-                "SELECT instance, SUM(pnl), SUM(pnl > 0), SUM(pnl < 0) FROM settlements GROUP BY instance"
+            r.instance: r
+            for r in self.execute(
+                select(
+                    SettlementRow.instance,
+                    func.sum(SettlementRow.pnl).label("pnl"),
+                    func.sum(case((SettlementRow.pnl > 0, 1), else_=0)).label("wins"),
+                    func.sum(case((SettlementRow.pnl < 0, 1), else_=0)).label("losses"),
+                ).group_by(SettlementRow.instance)
             )
         }
         out = []
-        for inst in sorted(set(orders) | set(fills) | set(settled)):
-            n_fills, contracts, fees, sell_pnl = fills.get(inst, (0, 0, 0.0, 0.0))
-            settle_pnl, wins, losses = settled.get(inst, (0.0, 0, 0))
+        for inst in sorted(orders.keys() | fills.keys() | settled.keys()):
+            o, f, s = orders.get(inst), fills.get(inst), settled.get(inst)
             out.append(
-                Summary(inst, orders.get(inst, 0), rejected.get(inst, 0), n_fills, contracts or 0,
-                        fees or 0.0, (sell_pnl or 0.0) + (settle_pnl or 0.0), wins or 0, losses or 0)
-            )  # fmt: skip
+                Summary(
+                    instance=inst,
+                    orders=o.n if o else 0,
+                    rejected=o.rejected if o else 0,
+                    fills=f.n if f else 0,
+                    contracts=f.contracts if f else 0,
+                    fees=f.fees if f else 0.0,
+                    pnl=(f.realized if f else 0.0) + (s.pnl if s else 0.0),
+                    wins=s.wins if s else 0,
+                    losses=s.losses if s else 0,
+                )
+            )
         return out
 
-    def _write(self, sql: str, args: tuple[object, ...]) -> None:
-        self.db.execute(sql, args)
-        if self.durable:
-            self.db.commit()
+    # --- helpers ---
+
+    def _add(self, model: type[Any], **row: Any) -> None:
+        self._rows[model].append(row)
+        self._wrote()
+
+    def _wrote(self) -> None:
+        self._pending += 1
+        if self.durable or self._pending >= FLUSH_EVERY:
+            self.commit()
+
+
+def _jsonable(fields: Mapping[str, object]) -> dict[str, object]:
+    return {k: v if isinstance(v, str | int | float | bool | None) else repr(v) for k, v in fields.items()}

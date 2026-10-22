@@ -37,3 +37,4 @@ strategies/*
 experiments/*
 !experiments/README.md
 !experiments/example.toml
+.alembic-dev.sqlite

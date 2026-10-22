@@ -83,6 +83,14 @@ uv run pytest && uv run ruff check && uv run mypy
 pre-commit install   # gitleaks, ruff, private-name guard
 ```
 
+Database tables are SQLAlchemy models in `src/quanty/db/models.py`; quanty migrates SQLite files to
+the latest schema when it opens them. After changing a model:
+
+```sh
+uv run alembic revision --autogenerate -m "what changed"   # review the generated file
+uv run pytest tests/test_ledger.py                          # fails if models and migrations differ
+```
+
 `scripts/check_private.py` blocks commits that match regexes in a denylist kept outside the repo
 (`$QUANTY_DENYLIST`, default `~/.config/quanty/denylist.txt`).
 

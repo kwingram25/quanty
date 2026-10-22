@@ -1,5 +1,6 @@
 import pytest
 from helpers import M2, Hooks, M, book, make, once, opened
+from sqlalchemy import select
 
 from quanty.core import (
     Book,
@@ -16,6 +17,7 @@ from quanty.core import (
     Side,
     Tif,
 )
+from quanty.db.models import LogRow
 
 
 def test_clock_ticks_between_events() -> None:
@@ -104,7 +106,7 @@ def test_strategy_errors_halt_when_not_strict() -> None:
     e.run([*opened(), book(1, [], [(0.4, 1)]), book(2, [], [(0.4, 1)])])
     assert "s0" in e.halted
     assert got[0].status is OrderStatus.CANCELLED
-    levels = [r[0] for r in e.ledger.db.execute("SELECT level FROM logs")]
+    levels = list(e.ledger.execute(select(LogRow.level).order_by(LogRow.id)).scalars())
     assert levels == ["error", "warning"]
 
 

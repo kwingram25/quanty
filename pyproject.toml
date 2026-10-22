@@ -7,7 +7,10 @@ license = "MIT"
 license-files = ["LICENSE"]
 authors = [{ name = "Keith Ingram" }]
 requires-python = ">=3.12"
-dependencies = []
+dependencies = [
+    "alembic>=1.13",
+    "sqlalchemy>=2.0",
+]
 
 [project.scripts]
 quanty = "quanty.cli:main"
