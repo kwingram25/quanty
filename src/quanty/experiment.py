@@ -1,30 +1,33 @@
 """Experiment configs: which strategies run, with which params, brokers and limits.
 
-clock_ms = 1000
+Example (TOML)::
 
-[limits]                     # account-wide
-max_open_risk = 500
+    clock_ms = 1000
 
-[brokers.sim]
-kind = "sim"
-latency_ms = 50
+    [limits]                     # account-wide
+    max_open_risk = 500
 
-[[instances]]
-id = "fav_paper"
-strategy = "example_favourite"
-broker = "sim"               # optional when there is one broker
-[instances.params]
-min_conf = 0.9
-[instances.limits]
-max_order_qty = 10
+    [brokers.sim]
+    kind = "sim"
+    latency_ms = 50
+
+    [[instances]]
+    id = "fav_paper"
+    strategy = "example_favourite"
+    broker = "sim"               # optional when there is one broker
+    [instances.params]
+    min_conf = 0.9
+    [instances.limits]
+    max_order_qty = 10
 """
 
 import tomllib
 from collections.abc import Mapping
-from dataclasses import dataclass, field
 from pathlib import Path
 from types import ModuleType
-from typing import Any
+from typing import Any, Literal, Self
+
+from pydantic import Field, NonNegativeInt, PositiveInt, model_validator
 
 from quanty.brokers.sim import SimBroker
 from quanty.core.broker import Broker
@@ -32,50 +35,52 @@ from quanty.core.engine import Instance
 from quanty.core.fees import FeeModel
 from quanty.core.risk import Limits
 from quanty.core.strategy import Strategy
+from quanty.core.validate import ConfigModel
 
 
-@dataclass(frozen=True)
-class InstanceSpec:
-    id: str
-    strategy: str
-    broker: str
-    params: Mapping[str, object] = field(default_factory=dict)
-    limits: Limits = field(default_factory=Limits)
+class SimBrokerConfig(ConfigModel):
+    kind: Literal["sim"] = "sim"
+    latency_ms: NonNegativeInt = Field(0, description="Delay before orders and cancels reach the venue")
 
 
-@dataclass(frozen=True)
-class Experiment:
-    instances: list[InstanceSpec]
-    brokers: Mapping[str, Mapping[str, object]]
-    limits: Limits = field(default_factory=Limits)
-    clock_ms: int | None = 1000
+BrokerConfig = SimBrokerConfig  # becomes a union discriminated on `kind` as broker kinds are added
+
+
+class InstanceSpec(ConfigModel):
+    id: str = Field(min_length=1)
+    strategy: str = Field(min_length=1)
+    broker: str | None = None
+    params: dict[str, Any] = Field(default_factory=dict)
+    limits: Limits = Limits()
+
+
+class Experiment(ConfigModel):
+    clock_ms: PositiveInt | None = 1000
+    limits: Limits = Limits()
+    brokers: dict[str, BrokerConfig] = Field(default_factory=lambda: {"sim": SimBrokerConfig()}, min_length=1)
+    instances: list[InstanceSpec] = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def _brokers_resolve(self) -> Self:
+        ids = [i.id for i in self.instances]
+        if len(set(ids)) != len(ids):
+            raise ValueError("instance ids must be unique")
+        for inst in self.instances:
+            name = inst.broker or (next(iter(self.brokers)) if len(self.brokers) == 1 else None)
+            if name not in self.brokers:
+                raise ValueError(f"instance {inst.id}: broker {inst.broker!r} is not defined under [brokers]")
+        return self
+
+    def broker_of(self, inst: InstanceSpec) -> str:
+        return inst.broker or next(iter(self.brokers))
 
 
 def load(path: Path) -> Experiment:
-    return parse(tomllib.loads(path.read_text()), source=str(path))
+    return parse(tomllib.loads(path.read_text()), source=path.name)
 
 
 def parse(raw: Mapping[str, Any], source: str = "experiment") -> Experiment:
-    brokers: dict[str, Mapping[str, object]] = dict(raw.get("brokers") or {"sim": {"kind": "sim"}})
-    specs = []
-    for i, inst in enumerate(raw.get("instances", [])):
-        where = f"{source}: instances[{i}]"
-        unknown = set(inst) - {"id", "strategy", "broker", "params", "limits"}
-        if unknown:
-            raise ValueError(f"{where}: unknown key(s) {', '.join(sorted(unknown))}")
-        for key in ("id", "strategy"):
-            if not isinstance(inst.get(key), str):
-                raise ValueError(f"{where}: '{key}' is required")
-        broker = inst.get("broker") or (next(iter(brokers)) if len(brokers) == 1 else None)
-        if broker not in brokers:
-            raise ValueError(f"{where}: broker {broker!r} is not defined under [brokers]")
-        specs.append(
-            InstanceSpec(inst["id"], inst["strategy"], broker, inst.get("params", {}),
-                         Limits.from_dict(inst.get("limits", {})))
-        )  # fmt: skip
-    if not specs:
-        raise ValueError(f"{source}: no [[instances]]")
-    return Experiment(specs, brokers, Limits.from_dict(raw.get("limits", {})), raw.get("clock_ms", 1000))
+    return Experiment.from_config(raw, where=source)
 
 
 def strategy_class(module: ModuleType) -> type[Strategy[Any]]:
@@ -89,17 +94,8 @@ def strategy_class(module: ModuleType) -> type[Strategy[Any]]:
     return found[0]
 
 
-def make_broker(name: str, cfg: Mapping[str, object], fees: Mapping[str, FeeModel]) -> Broker:
-    kind = cfg.get("kind", "sim")
-    opts = {k: v for k, v in cfg.items() if k != "kind"}
-    if kind == "sim":
-        latency = opts.pop("latency_ms", 0)
-        if opts:
-            raise ValueError(f"broker {name}: unknown option(s) {', '.join(sorted(opts))}")
-        if not isinstance(latency, int):
-            raise ValueError(f"broker {name}: latency_ms must be a whole number")
-        return SimBroker(name, latency_ms=latency, fees=fees)
-    raise ValueError(f"broker {name}: unknown kind {kind!r}")
+def make_broker(name: str, cfg: BrokerConfig, fees: Mapping[str, FeeModel]) -> Broker:
+    return SimBroker(name, latency_ms=cfg.latency_ms, fees=fees)
 
 
 def build(
@@ -111,6 +107,6 @@ def build(
         if spec.strategy not in strategies:
             raise ValueError(f"instance {spec.id}: no strategy named {spec.strategy!r}")
         cls = strategy_class(strategies[spec.strategy])
-        params = cls.params_type.from_dict(spec.params)
-        out.append(Instance(spec.id, cls(params), brokers[spec.broker], spec.limits))
+        params = cls.params_type.from_config(spec.params, where=f"{spec.id}.params")
+        out.append(Instance(spec.id, cls(params), brokers[exp.broker_of(spec)], spec.limits))
     return out

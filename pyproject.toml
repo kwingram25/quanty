@@ -9,11 +9,13 @@ authors = [{ name = "Keith Ingram" }]
 requires-python = ">=3.12"
 dependencies = [
     "alembic>=1.13",
+    "pydantic>=2.8",
     "sqlalchemy>=2.0",
+    "typer>=0.12",
 ]
 
 [project.scripts]
-quanty = "quanty.cli:main"
+quanty = "quanty.cli:app"
 
 [dependency-groups]
 dev = [
@@ -42,6 +44,7 @@ ignore = ["RUF001", "RUF002", "RUF003"]  # allow − × in prose
 python_version = "3.12"
 strict = true
 files = ["src", "tests", "scripts"]
+plugins = ["pydantic.mypy"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

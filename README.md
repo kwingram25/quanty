@@ -41,13 +41,13 @@ The bundled `src/quanty/strategies/` holds examples only. The simplest way to st
 cp strategies/_template.py strategies/my_idea.py      # gitignored; edit the TODOs
 ```
 
-A strategy is a class with typed, config-overridable params and event hooks:
+A strategy is a class with typed params (Pydantic, strictly validated, overridable from
+experiment configs) and event hooks:
 
 ```python
-@dataclass(frozen=True)
 class MyParams(Params):
-    min_edge: float = 0.02
-    size: int = 1
+    min_edge: float = Field(0.02, ge=0, description="Buy when the model beats the price by this much")
+    size: int = Field(1, gt=0)
 
 
 class MyStrategy(Strategy[MyParams]):

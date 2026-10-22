@@ -6,19 +6,18 @@ on_market_open, on_book, on_trade, on_data, on_clock, on_fill, on_order, on_mark
 on_settled. See src/quanty/strategies/example_favourite.py for a working example.
 """
 
-from dataclasses import dataclass
+from pydantic import Field
 
 from quanty.core import Book, Context, Params, Side, Strategy, Tif
 
 
-@dataclass(frozen=True)
 class MyParams(Params):
     """Knobs an experiment config can override. TODO: replace with your own."""
 
-    min_edge: float = 0.02  # buy when the model beats the price by at least this much
-    max_price: float = 0.95  # never pay more than this
-    size: int = 1  # contracts per order
-    enter_last_s: int = 300  # only trade in the last N seconds of a window
+    min_edge: float = Field(0.02, ge=0, description="Buy when the model beats the price by this much")
+    max_price: float = Field(0.95, gt=0, lt=1, description="Never pay more than this")
+    size: int = Field(1, gt=0, description="Contracts per order")
+    enter_last_s: int = Field(300, gt=0, description="Only trade in the last N seconds of a window")
 
 
 class MyStrategy(Strategy[MyParams]):

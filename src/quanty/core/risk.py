@@ -6,26 +6,19 @@ the position they sell.
 """
 
 from collections.abc import Iterable, Mapping
-from dataclasses import dataclass
-from typing import Self
 
 from quanty.core.orders import Order
 from quanty.core.portfolio import Portfolio, Position
 from quanty.core.types import EPS, Action, Market
-from quanty.core.validate import build_dataclass
+from quanty.core.validate import ConfigModel
 
 
-@dataclass(frozen=True)
-class Limits:
+class Limits(ConfigModel):
     max_order_qty: int | None = None
     max_position: int | None = None  # contracts per market: held + resting buys, both sides
     max_open_risk: float | None = None  # dollars: cost of open positions + resting buy notional
     max_group_risk: float | None = None  # the same, per correlation group (Market.group)
     max_daily_loss: float | None = None  # no new buys once today's (UTC) realized P&L <= −this
-
-    @classmethod
-    def from_dict(cls, raw: Mapping[str, object]) -> Self:
-        return build_dataclass(cls, raw)
 
 
 class Risk:

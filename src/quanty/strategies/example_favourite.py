@@ -4,19 +4,18 @@ This shows the shape of a strategy, not a tuned edge. It trades the synthetic up
 (`quanty demo`), and its model is the same log-normal formula the synthetic markets are built on.
 """
 
-from dataclasses import dataclass
+from pydantic import Field
 
 from quanty.core import Book, Context, IndexValue, Params, Side, Strategy, Tif
 from quanty.synthetic import INDEX_KEY, p_up
 
 
-@dataclass(frozen=True)
 class FavouriteParams(Params):
-    min_conf: float = 0.9  # model probability the favourite wins
-    max_price: float = 0.95  # never pay more than this
-    enter_last_s: int = 60  # only buy in the last N seconds of a window
-    size: int = 10  # contracts per window
-    vol_per_s: float = 0.0005  # model input: index log-return sd per second
+    min_conf: float = Field(0.9, gt=0.5, lt=1, description="Model probability the favourite wins")
+    max_price: float = Field(0.95, gt=0, lt=1, description="Never pay more than this")
+    enter_last_s: int = Field(60, gt=0, description="Only buy in the last N seconds of a window")
+    size: int = Field(10, gt=0, description="Contracts per window")
+    vol_per_s: float = Field(0.0005, gt=0, description="Model input: index log-return sd per second")
 
 
 class FavouriteLate(Strategy[FavouriteParams]):

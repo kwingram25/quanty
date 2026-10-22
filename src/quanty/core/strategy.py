@@ -1,23 +1,18 @@
-from collections.abc import Mapping
-from dataclasses import dataclass
-from typing import TYPE_CHECKING, ClassVar, Self
+from typing import TYPE_CHECKING, ClassVar
 
 from quanty.core.events import Book, Clock, DataEvent, Fill, MarketTrade
 from quanty.core.orders import Order
 from quanty.core.types import Market, Side
-from quanty.core.validate import build_dataclass
+from quanty.core.validate import ConfigModel
 
 if TYPE_CHECKING:
     from quanty.core.engine import Context
 
 
-@dataclass(frozen=True)
-class Params:
-    """Base for strategy parameters: a frozen dataclass whose fields an experiment config can set."""
-
-    @classmethod
-    def from_dict(cls, raw: Mapping[str, object]) -> Self:
-        return build_dataclass(cls, raw)
+class Params(ConfigModel):
+    """Base for strategy parameters. Subclass with typed fields and defaults; experiment configs
+    override them by name, strictly validated. Field(description=...) shows up in the web UI.
+    """
 
 
 class Strategy[P: Params]:

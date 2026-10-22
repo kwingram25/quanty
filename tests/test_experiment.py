@@ -1,3 +1,4 @@
+import re
 from pathlib import Path
 from types import ModuleType
 
@@ -36,25 +37,30 @@ def inst(**kw: object) -> dict[str, object]:
 @pytest.mark.parametrize(
     ("raw", "error"),
     [
-        ({}, "no [[instances]]"),
-        ({"instances": [{"strategy": "x"}]}, "'id' is required"),
-        (inst(colour="red"), "unknown key"),
-        (inst(broker="nope"), "not defined"),
-        ({**inst(), "brokers": {"a": {}, "b": {}}}, "not defined"),  # ambiguous: must name one
+        ({}, "exp.instances: Field required"),
+        ({"instances": []}, "exp.instances: List should have at least 1 item"),
+        ({"instances": [{"strategy": "x"}]}, "exp.instances.0.id: Field required"),
+        (inst(colour="red"), "exp.instances.0.colour: Extra inputs are not permitted"),
+        (inst(broker="nope"), "broker 'nope' is not defined"),
+        ({**inst(), "brokers": {"a": {}, "b": {}}}, "broker None is not defined"),  # must name one
+        ({"instances": [{"id": "a", "strategy": "s"}, {"id": "a", "strategy": "s"}]}, "unique"),
+        ({**inst(), "brokers": {"sim": {"kind": "magic"}}}, "exp.brokers.sim.kind"),
+        ({**inst(), "brokers": {"sim": {"latency_ms": -1}}}, "exp.brokers.sim.latency_ms"),
+        ({**inst(), "clock_ms": 0}, "exp.clock_ms"),
     ],
 )
 def test_parse_errors(raw: dict[str, object], error: str) -> None:
-    with pytest.raises(ValueError, match=error.replace("[", r"\[")):
-        experiment.parse(raw)
+    with pytest.raises(ValueError, match=re.escape(error)):
+        experiment.parse(raw, source="exp")
 
 
 def test_build_errors(strategies: dict[str, ModuleType]) -> None:
     with pytest.raises(ValueError, match="no strategy named"):
         experiment.build(experiment.parse({"instances": [{"id": "a", "strategy": "nope"}]}), strategies)
-    with pytest.raises(ValueError, match="unknown field"):
+    with pytest.raises(ValueError, match=r"a\.params\.min_confidence: Extra inputs"):
         experiment.build(experiment.parse(inst(params={"min_confidence": 1})), strategies)
-    with pytest.raises(ValueError, match="unknown kind"):
-        experiment.build(experiment.parse({**inst(), "brokers": {"sim": {"kind": "magic"}}}), strategies)
+    with pytest.raises(ValueError, match=r"a\.params\.size: Input should be a valid integer"):
+        experiment.build(experiment.parse(inst(params={"size": 2.5})), strategies)
 
 
 def test_strategy_class_needs_exactly_one(tmp_path: Path) -> None:

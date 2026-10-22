@@ -1,14 +1,12 @@
-from dataclasses import dataclass
-
 import pytest
+from pydantic import Field
 
 from quanty.core import Limits, Params
 
 
-@dataclass(frozen=True)
 class P(Params):
     a: float = 1.0
-    n: int = 1
+    n: int = Field(1, gt=0)
     flag: bool = False
     name: str = "x"
     cap: float | None = None
@@ -16,25 +14,46 @@ class P(Params):
 
 
 def test_defaults_and_coercion() -> None:
-    p = P.from_dict({"a": 2, "cap": 3, "tags": ["u", "v"]})
+    p = P.from_config({"a": 2, "cap": 3, "tags": ["u", "v"]})
     assert p == P(a=2.0, cap=3.0, tags=("u", "v"))
     assert isinstance(p.a, float)
 
 
 @pytest.mark.parametrize(
-    "raw",
-    [{"nope": 1}, {"n": 1.5}, {"n": True}, {"flag": 1}, {"name": 3}, {"a": None}, {"a": "1"}],
+    ("raw", "field"),
+    [
+        ({"nope": 1}, "nope"),
+        ({"n": 1.5}, "n"),
+        ({"n": True}, "n"),
+        ({"n": 0}, "n"),  # constraint
+        ({"flag": 1}, "flag"),
+        ({"name": 3}, "name"),
+        ({"a": None}, "a"),
+        ({"a": "1"}, "a"),
+    ],
 )
-def test_rejects_bad_values(raw: dict[str, object]) -> None:
+def test_rejects_bad_values_naming_the_field(raw: dict[str, object], field: str) -> None:
+    with pytest.raises(ValueError, match=rf"^inst\.params\.{field}: "):
+        P.from_config(raw, where="inst.params")
+
+
+def test_optional_accepts_none_and_params_are_frozen() -> None:
+    p = P.from_config({"cap": None})
+    assert p.cap is None
     with pytest.raises(ValueError):
-        P.from_dict(raw)
+        p.a = 2.0  # type: ignore[misc]
 
 
-def test_optional_accepts_none() -> None:
-    assert P.from_dict({"cap": None}).cap is None
+def test_schema_has_descriptions_for_the_ui() -> None:
+    class Q(Params):
+        x: float = Field(0.5, description="what x does")
+
+    assert Q.model_json_schema()["properties"]["x"] == {
+        "default": 0.5, "description": "what x does", "title": "X", "type": "number",
+    }  # fmt: skip
 
 
-def test_limits_from_dict() -> None:
-    assert Limits.from_dict({"max_open_risk": 100}).max_open_risk == 100.0
-    with pytest.raises(ValueError):
-        Limits.from_dict({"max_risk": 1})
+def test_limits() -> None:
+    assert Limits.from_config({"max_open_risk": 100}).max_open_risk == 100.0
+    with pytest.raises(ValueError, match="max_risk"):
+        Limits.from_config({"max_risk": 1})

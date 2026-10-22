@@ -2,6 +2,7 @@ from collections import Counter
 from pathlib import Path
 
 import pytest
+from typer.testing import CliRunner, Result
 
 from quanty import cli, synthetic
 from quanty.core import MarketOpen, Settled
@@ -28,42 +29,43 @@ def test_p_up() -> None:
     assert synthetic.p_up(99, 100, 0, 0.001) == 0.0
 
 
-def run(capsys: pytest.CaptureFixture[str], *argv: str) -> tuple[int, str]:
-    code = cli.main(list(argv))
-    return code, capsys.readouterr().out
+runner = CliRunner()
 
 
-def test_demo_is_reproducible(capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch) -> None:
+@pytest.fixture(autouse=True)
+def no_user_config(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("QUANTY_CONFIG", "/nonexistent")
-    code, out = run(capsys, "demo", "--hours", "1", "--seed", "2")
-    assert code == 0 and "example_favourite" in out
-    assert run(capsys, "demo", "--hours", "1", "--seed", "2")[1] == out
 
 
-def test_demo_param_override_and_errors(
-    capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
-) -> None:
-    monkeypatch.setenv("QUANTY_CONFIG", "/nonexistent")
-    assert run(capsys, "demo", "--hours", "0.5", "--param", "min_conf=0.99")[0] == 0
-    assert cli.main(["demo", "--param", "nope=1"]) == 2
-    assert cli.main(["demo", "--param", "missing-equals"]) == 2
-    assert "unknown field" in capsys.readouterr().err
+def run(*argv: str) -> Result:
+    return runner.invoke(cli.app, list(argv))
 
 
-def test_backtest_writes_ledger(
-    capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    monkeypatch.setenv("QUANTY_CONFIG", "/nonexistent")
+def test_demo_is_reproducible() -> None:
+    first = run("demo", "--hours", "1", "--seed", "2")
+    assert first.exit_code == 0 and "example_favourite" in first.stdout
+    assert run("demo", "--hours", "1", "--seed", "2").stdout == first.stdout
+
+
+def test_demo_param_override_and_errors() -> None:
+    assert run("demo", "--hours", "0.5", "--param", "min_conf=0.99").exit_code == 0
+    bad = run("demo", "--param", "nope=1")
+    assert bad.exit_code == 2 and "params.nope: Extra inputs are not permitted" in bad.stderr
+    assert run("demo", "--param", "missing-equals").exit_code == 2
+
+
+def test_backtest_writes_ledger(tmp_path: Path) -> None:
     db = tmp_path / "run.sqlite"
-    code, out = run(
-        capsys, "backtest", str(ROOT / "experiments" / "example.toml"), "--hours", "1", "--ledger", str(db)
-    )
-    assert code == 0 and "fav_90" in out and "fav_97" in out
+    example = str(ROOT / "experiments" / "example.toml")
+    res = run("backtest", example, "--hours", "1", "--ledger", str(db))
+    assert res.exit_code == 0 and "fav_90" in res.stdout and "fav_97" in res.stdout
     assert db.exists()
-    assert cli.main(["backtest", str(ROOT / "experiments" / "example.toml"), "--ledger", str(db)]) == 2
+    again = run("backtest", example, "--ledger", str(db))
+    assert again.exit_code == 2 and "already exists" in again.stderr
 
 
-def test_list(capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("QUANTY_CONFIG", "/nonexistent")
-    code, out = run(capsys, "list")
-    assert code == 0 and "example_favourite" in out
+def test_list_and_params() -> None:
+    assert "example_favourite" in run("list").stdout
+    res = run("params", "example_favourite")
+    assert res.exit_code == 0 and "min_conf" in res.stdout and "Model probability" in res.stdout
+    assert run("params", "nope").exit_code == 2
