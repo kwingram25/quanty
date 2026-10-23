@@ -24,7 +24,8 @@ LedgerPath = Annotated[Path | None, typer.Option("--ledger", help="Write the led
 
 
 def _strategies() -> dict[str, ModuleType]:
-    return plugins.discover(config.load().strategy_paths)
+    cfg = config.load()
+    return plugins.discover(cfg.strategy_paths, python_paths=cfg.python_paths)
 
 
 def _fail(exc: Exception) -> typer.Exit:

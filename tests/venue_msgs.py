@@ -111,3 +111,8 @@ def pm_trade(slug: str, tid: str, price: str, qty: str, taker_side: str, ts: int
           "quantity": {"value": qty, "currency": "USD"}, "tradeTime": iso(ts).replace("Z", ".5Z"),
           "taker": {"side": taker_side}, "maker": {"side": "ORDER_SIDE_SELL"}}  # fmt: skip
     return json.dumps({"requestId": "tr", "subscriptionType": "SUBSCRIPTION_TYPE_TRADE", "trade": tr})
+
+
+def k_index_5hz(value: str, t: int = T0, index: str = "BRTI") -> str:
+    msg = {"index_id": index, "value_usd": value, "source_ts_ms": t}
+    return json.dumps({"type": "cfbenchmarks_value_5hz", "sid": 5, "seq": 1, "msg": msg})

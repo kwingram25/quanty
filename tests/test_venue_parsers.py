@@ -8,6 +8,7 @@ from venue_msgs import (
     T0,
     k_delta,
     k_index,
+    k_index_5hz,
     k_snapshot,
     k_trade,
     kalshi_market,
@@ -95,6 +96,7 @@ def test_kalshi_sequence_gap_is_reported_and_reconnect_resets() -> None:
     k.parse(raw(k_snapshot(TK, yes=[("0.40", "10")], no=[("0.55", "3")])))
     with pytest.raises(ValueError, match="sequence gap"):
         k.parse(raw(k_delta(TK, "yes", "0.42", "1", seq=5)))
+    assert k.parse(raw(k_delta(TK, "yes", "0.44", "1", seq=1))) != []  # seq 1: a new subscription, not a gap
     k.on_link(Link("v", T0, "up"))
     assert k.parse(raw(k_delta(TK, "yes", "0.43", "1", seq=6))) == []  # no snapshot yet on this connection
 
@@ -110,6 +112,8 @@ def test_kalshi_trades_and_index() -> None:
     assert isinstance(t, MarketTrade) and t.taker is Action.SELL  # bought NO = sold YES
     (i,) = k.parse(raw(k_index("81280.82")))
     assert i == IndexValue(ts=T0, src_ts=T0, key="cfbenchmarks:BRTI", value=81280.82)
+    (i,) = k.parse(raw(k_index_5hz("81281.5", t=T0 - 40)))
+    assert i == IndexValue(ts=T0, src_ts=T0 - 40, key="cfbenchmarks:BRTI", value=81281.5)
     with pytest.raises(ValueError):
         k.parse(raw('{"type":"error","msg":{"code":6,"msg":"Already subscribed"}}'))
 
@@ -118,7 +122,7 @@ def test_kalshi_subscriptions() -> None:
     k = kalshi(index_ids=["BRTI"])
     msgs = k.subscribe_messages(frozenset({"B", "A"}))
     assert [m for m in msgs if '"orderbook_delta"' in m and '["A", "B"]' in m]
-    assert any('"cfbenchmarks_value"' in m and "BRTI" in m for m in msgs)
+    assert any('"cfbenchmarks_value_5hz"' in m and "BRTI" in m for m in msgs)
 
 
 # --- Polymarket US ---

@@ -40,9 +40,16 @@ def _import(file: Path) -> ModuleType:
 
 
 def discover(
-    paths: list[Path], include_examples: bool = True, local: Path | None = LOCAL
+    paths: list[Path],
+    include_examples: bool = True,
+    local: Path | None = LOCAL,
+    python_paths: list[Path] | None = None,
 ) -> dict[str, ModuleType]:
-    """Map strategy name -> module; later paths shadow earlier ones."""
+    """Map strategy name -> module; later paths shadow earlier ones. python_paths are added to
+    sys.path first, so strategies can import their own helper packages."""
+    for extra in python_paths or ():
+        if str(extra) not in sys.path:
+            sys.path.insert(0, str(extra))
     search = ([EXAMPLES] if include_examples else []) + (_local_paths(local) if local else []) + paths
     files: dict[str, Path] = {}
     for path in search:

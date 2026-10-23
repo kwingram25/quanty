@@ -37,6 +37,9 @@ class KalshiConfig(VenueConfig):
     kind: Literal["kalshi"] = "kalshi"
     series: tuple[str, ...] = Field(("KXBTC15M",), description='Series tickers, e.g. "KXBTC15M", "KXHIGHNY"')
     index_ids: tuple[str, ...] = Field((), description='CF Benchmarks indexes to stream, e.g. "BRTI"')
+    index_channel: Literal["cfbenchmarks_value_5hz", "cfbenchmarks_value"] = Field(
+        "cfbenchmarks_value_5hz", description="5 Hz prints, or 1/s values with trailing 60 s averages"
+    )
     poll_s: PositiveFloat = Field(30, description="Discovery poll interval per series")
     strike_poll_s: PositiveFloat = Field(
         2, description="Poll interval while an open market has no strike yet"
@@ -111,7 +114,7 @@ class Kalshi(VenueFeed):
             msgs.append(
                 self._command(
                     "subscribe",
-                    {"channels": ["cfbenchmarks_value"], "index_ids": list(self.config.index_ids)},
+                    {"channels": [self.config.index_channel], "index_ids": list(self.config.index_ids)},
                 )
             )
         return msgs
@@ -184,6 +187,12 @@ class Kalshi(VenueFeed):
             return self._parse_book(raw, msg)
         if kind == "trade":
             return self._parse_trade(raw, msg["msg"])
+        if kind == "cfbenchmarks_value_5hz":
+            body = msg["msg"]
+            key = f"cfbenchmarks:{body['index_id']}"
+            return [
+                IndexValue(ts=raw.t, src_ts=body.get("source_ts_ms"), key=key, value=float(body["value_usd"]))
+            ]
         if kind == "cfbenchmarks_value":
             data = orjson.loads(msg["msg"]["data"])
             return [
@@ -221,7 +230,8 @@ class Kalshi(VenueFeed):
         ticker = body["market_ticker"]
         gap = False
         if sid is not None and seq is not None:
-            gap = msg["type"] == "orderbook_delta" and sid in self._seq and seq != self._seq[sid] + 1
+            # seq 1 starts a fresh subscription (also how a reconnect shows in recordings without link events)
+            gap = msg["type"] == "orderbook_delta" and sid in self._seq and seq not in (1, self._seq[sid] + 1)
             self._seq[sid] = seq
         if msg["type"] == "orderbook_snapshot":
             self._books[ticker] = (

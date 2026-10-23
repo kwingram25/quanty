@@ -30,3 +30,9 @@ def test_rejects_non_list(tmp_path: Path) -> None:
     f.write_text('strategy_paths = "strats"\n')
     with pytest.raises(ValueError):
         config.load(f)
+
+
+def test_python_paths(tmp_path: Path) -> None:
+    f = tmp_path / "config.toml"
+    f.write_text('python_paths = ["lib"]\n')
+    assert config.load(f).python_paths == [(tmp_path / "lib").resolve()]

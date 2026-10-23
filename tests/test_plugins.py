@@ -58,3 +58,13 @@ def test_missing_local_folder_is_fine(tmp_path: Path) -> None:
 def test_repo_template_is_not_a_strategy() -> None:
     repo_local = Path(__file__).parents[1] / "strategies"
     assert "_template" not in plugins.discover([], include_examples=False, local=repo_local)
+
+
+def test_python_paths_make_helper_packages_importable(tmp_path: Path) -> None:
+    (tmp_path / "helpers_pkg").mkdir()
+    (tmp_path / "helpers_pkg" / "__init__.py").write_text("VALUE = 42\n")
+    strategies = tmp_path / "strats"
+    strategies.mkdir()
+    (strategies / "uses_helper.py").write_text("from helpers_pkg import VALUE\n")
+    found = plugins.discover([strategies], include_examples=False, local=None, python_paths=[tmp_path])
+    assert found["uses_helper"].VALUE == 42
