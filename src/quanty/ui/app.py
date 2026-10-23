@@ -1,16 +1,20 @@
 """The web UI: a read-only dashboard over ledgers (data/{live,paper,backtest}/*.sqlite) and feed
 metrics (data/quanty.sqlite). Run it with `quanty ui`."""
 
+import asyncio
 import json
+import secrets
 import time
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlencode
 
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
+from quanty.control import ControlStore
 from quanty.ui import charts, queries
 
 HERE = Path(__file__).parent
@@ -73,6 +77,54 @@ def create_app(data: Path, refresh_s: int = 5) -> FastAPI:
     def feeds(request: Request) -> HTMLResponse:
         return page(request, "feeds.html", page="feeds", feeds=queries.feed_states(data))
 
+    token = secrets.token_urlsafe(24)  # in every form; a page on another site can't read it
+    control_path = data / "control.sqlite"
+
+    def control_view(run: str) -> tuple[dict[str, Any] | None, list[dict[str, Any]]]:
+        if not control_path.exists():
+            return None, []
+        store = ControlStore(control_path, create=False)
+        try:
+            return store.session(run), store.history(run)
+        finally:
+            store.close()
+
+    @app.post("/runs/{mode}/{name}/control")
+    async def control(request: Request, mode: str, name: str) -> RedirectResponse:
+        run_name = f"{mode}/{name}"
+        back = f"/runs/{run_name}"
+        origin = request.headers.get("origin")
+        if origin is not None and origin != f"{request.url.scheme}://{request.url.netloc}":
+            raise HTTPException(403, "cross-site request refused")
+        form = await request.form()
+        if form.get("token") != token:
+            raise HTTPException(403, "missing or stale form token: reload the page")
+        if queries.run_by_name(data, run_name) is None:
+            raise HTTPException(404, f"no run {run_name}")
+        action, _, target = str(form.get("cmd", "")).partition(":")
+
+        def done(msg: str, bad: bool = False) -> RedirectResponse:
+            return RedirectResponse(f"{back}?{urlencode({'msg': msg, 'bad': int(bad)})}", status_code=303)
+
+        if mode == "live" and form.get("confirm") != name:
+            return done(f"not sent: type {name} to confirm actions on a live run", bad=True)
+        store = ControlStore(control_path)
+        try:
+            if store.session(run_name) is None:
+                return done("not sent: this run is not running", bad=True)
+            try:
+                cid = store.submit(run_name, action, target)
+            except ValueError as exc:
+                return done(f"not sent: {exc}", bad=True)
+            for _ in range(30):  # sessions poll every second; wait briefly for the outcome
+                await asyncio.sleep(0.1)
+                row = next((c for c in store.history(run_name) if c["id"] == cid), None)
+                if row is not None and row["status"] != "pending":
+                    return done(row["result"], bad=row["status"] == "failed")
+            return done(f"sent {action} {target or 'all'}; waiting for the session")
+        finally:
+            store.close()
+
     @app.get("/runs/{mode}/{name}", response_class=HTMLResponse)
     def run(request: Request, mode: str, name: str) -> HTMLResponse:
         r = queries.run_by_name(data, f"{mode}/{name}")
@@ -82,6 +134,7 @@ def create_app(data: Path, refresh_s: int = 5) -> FastAPI:
         curves = queries.pnl_curves(r)
         slots = charts.color_slots([s.instance for s in v.summaries])
         chart = charts.step_chart(curves, slots, label=f"Cumulative realized P&L, {r.name}")
+        session, history = control_view(r.name)
         return page(
             request,
             "run.html",
@@ -92,6 +145,11 @@ def create_app(data: Path, refresh_s: int = 5) -> FastAPI:
             chart=chart,
             positions=queries.positions(r),
             recent=queries.recent(r),
+            session=session,
+            history=history,
+            token=token,
+            msg=request.query_params.get("msg", ""),
+            msg_bad=request.query_params.get("bad") == "1",
         )
 
     return app

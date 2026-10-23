@@ -136,6 +136,13 @@ fills, orders, and the events worth seeing (warnings, errors, shadow previews, l
 events), plus feed health. Read-only and safe beside running sessions; it refreshes itself.
 There is no login, so it listens on localhost only by default.
 
+Runs that are running (`quanty paper`, `quanty live`) also get controls: halt or resume a
+strategy (no new buys, resting buys canceled, exits still allowed), disarm or re-arm a live
+broker (re-arming only if the session was started with `--arm`), and a kill switch that halts
+everything. Sessions pick commands up from `data/control.sqlite` within a second and record the
+outcome; actions on a live run need its name typed to confirm, and every form carries a
+per-server token so another web page can't post to it.
+
 ## Pieces
 
 | | |

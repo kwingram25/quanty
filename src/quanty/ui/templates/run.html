@@ -11,6 +11,63 @@
   <div class="stat"><div class="label">Errors</div><div class="value">{{ v.errors }}</div></div>
 </div>
 
+{% if msg %}<p class="notice {{ 'bad' if msg_bad else '' }}" role="status">{{ msg }}</p>{% endif %}
+
+{% if session %}
+<section class="card controls">
+  <h2 style="margin-top:0">Controls <span class="badge ok">running</span> <span class="muted">pid {{ session.pid }}</span></h2>
+  <p class="sub">Halt stops new buys and cancels resting buys; exits and stops still go through. Disarm makes a
+    live broker refuse every order, exits included, and cancels its resting orders.</p>
+  <form method="post" action="/runs/{{ v.run.name }}/control">
+    <input type="hidden" name="token" value="{{ token }}">
+    {% if v.run.mode == "live" %}
+    <p><label>Type <strong>{{ v.run.name.split("/", 1)[1] }}</strong> to confirm actions on this live run:
+      <input name="confirm" autocomplete="off" placeholder="run name" required></label></p>
+    {% endif %}
+    <table>
+      <thead><tr><th>Strategy</th><th>Broker</th><th>State</th><th></th></tr></thead>
+      <tbody>
+      {% for iid, s in session.state.instances | dictsort %}
+        <tr><td>{{ iid }}</td><td>{{ s.broker }}</td>
+          <td>{% if s.halted %}<span class="badge warning">halted</span>{% else %}<span class="badge ok">trading</span>{% endif %}</td>
+          <td class="num">{% if s.halted %}<button name="cmd" value="resume:{{ iid }}">Resume</button>
+            {% else %}<button name="cmd" value="halt:{{ iid }}">Halt</button>{% endif %}</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    {% set live_brokers = session.state.brokers | dictsort | selectattr("1.kind", "equalto", "live") | list %}
+    {% if live_brokers %}
+    <table style="margin-top:12px">
+      <thead><tr><th>Live broker</th><th>State</th><th></th></tr></thead>
+      <tbody>
+      {% for name, b in live_brokers %}
+        <tr><td>{{ name }}</td>
+          <td>{% if b.disabled %}<span class="badge error">disabled</span> <span class="muted">{{ b.disabled }}</span>
+              {% elif b.armed %}<span class="badge live">armed</span>{% else %}<span class="badge warning">disarmed</span>{% endif %}</td>
+          <td class="num">{% if b.armed %}<button name="cmd" value="disarm:{{ name }}">Disarm</button>
+            {% elif session.can_arm and not b.disabled %}<button name="cmd" value="arm:{{ name }}">Arm</button>{% endif %}</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    {% endif %}
+    <p style="margin-top:14px"><button class="danger" name="cmd" value="kill:">Kill switch: halt everything</button></p>
+  </form>
+  {% if history %}
+  <h2>Command history</h2>
+  <table>
+    <thead><tr><th>Sent</th><th>Action</th><th>Target</th><th>Status</th><th>Result</th></tr></thead>
+    <tbody>
+    {% for c in history %}
+      <tr><td class="muted">{{ c.created_ts | clock }}</td><td>{{ c.action }}</td><td>{{ c.target or "all" }}</td>
+        <td><span class="badge {{ {'done': 'ok', 'failed': 'error'}.get(c.status, 'warning') }}">{{ c.status }}</span></td>
+        <td class="wrap">{{ c.result }}</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% endif %}
+</section>
+{% endif %}
+
 <section class="card">
   <h2 style="margin-top:0">Cumulative realized P&amp;L</h2>
   {% if curves | length > 1 %}

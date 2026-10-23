@@ -114,3 +114,15 @@ svg.spark { width: 140px; height: 28px; vertical-align: middle; }
   header { padding: 10px 16px; gap: 12px; }
   main { padding: 16px; }
 }
+
+.controls button {
+  font: inherit; padding: 4px 12px; border-radius: 6px; cursor: pointer;
+  background: var(--surface); color: var(--ink); border: 1px solid var(--axis);
+}
+.controls button:hover { border-color: var(--ink-2); }
+.controls button.danger { border-color: var(--critical); color: var(--critical); }
+.controls input { font: inherit; padding: 4px 8px; border-radius: 6px; border: 1px solid var(--axis);
+  background: var(--page); color: var(--ink); margin-left: 6px; }
+.notice { padding: 8px 12px; border-radius: 8px; border: 1px solid var(--border); background: var(--surface); }
+.notice::before { content: "✓ "; color: var(--good); }
+.notice.bad::before { content: "✕ "; color: var(--critical); }

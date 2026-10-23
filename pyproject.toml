@@ -17,6 +17,7 @@ dependencies = [
     "orjson>=3.10",
     "pydantic>=2.8",
     "pydantic-settings>=2.4",
+    "python-multipart>=0.0.9",
     "sortedcontainers>=2.4",
     "sqlalchemy>=2.0",
     "structlog>=24",

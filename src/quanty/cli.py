@@ -13,6 +13,7 @@ import typer
 
 from quanty import config, experiment, plugins, synthetic
 from quanty.brokers.live import LiveBroker
+from quanty.control import Controller, ControlStore
 from quanty.core import Engine, Event, Ledger, Summary
 from quanty.feeds.cli import feeds_app, load_feeds, print_windows, record, recorded, recorded_range, replay
 from quanty.feeds.health import Status, Window
@@ -197,7 +198,11 @@ def _session(
     book = Ledger(ledger_path, durable=True)
     trader = Engine(instances, ledger=book, limits=exp.limits, clock_ms=exp.clock_ms, strict=False,
                     signals=experiment.signals(exp))  # fmt: skip
-    session = RecordSession(feed_objs, data, data / "quanty.sqlite", window_s=window, trader=trader)
+    run_name = f"{mode}/{ledger_path.stem}"
+    store = ControlStore(data / "control.sqlite")
+    controller = Controller(store, run_name, trader, can_arm=armed)
+    session = RecordSession(feed_objs, data, data / "quanty.sqlite", window_s=window, trader=trader,
+                            controller=controller)  # fmt: skip
     ids = [i.id for i in instances]
 
     def report(windows: list[Window], status: dict[str, Status]) -> None:
@@ -214,6 +219,7 @@ def _session(
         typer.echo("stopped")
     finally:
         book.close()
+        store.close()
 
 
 def _params(pairs: list[str]) -> dict[str, Any]:
