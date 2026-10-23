@@ -1,0 +1,110 @@
+# Writing strategies
+
+A strategy is one Python file with one `Strategy` subclass. It only sees events and only acts
+through a context, so the same file runs unchanged in backtest, paper, shadow and live: the broker
+behind the context decides what an order means.
+
+## The shape
+
+```python
+from pydantic import Field
+
+from quanty.core import Book, Context, Params, Side, Strategy, Tif
+
+
+class EdgeParams(Params):
+    min_edge: float = Field(0.02, ge=0, description="Buy when the model beats the price by this much")
+    size: int = Field(10, gt=0, description="Contracts per order")
+
+
+class Edge(Strategy[EdgeParams]):
+    params_type = EdgeParams
+    series = ("kalshi:KXHIGHNY",)  # markets to trade; empty = everything
+    description = "Buy whichever side the model prices above the ask"
+
+    def on_book(self, ctx: Context, book: Book) -> None:
+        if ctx.orders(book.market_id):  # one order at a time per market
+            return
+        fair = self.model(ctx, book.market_id)  # P(YES), your code
+        for side, prob in ((Side.YES, fair), (Side.NO, 1 - fair)):
+            ask = book.ask(side)
+            if ask is not None and prob - ask >= self.params.min_edge:
+                ctx.buy(book.market_id, side, ask, self.params.size, tif=Tif.IOC)
+                return
+```
+
+`Params` are Pydantic models: typed, with defaults and descriptions, validated strictly when an
+experiment overrides them. `quanty params <strategy>` lists them.
+
+## Hooks
+
+Override only what you need. Every hook gets the context first.
+
+| Hook | When |
+|---|---|
+| `on_start(ctx)` | once, before any event |
+| `on_market_open(ctx, market)` | a market in your series is announced (terms, strike, close time) |
+| `on_book(ctx, book)` | the top of a book changed |
+| `on_trade(ctx, trade)` | a trade printed on the venue |
+| `on_data(ctx, event)` | external data: index values, prices, observations, forecasts, releases |
+| `on_clock(ctx, clock)` | every `clock_ms` of event time, if the experiment sets it |
+| `on_fill(ctx, fill)` | one of your orders filled (partly or fully) |
+| `on_order(ctx, order)` | one of your orders changed status (open, filled, canceled, rejected, expired) |
+| `on_market_close(ctx, market)` | trading in a market ended |
+| `on_settled(ctx, market, outcome)` | the market resolved; positions are paid out |
+
+Events arrive in time order. In a backtest that order is the recording's; live it is arrival
+order, with receive timestamps.
+
+## The context
+
+| | |
+|---|---|
+| `ctx.now` | current event time, ms |
+| `ctx.markets()`, `ctx.market(id)` | open markets in your series |
+| `ctx.seconds_left(id)` | until the market closes |
+| `ctx.book(id)` | latest book: `bids`, `asks`, `book.bid(side)`, `book.ask(side)` in that side's terms |
+| `ctx.latest(key)` | latest data event for a key, e.g. `"cfbenchmarks:BRTI"` |
+| `ctx.signal(name)` | a derived value declared in the experiment (`last`, `ewma`, `realized_vol`) |
+| `ctx.position(id, side)` | contracts held |
+| `ctx.orders(id=None)` | your open orders |
+| `ctx.buy(id, side, price, qty, tif=, post_only=, tag=)` | place a buy; returns the `Order` |
+| `ctx.sell(...)` | sell contracts you hold (no shorting: to bet against YES, buy NO) |
+| `ctx.cancel(order)`, `ctx.cancel_all(id=None)` | |
+| `ctx.log(msg, **fields)` | into the ledger, shown in the dashboard |
+
+Prices are always in the terms of the side you name: buying NO at 0.97 means paying 97¢ for a
+contract that pays $1 if NO wins. Venues that quote everything in YES terms are converted for you.
+
+An order that fails a check (risk limit, tick size, quantity step, market closed, halted) comes
+back already `REJECTED` with a reason; it never reaches the venue. A strategy that raises is
+halted and logged; in backtests the error is raised so you see it.
+
+## Orders
+
+- `Tif.IOC`: take what is there now, cancel the rest. The usual choice for taking liquidity.
+- `Tif.GTC` (default): rest until filled, canceled, or the market closes.
+- `post_only=True`: rejected rather than taking liquidity, for making markets.
+
+## Signals and external data
+
+Declare derived values in the experiment; they are rebuilt identically in replays:
+
+```toml
+[[signals]]
+name = "btc_vol"
+kind = "realized_vol"
+key = "coinbase:BTC-USD"
+window_s = 300
+```
+
+and read them with `ctx.signal("btc_vol")` (None until there is enough data).
+
+## Testing a strategy
+
+- `quanty demo --strategy my_idea` runs it on synthetic markets (it must trade the
+  `synthetic:updown_5m` series, or have an empty `series`).
+- `quanty backtest experiment.toml --data data` runs it on your recordings.
+- The simulated broker models latency, taker fills against the book, queue position for resting
+  orders and post-only rejects. `QueueModel` options make it more or less conservative.
+- In unit tests, build events by hand and run an `Engine` directly; `tests/helpers.py` shows how.

@@ -88,3 +88,19 @@ def test_live_brokers_are_gated(tmp_path: Path) -> None:
     missing = tmp_path / "nocap.toml"
     missing.write_text(exp.read_text().replace("max_notional = 5\n", ""))
     assert "max_notional" in run("backtest", str(missing)).stderr
+
+
+def test_backtest_ledger_folder_is_created(tmp_path: Path) -> None:
+    db = tmp_path / "data" / "backtest" / "run.sqlite"
+    assert (
+        run(
+            "backtest", str(ROOT / "experiments" / "example.toml"), "--hours", "0.5", "--ledger", str(db)
+        ).exit_code
+        == 0
+    )
+    assert db.exists()
+
+
+def test_demo_ui_refuses_a_custom_ledger(tmp_path: Path) -> None:
+    res = run("demo", "--ui", "--ledger", str(tmp_path / "x.sqlite"))
+    assert res.exit_code == 2 and "leave out --ledger" in res.stderr

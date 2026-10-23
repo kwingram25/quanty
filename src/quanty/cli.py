@@ -2,7 +2,10 @@
 
 import asyncio
 import sys
+import tempfile
+import threading
 import tomllib
+import webbrowser
 from collections.abc import Iterable
 from pathlib import Path
 from types import ModuleType
@@ -72,16 +75,41 @@ def demo(
     hours: Hours = 6.0,
     seed: Seed = 0,
     ledger: LedgerPath = None,
+    ui: Annotated[bool, typer.Option("--ui", help="Then open the dashboard on the result")] = False,
+    port: Annotated[int, typer.Option(help="Dashboard port, with --ui")] = 8765,
+    browser: Annotated[bool, typer.Option(help="Open a browser, with --ui")] = True,
 ) -> None:
-    """Backtest one strategy on synthetic up/down markets."""
+    """Backtest one strategy on synthetic up/down markets.
+
+    With --ui (and no --param), three variants of the example run side by side and the dashboard
+    opens on them: the whole loop with no keys and no setup.
+    """
     try:
-        raw = {
-            "brokers": {"sim": {"kind": "sim", "latency_ms": latency_ms}},
-            "instances": [{"id": strategy, "strategy": strategy, "params": _params(param or [])}],
-        }
+        instances = [{"id": strategy, "strategy": strategy, "params": _params(param or [])}]
+        if ui and not param and strategy == "example_favorite":
+            instances = [{"id": f"fav_{round(c * 100)}", "strategy": strategy, "params": {"min_conf": c}}
+                         for c in (0.90, 0.95, 0.97)]  # fmt: skip
+        raw = {"brokers": {"sim": {"kind": "sim", "latency_ms": latency_ms}}, "instances": instances}
+        if ui and ledger is not None:
+            raise ValueError("--ui keeps its ledger in a temporary demo folder; leave out --ledger")
+        data = Path(tempfile.mkdtemp(prefix="quanty-demo-")) if ui else None
+        if data is not None:
+            ledger = data / "backtest" / f"demo-{hours:g}h-seed{seed}.sqlite"
+            ledger.parent.mkdir(parents=True)
         _backtest(experiment.parse(raw, source="demo"), hours, seed, ledger)
     except ValueError as exc:
         raise _fail(exc) from None
+    if data is not None:
+        import uvicorn
+
+        from quanty.ui.app import create_app
+
+        assert ledger is not None
+        url = f"http://127.0.0.1:{port}/runs/backtest/{ledger.stem}"
+        typer.echo(f"dashboard: {url} (demo data in {data}; Ctrl-C to stop)")
+        if browser:
+            threading.Timer(1.0, webbrowser.open, args=[url]).start()
+        uvicorn.run(create_app(data), host="127.0.0.1", port=port, log_level="warning")
 
 
 @app.command()
@@ -241,6 +269,8 @@ def _backtest(
 ) -> None:  # fmt: skip
     if ledger_path and ledger_path.exists():
         raise ValueError(f"{ledger_path} already exists")
+    if ledger_path:
+        ledger_path.parent.mkdir(parents=True, exist_ok=True)
     if live_names := experiment.live_brokers(exp):
         raise ValueError(f"brokers {', '.join(live_names)} are live; backtests need sim or shadow brokers")
     instances = experiment.build(exp, _strategies(), synthetic.FEES)
