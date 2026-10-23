@@ -51,7 +51,8 @@ recording real data, paper trading, shadow trading and live trading.
   repeated rejections or unknown order outcomes, an order journal that cleans up after a crash
   without touching anything else on the account. A fake exchange with fault injection for tests.
 - **A dashboard.** P&L over time per strategy, positions, fills, orders, notable events and feed
-  health, with controls for running sessions: halt, resume, disarm, kill switch.
+  health, each platform's connection and your account balances, with controls for running sessions:
+  halt, resume, disarm, kill switch.
 - **Private strategies.** Strategies load from folders in your own config, so your edge never has
   to live in this repo.
 

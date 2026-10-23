@@ -56,6 +56,15 @@ class VenueOrder:
     fill_yes_price: float | None = None  # average YES price of `filled`, when the venue reports it
 
 
+@dataclass(frozen=True)
+class AccountBalance:
+    """An account's money on one venue, in dollars."""
+
+    cash: float  # settled cash, not counting positions
+    buying_power: float  # what new orders can use now
+    positions_value: float | None = None  # what open positions are worth, where the venue reports it
+
+
 class VenueError(Exception):
     """The venue refused a request (an HTTP error status); the order's outcome is known."""
 
@@ -111,6 +120,11 @@ class OrderAPI(ABC):
         venue keeps client ids (Kalshi); {} where it doesn't (Polymarket US)."""
         return {}
 
+    label: str = ""
+
+    async def balance(self, client: httpx.AsyncClient) -> AccountBalance:
+        raise NotImplementedError(f"{self.venue}: reading the balance isn't supported")
+
     async def _send(self, client: httpx.AsyncClient, method: str, path: str, **kw: Any) -> dict[str, Any]:
         headers = self.signer.headers(method, path)
         if "json" in kw:
@@ -126,6 +140,7 @@ class PolymarketOrders(OrderAPI):
     """Polymarket US: prices in YES terms (buying NO at 99¢ is BUY_SHORT at YES 0.01)."""
 
     venue = "polymarket_us"
+    label = "Polymarket US"
     base_url = "https://api.polymarket.us"
     INTENTS: ClassVar[dict[tuple[Side, Action], str]] = {
         (Side.YES, Action.BUY): "ORDER_INTENT_BUY_LONG",
@@ -221,6 +236,17 @@ class PolymarketOrders(OrderAPI):
         done = state in self.DONE_STATES or nothing_left
         return VenueOrder(venue_id, _num(od.get("cumQuantity")), 0.0, done, state, price)
 
+    async def balance(self, client: httpx.AsyncClient) -> AccountBalance:
+        rows = (await self._send(client, "GET", "/v1/account/balances")).get("balances") or []
+        usd = next((b for b in rows if (b.get("currency") or "USD") == "USD"), None)
+        if usd is None:
+            raise VenueError(200, "no USD balance in reply")
+        return AccountBalance(
+            cash=_num(usd.get("currentBalance")),
+            buying_power=_num(usd.get("buyingPower")),
+            positions_value=_num(usd.get("assetNotional")) if usd.get("assetNotional") is not None else None,
+        )
+
     async def cancel(self, client: httpx.AsyncClient, venue_id: str, market_id: str) -> None:
         await self._send(
             client, "POST", f"/v1/order/{venue_id}/cancel", json={"marketSlug": native_id(market_id)}
@@ -231,6 +257,7 @@ class KalshiOrders(OrderAPI):
     """Kalshi: orders in YES terms (bid/ask); counts in hundredths of a contract."""
 
     venue = "kalshi"
+    label = "Kalshi"
     base_url = "https://api.elections.kalshi.com"
     PATH = "/trade-api/v2/portfolio/events/orders"
     READ_PATH = "/trade-api/v2/portfolio/orders"
@@ -305,6 +332,16 @@ class KalshiOrders(OrderAPI):
     async def cancel(self, client: httpx.AsyncClient, venue_id: str, market_id: str) -> None:
         await self._send(
             client, "DELETE", f"{self.PATH}/{venue_id}", params={"market_ticker": native_id(market_id)}
+        )
+
+    async def balance(self, client: httpx.AsyncClient) -> AccountBalance:
+        res = await self._send(client, "GET", "/trade-api/v2/portfolio/balance")
+        cash = (
+            _num(res.get("balance_dollars")) if res.get("balance_dollars") else _num(res.get("balance")) / 100
+        )
+        value = res.get("portfolio_value")
+        return AccountBalance(
+            cash=cash, buying_power=cash, positions_value=None if value is None else _num(value) / 100
         )
 
     async def resting_by_client_id(self, client: httpx.AsyncClient) -> dict[str, tuple[str, str]]:

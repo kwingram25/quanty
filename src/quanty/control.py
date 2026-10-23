@@ -13,6 +13,7 @@ a session started with `quanty live --arm`.
 import asyncio
 import os
 import time
+from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import Any
 
@@ -185,6 +186,7 @@ class Controller:
         """playback: a demo's pacing, which the dashboard can switch between speeds."""
         self.store, self.run, self.trader, self.can_arm, self.poll_s = store, run, trader, can_arm, poll_s
         self.playback = playback
+        self.feeds: Callable[[], Mapping[str, str]] | None = None  # feed -> health, set by a live session
         self.started_ts = now_ms()
         self.brokers = {i.broker.name: i.broker for i in trader.instances.values()}
 
@@ -210,10 +212,19 @@ class Controller:
             "now": t.now,
             "markets": self.markets(),
             "exposure": self.exposure(),
+            "platforms": self.platforms(),
             "speed": None
             if self.playback is None
             else {"value": self.playback.speed, "options": list(self.playback.options)},
         }
+
+    def platforms(self) -> list[dict[str, str]]:
+        """What this session is connected to: each feed and its health, or, with no feeds (a demo or
+        replay), the venues of its markets as simulated."""
+        if self.feeds is not None:
+            return [{"name": name, "status": str(status)} for name, status in sorted(self.feeds().items())]
+        venues = sorted({m.venue for m in self.trader.markets.values()})
+        return [{"name": v, "status": "simulated"} for v in venues]
 
     def exposure(self) -> dict[str, dict[str, dict[str, float]]]:
         """Per exclusive event with positions: each instance's worst-case loss and best-case gain."""

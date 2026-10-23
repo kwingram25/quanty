@@ -4,9 +4,11 @@ commands (data/control.sqlite), behind a per-server token and a same-origin chec
 import asyncio
 import dataclasses
 import secrets
+import time
 from pathlib import Path
 from typing import Any
 
+import httpx
 from fastapi import APIRouter, HTTPException, Request, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel
 from sqlalchemy import func, select
@@ -16,8 +18,11 @@ from quanty.control import ControlStore
 from quanty.core.ledger import Summary
 from quanty.db.models import FillRow, LogRow, OrderRow, SettlementRow
 from quanty.ui import queries
+from quanty.venues.orders import OrderAPI, VenueError, default_apis
 
 STREAM_POLL_S = 0.5
+BALANCE_EVERY_S = 30  # account balances: asked at most this often per venue
+BALANCE_BACKOFF_S = 120  # after a refusal (rate limit, error): leave the venue alone this long
 
 
 def _row(obj: Any) -> dict[str, Any]:
@@ -48,6 +53,9 @@ class Api:
         self.data = data
         self.token = secrets.token_urlsafe(24)
         self.control_path = data / "control.sqlite"
+        self.apis: dict[str, OrderAPI] = default_apis()
+        self._balances: dict[str, dict[str, Any]] = {}  # venue -> last answer (or error), with when
+        self._balance_lock = asyncio.Lock()
 
     # --- reads ---
 
@@ -119,6 +127,7 @@ class Api:
                 "markets": state.get("markets", []),
                 "exposure": state.get("exposure", {}),
                 "speed": state.get("speed"),
+                "platforms": state.get("platforms", []),
             },
             "commands": history,
         }
@@ -170,6 +179,63 @@ class Api:
                 }
         finally:
             engine.dispose()
+
+    async def accounts(self) -> list[dict[str, Any]]:
+        """Each venue with API keys on this machine: its balance, read-only and cached (venues share
+        rate limits with anything else trading the account, so this asks rarely)."""
+        async with self._balance_lock:
+            now = time.time()
+            due = []
+            for venue, api in self.apis.items():
+                last = self._balances.get(venue)
+                wait = BALANCE_BACKOFF_S if last and last.get("error") else BALANCE_EVERY_S
+                if last is None or now - last["asked"] >= wait:
+                    due.append((venue, api))
+            if due:
+                async with httpx.AsyncClient(timeout=10) as client:
+                    for venue, api in due:
+                        self._balances[venue] = await self._read_balance(client, venue, api, now)
+        return [
+            {k: v for k, v in b.items() if k != "asked"}
+            for b in self._balances.values()
+            if not b.get("no_keys")
+        ]
+
+    async def _read_balance(
+        self, client: httpx.AsyncClient, venue: str, api: OrderAPI, now: float
+    ) -> dict[str, Any]:
+        last = self._balances.get(venue, {})
+        base = {"venue": venue, "label": api.label or venue, "asked": now}
+        try:
+            api.signer  # noqa: B018 - raises when this venue's keys aren't configured
+        except RuntimeError:
+            return {**base, "no_keys": True}
+        try:
+            bal = await api.balance(client)
+        except VenueError as exc:
+            busy = exc.status == 429
+            return {
+                **base,
+                **{k: last.get(k) for k in ("cash", "buying_power", "positions_value", "updated")},
+                "error": "rate limited: retrying in 2 min" if busy else exc.detail[:200],
+                "busy": busy,
+            }
+        except httpx.HTTPError as exc:
+            return {
+                **base,
+                **{k: last.get(k) for k in ("cash", "buying_power", "positions_value", "updated")},
+                "error": f"unreachable ({type(exc).__name__})",
+                "busy": False,
+            }
+        return {
+            **base,
+            "cash": bal.cash,
+            "buying_power": bal.buying_power,
+            "positions_value": bal.positions_value,
+            "updated": int(now * 1000),
+            "error": None,
+            "busy": False,
+        }
 
     # --- control ---
 
@@ -238,6 +304,10 @@ def router(api: Api) -> APIRouter:
     @r.post("/runs/{mode}/{name}/control")
     async def control(request: Request, mode: str, name: str, cmd: Command) -> dict[str, Any]:
         return await api.command(request, mode, name, cmd)
+
+    @r.get("/accounts")
+    async def accounts() -> list[dict[str, Any]]:
+        return await api.accounts()
 
     @r.get("/feeds")
     def feeds() -> list[dict[str, Any]]:

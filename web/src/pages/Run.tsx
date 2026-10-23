@@ -48,6 +48,11 @@ function Run({ snap, live }: { snap: Snapshot; live: boolean }) {
             <span className={`pill ${snap.run.mode}`}><span className="dot" />{snap.run.mode}</span>
             {snap.session && <span className="pill running" title={live ? "updates pushed live" : "reconnecting"}>
               <span className="dot" />running</span>}
+            {snap.session?.platforms?.map((p) => (
+              <span key={p.name} className={`pill platform ${p.status}`} title={`${p.name}: ${p.status}`}>
+                <span className="dot" />{p.name.replace(/_/g, " ")}{p.status !== "ok" && <span className="muted"> · {p.status}</span>}
+              </span>
+            ))}
             <SpeedToggle run={snap.run.name} session={snap.session} />
           </h1>
           <p>{snap.run.file} · last activity {ago(snap.run.last_ts)}</p>

@@ -58,6 +58,8 @@ export interface SessionState {
   exposure?: Record<string, Record<string, { loss: number; gain: number }>>;
   /** a demo's playback speed (x real time) and the speeds it can switch to */
   speed?: { value: number; options: number[] } | null;
+  /** feeds this session is connected to and their health ("simulated" in a demo) */
+  platforms?: { name: string; status: string }[];
 }
 
 export interface ActivityRow {
@@ -109,6 +111,17 @@ export interface Snapshot {
 }
 
 export interface MarketName { title: string; subtitle: string; event: string; series: string }
+
+export interface Account {
+  venue: string;
+  label: string;
+  cash: number | null;
+  buying_power: number | null;
+  positions_value: number | null;
+  updated: number | null;
+  error: string | null;
+  busy: boolean;
+}
 
 export interface FeedRow {
   feed: string;

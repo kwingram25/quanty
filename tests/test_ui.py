@@ -139,3 +139,67 @@ def test_ui_never_creates_files(tmp_path: Path) -> None:
     c = TestClient(create_app(tmp_path))
     assert c.get("/api/runs").json() == [] and c.get("/api/feeds").json() == []
     assert list(tmp_path.iterdir()) == []
+
+
+class FakeAccountAPI:
+    """Stands in for a venue's OrderAPI: keys or not, a balance or a refusal."""
+
+    def __init__(self, label: str, keys: bool = True) -> None:
+        self.label, self.keys, self.calls, self.fail = label, keys, 0, False
+
+    @property
+    def signer(self) -> object:
+        if not self.keys:
+            raise RuntimeError("KEY is not set")
+        return object()
+
+    async def balance(self, client: object) -> object:
+        from quanty.venues.orders import AccountBalance, VenueError
+
+        self.calls += 1
+        if self.fail:
+            raise VenueError(429, "too many requests")
+        return AccountBalance(cash=100.0 + self.calls, buying_power=90.0, positions_value=5.0)
+
+
+def test_accounts_are_cached_hide_venues_without_keys_and_back_off(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import asyncio
+
+    from quanty.ui.api import Api
+
+    a = Api(tmp_path)
+    k, p = FakeAccountAPI("Kalshi"), FakeAccountAPI("Polymarket US", keys=False)
+    a.apis = {"kalshi": k, "polymarket_us": p}  # type: ignore[dict-item]
+    clock = [1000.0]
+    monkeypatch.setattr("quanty.ui.api.time.time", lambda: clock[0])
+
+    first = asyncio.run(a.accounts())
+    assert [(x["label"], x["cash"]) for x in first] == [("Kalshi", 101.0)]  # no keys: not shown
+    asyncio.run(a.accounts())
+    assert k.calls == 1  # cached
+    clock[0] += 31
+    k.fail = True
+    busy = asyncio.run(a.accounts())[0]
+    assert busy["busy"] and busy["cash"] == 101.0 and "rate limited" in busy["error"]  # last balance kept
+    clock[0] += 31
+    asyncio.run(a.accounts())
+    assert k.calls == 2  # backing off after a refusal
+    clock[0] += 120
+    k.fail = False
+    assert asyncio.run(a.accounts())[0]["cash"] == 103.0 and k.calls == 3
+
+
+def test_session_reports_platforms(tmp_path: Path) -> None:
+    from quanty.control import Controller, ControlStore
+
+    (tmp_path / "paper").mkdir()
+    ledger = backtest_ledger(tmp_path / "paper" / "x.sqlite")
+    from quanty.core import Engine
+
+    e = Engine([], ledger=ledger, clock_ms=None)
+    c = Controller(ControlStore(tmp_path / "control.sqlite"), "paper/x", e, can_arm=False)
+    assert c.platforms() == []
+    c.feeds = lambda: {"kalshi": "ok", "polymarket_us": "stale"}
+    assert c.platforms() == [{"name": "kalshi", "status": "ok"}, {"name": "polymarket_us", "status": "stale"}]

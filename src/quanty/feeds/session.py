@@ -47,6 +47,8 @@ class RecordSession:
         """trader: an engine to drive with the live events (paper/shadow/live); None = record only."""
         self.trader = trader
         self.controller = controller  # applies UI commands to the trader (quanty.control)
+        if controller is not None:
+            controller.feeds = self.status  # the dashboard shows each platform's connection
         self.feeds = dict(feeds)
         self.recorder = Recorder(root)
         self.db: Engine | None = db.connect(db_path) if db_path else None

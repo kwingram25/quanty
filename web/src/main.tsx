@@ -2,6 +2,7 @@ import { MotionConfig } from "motion/react";
 import { StrictMode, useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { BrowserRouter, Link, NavLink, Route, Routes, useNavigate } from "react-router-dom";
+import { Accounts } from "./components/Accounts";
 import { ToastProvider } from "./components/Toasts";
 import { FeedsPage } from "./pages/Feeds";
 import { RunPage } from "./pages/Run";
@@ -56,6 +57,7 @@ function App() {
           <NavLink to="/" end>Runs</NavLink>
           <NavLink to="/feeds">Feeds</NavLink>
         </nav>
+        <Accounts />
         <ThemeToggle />
       </div>
       <Routes>
