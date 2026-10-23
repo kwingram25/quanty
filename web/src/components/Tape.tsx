@@ -39,9 +39,9 @@ function Body({ it }: { it: TapeItem }) {
   if (it.kind === "fill") {
     return (
       <>
-        <span className="what">
+        <span className="what" title={it.market_id}>
           <b>{it.instance}</b> {it.action === "buy" ? "bought" : "sold"} {it.qty} {it.side.toUpperCase()} at {cents(it.price)}
-          <span className="detail">{it.market_id} · {it.liquidity} · fee {money(it.fee)}</span>
+          <span className="detail">{it.liquidity} · fee {money(it.fee)}</span>
         </span>
         <span className={`amount ${tone(it.realized)}`}>{it.realized ? money(it.realized, true) : money(-it.qty * it.price - it.fee)}</span>
       </>
@@ -51,9 +51,9 @@ function Body({ it }: { it: TapeItem }) {
     const won = it.payout > 0;
     return (
       <>
-        <span className="what">
-          <b>{it.instance}</b> {won ? "won" : "lost"}: {it.qty} {it.side.toUpperCase()} {won ? `paid ${money(it.payout)}` : "expired worthless"}
-          <span className="detail">{it.market_id} settled</span>
+        <span className="what" title={it.market_id}>
+          <b>{it.instance}</b> {won ? "won" : "lost"} {it.qty} {it.side.toUpperCase()}
+          <span className="detail">{won ? `paid ${money(it.payout)}` : "expired worthless"}</span>
         </span>
         <span className={`amount ${tone(it.pnl)}`}>{money(it.pnl, true)}</span>
       </>

@@ -23,9 +23,9 @@ export function Strategies({ snap, slots }: { snap: Snapshot; slots: Record<stri
   };
 
   return (
-    <aside className="panel side">
+    <aside className="panel side fill">
       <header><h2>Strategies</h2></header>
-      <div className="panel-body">
+      <div className="panel-body scroll">
         {snap.strategies.length === 0 && <p className="empty">No strategies have traded yet.</p>}
         {snap.strategies.map((st) => {
           const halted = pending[st.instance] ?? s?.instances[st.instance]?.halted ?? false;
@@ -34,12 +34,13 @@ export function Strategies({ snap, slots }: { snap: Snapshot; slots: Record<stri
             onToggle={() => act(halted ? "resume" : "halt", st.instance, `${halted ? "Resumed" : "Halted"} ${st.instance}`)} />;
         })}
         {s && <Brokers s={s} act={act} />}
-        {s && <>
-          <HoldButton onConfirm={() => act("kill", "", "Kill switch: everything halted")} />
-          <p className="side-note">Halt stops new buys and cancels resting ones; exits still go through.
-            Hold the kill switch to halt every strategy.</p>
-        </>}
       </div>
+      {s && (
+        <div className="panel-foot">
+          <HoldButton onConfirm={() => act("kill", "", "Kill switch: everything halted")} />
+          <p className="side-note">Halt stops new buys and cancels resting ones; exits still go through.</p>
+        </div>
+      )}
       <AnimatePresence>
         {confirm && <ConfirmDialog name={run.split("/")[1]} label={confirm.label}
           onCancel={() => setConfirm(null)}

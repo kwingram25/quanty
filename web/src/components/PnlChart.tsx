@@ -1,13 +1,27 @@
 import { scaleLinear } from "d3-scale";
 import { AnimatePresence, motion } from "motion/react";
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { clock, money } from "../format";
 
 type Curves = Record<string, [number, number][]>;
 
-const W = 760;
-const H = 280;
 const PAD = { l: 64, t: 14, b: 28 };
+
+/** The element's size, kept current as it resizes. */
+function useSize<T extends HTMLElement>(): [React.RefObject<T>, { w: number; h: number }] {
+  const ref = useRef<T>(null);
+  const [size, setSize] = useState({ w: 760, h: 280 });
+  useEffect(() => {
+    if (!ref.current) return;
+    const ro = new ResizeObserver(([e]) => {
+      const { width, height } = e.contentRect;
+      setSize({ w: Math.max(320, Math.floor(width)), h: Math.max(180, Math.floor(height)) });
+    });
+    ro.observe(ref.current);
+    return () => ro.disconnect();
+  }, []);
+  return [ref, size];
+}
 
 /** Cumulative realized P&L per strategy: step lines on one zero-based axis, a crosshair tooltip,
  *  and a ripple at a line's end when it moves. */
@@ -19,6 +33,7 @@ export function PnlChart({ curves, slots, halted }: {
   const padR = direct ? 140 : 16;
   const [hover, setHover] = useState<{ x: number; t: number } | null>(null);
   const ref = useRef<SVGSVGElement>(null);
+  const [box, { w: W, h: H }] = useSize<HTMLDivElement>();
 
   const { x, y, ticks, t0, t1 } = useMemo(() => {
     const pts = Object.values(curves).flat();
@@ -29,9 +44,11 @@ export function PnlChart({ curves, slots, halted }: {
     const y = scaleLinear().domain([Math.min(0, ...vs), Math.max(0, ...vs)]).nice(4).range([H - PAD.b, PAD.t]);
     const x = scaleLinear().domain([t0, t1]).range([PAD.l, W - padR]);
     return { x, y, ticks: y.ticks(4), t0, t1 };
-  }, [curves, padR]);
+  }, [curves, padR, W, H]);
 
-  if (!names.length) return <p className="empty">No realized P&L yet: it appears as markets settle.</p>;
+  if (!names.length) {
+    return <div className="chart-wrap" ref={box}><p className="empty">No realized P&L yet: it appears as markets settle.</p></div>;
+  }
 
   const path = (pts: [number, number][]) =>
     `M${x(t0)},${y(0)}` + pts.map(([t, v]) => `H${x(t)}V${y(v)}`).join("") + `H${x(t1)}`;
@@ -67,7 +84,8 @@ export function PnlChart({ curves, slots, halted }: {
           ))}
         </div>
       )}
-      <svg ref={ref} className="chart" viewBox={`0 0 ${W} ${H}`} role="img"
+      <div className="plot" ref={box}>
+      <svg ref={ref} className="chart" width={W} height={H} viewBox={`0 0 ${W} ${H}`} role="img"
         aria-label="Cumulative realized P&L per strategy" onPointerMove={onMove} onPointerLeave={() => setHover(null)}>
         {ticks.map((v) => (
           <g key={v}>
@@ -101,7 +119,7 @@ export function PnlChart({ curves, slots, halted }: {
         {hover && <line className="cross" x1={hover.x} x2={hover.x} y1={PAD.t} y2={H - PAD.b} />}
       </svg>
       {hover && (
-        <div className="tooltip" style={{ left: `calc(${(hover.x / W) * 100}% + 12px)`, top: 40 }}>
+        <div className="tooltip" style={hover.x > W * 0.6 ? { right: W - hover.x + 12, top: 12 } : { left: hover.x + 12, top: 12 }}>
           <div className="when">{clock(hover.t)} UTC</div>
           {names.map((n) => {
             const v = valueAt(curves[n], hover.t);
@@ -114,6 +132,7 @@ export function PnlChart({ curves, slots, halted }: {
           })}
         </div>
       )}
+      </div>
     </div>
   );
 }

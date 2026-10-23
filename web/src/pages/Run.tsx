@@ -40,7 +40,7 @@ function Run({ snap, live }: { snap: Snapshot; live: boolean }) {
   );
   const open = snap.positions.length;
   return (
-    <div className="page">
+    <div className="page run-page">
       <div className="run-head">
         <div className="run-title">
           <h1>{snap.run.name.split("/")[1]}
@@ -60,56 +60,58 @@ function Run({ snap, live }: { snap: Snapshot; live: boolean }) {
         </div>
       </div>
 
-      <Markets session={snap.session} slots={slots} />
-
-      <div className="layout">
+      <div className="workspace">
         <Strategies snap={snap} slots={slots} />
-        <div className="stack">
-          <section className="panel">
-            <header><h2>Cumulative realized P&L</h2></header>
-            <div className="panel-body"><PnlChart curves={snap.curves} slots={slots} halted={halted} /></div>
-          </section>
-          <section className="panel">
-            <header><h2>Tape</h2><span className="hint">fills, settlements and alerts as they happen</span></header>
-            <div className="panel-body"><Tape items={snap.tape} slots={slots} /></div>
+        <Center snap={snap} slots={slots} halted={halted} />
+        <div className="right-col">
+          <Markets session={snap.session} slots={slots} />
+          <section className="panel fill">
+            <header><h2>Tape</h2><span className="hint">fills, settlements and alerts</span></header>
+            <div className="panel-body scroll"><Tape items={snap.tape} slots={slots} /></div>
           </section>
         </div>
       </div>
-
-      <Tabs snap={snap} />
     </div>
   );
 }
 
-const TABS = ["activity", "positions", "commands"] as const;
+const TABS = ["chart", "activity", "positions", "commands"] as const;
 type Tab = (typeof TABS)[number];
 
-function Tabs({ snap }: { snap: Snapshot }) {
+/** The center panel: the P&L chart, or one of the tables, in the same space. */
+function Center({ snap, slots, halted }: { snap: Snapshot; slots: Record<string, number>; halted: Set<string> }) {
   const [tab, setTab] = useState<Tab>(() => {
-    try { return (sessionStorage.getItem("tab:run") as Tab) || "activity"; } catch { return "activity"; }
+    try {
+      const t = sessionStorage.getItem("tab:run") as Tab;
+      return TABS.includes(t) ? t : "chart";
+    } catch { return "chart"; }
   });
   const pick = (t: Tab) => { setTab(t); try { sessionStorage.setItem("tab:run", t); } catch { /* private mode */ } };
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.target instanceof HTMLInputElement || e.metaKey || e.ctrlKey || e.altKey) return;
-      const i = ["1", "2", "3"].indexOf(e.key);
+      const i = ["1", "2", "3", "4"].indexOf(e.key);
       if (i >= 0) pick(TABS[i]);
     };
     addEventListener("keydown", onKey);
     return () => removeEventListener("keydown", onKey);
   }, []);
-  const counts: Record<Tab, number> = { activity: snap.activity.length, positions: snap.positions.length, commands: snap.commands.length };
+  const counts: Record<Tab, number | null> = {
+    chart: null, activity: snap.activity.length, positions: snap.positions.length, commands: snap.commands.length,
+  };
+  const label = (t: Tab) => (t === "chart" ? "P&L" : t[0].toUpperCase() + t.slice(1));
   return (
-    <section className="panel" style={{ marginTop: 16 }}>
+    <section className="panel center">
       <div className="tabbar" role="tablist">
         {TABS.map((t, i) => (
           <button key={t} role="tab" aria-selected={tab === t} onClick={() => pick(t)} title={`Press ${i + 1}`}>
-            {t[0].toUpperCase() + t.slice(1)}<span className="count">{counts[t]}</span>
+            {label(t)}{counts[t] != null && <span className="count">{counts[t]}</span>}
             {tab === t && <motion.span className="underline" layoutId="tab-underline" />}
           </button>
         ))}
       </div>
-      <div className="table-wrap" role="tabpanel">
+      <div className={tab === "chart" ? "chart-pane" : "table-wrap"} role="tabpanel">
+        {tab === "chart" && <PnlChart curves={snap.curves} slots={slots} halted={halted} />}
         {tab === "activity" && <Activity snap={snap} />}
         {tab === "positions" && <Positions snap={snap} />}
         {tab === "commands" && <Commands snap={snap} />}

@@ -32,7 +32,7 @@ export function Markets({ session, slots }: { session: SessionState | null; slot
   if (!session) return null;
   return (
     <section className="panel" aria-label="Open markets">
-      <header><h2>Open markets</h2><span className="hint">counting down to close; bars drain as time runs out</span></header>
+      <header><h2>Open markets</h2><span className="hint">soonest close first</span></header>
       <div className="panel-body">
         {markets.length === 0 ? <p className="empty">No markets open right now.</p> : (
           <div className="board">
@@ -55,9 +55,11 @@ function Market({ m, now, slots }: { m: OpenMarket; now: number | null; slots: R
     <motion.div className={`market ${closing ? "closing" : ""}`} layout
       initial={{ opacity: 0, x: 24 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -24, transition: { duration: 0.2 } }}
       transition={{ type: "spring", stiffness: 380, damping: 32 }}>
+      <div className="top">
+        <span className="clock">{duration(left)}</span>
+        <span className="quote"><span>bid {cents(m.bid)}</span><span>ask {cents(m.ask)}</span></span>
+      </div>
       <div className="name" title={marketName(m.id)}>{seriesName(m.series)} · closes {clock(m.close_ts, false)}</div>
-      <div className="clock">{duration(left)}</div>
-      <div className="quote"><span>bid {cents(m.bid)}</span><span>ask {cents(m.ask)}</span></div>
       {m.held.length > 0 && (
         <div className="held">
           {m.held.map((h) => (
