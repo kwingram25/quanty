@@ -12,6 +12,7 @@ import structlog
 from sqlalchemy import Engine, insert
 
 from quanty import db
+from quanty.core.broker import Broker
 from quanty.core.engine import Engine as Trader
 from quanty.core.events import Event
 from quanty.core.events import Status as StatusEvent
@@ -77,6 +78,10 @@ class RecordSession:
             self.trader.advance(ev.ts)  # due order arrivals, cancels and clock ticks first
             self.trader.process(ev)
 
+    def _brokers(self) -> list["Broker"]:
+        assert self.trader is not None
+        return list({id(i.broker): i.broker for i in self.trader.instances.values()}.values())
+
     async def _tick(self) -> None:
         """Advance the engine with the wall clock, so order latency and clock ticks fire on time."""
         assert self.trader is not None
@@ -89,6 +94,9 @@ class RecordSession:
         return {name: h.status(now) for name, h in self.health.items()}
 
     async def run(self, duration_s: float | None = None, on_window: OnWindow | None = None) -> None:
+        if self.trader is not None:
+            for broker in self._brokers():
+                await broker.start()
         tasks = [asyncio.create_task(f.run(self.sink), name=f"feed:{n}") for n, f in self.feeds.items()]
         if self.trader is not None:
             tasks.append(asyncio.create_task(self._tick(), name="engine clock"))
@@ -110,7 +118,7 @@ class RecordSession:
                 t.cancel()
             await asyncio.gather(*tasks, return_exceptions=True)
             if self.trader is not None:
-                for broker in {id(i.broker): i.broker for i in self.trader.instances.values()}.values():
+                for broker in self._brokers():
                     await broker.aclose()
                 self.trader.advance(now_ms())
                 self.trader.ledger.commit()

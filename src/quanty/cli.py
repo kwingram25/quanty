@@ -12,6 +12,7 @@ import structlog
 import typer
 
 from quanty import config, experiment, plugins, synthetic
+from quanty.brokers.live import LiveBroker
 from quanty.core import Engine, Event, Ledger, Summary
 from quanty.feeds.cli import feeds_app, load_feeds, print_windows, record, recorded, recorded_range, replay
 from quanty.feeds.health import Status, Window
@@ -172,6 +173,9 @@ def _session(
     structlog.configure(logger_factory=structlog.PrintLoggerFactory(sys.stderr))  # after any refusal
     ledger_path = ledger or data / mode / f"{path.stem}.sqlite"
     ledger_path.parent.mkdir(parents=True, exist_ok=True)
+    for inst in instances:
+        if isinstance(inst.broker, LiveBroker):
+            inst.broker.journal = ledger_path.with_name(f"{path.stem}.{inst.broker.name}.orders.jsonl")
     book = Ledger(ledger_path, durable=True)
     trader = Engine(instances, ledger=book, limits=exp.limits, clock_ms=exp.clock_ms, strict=False,
                     signals=experiment.signals(exp))  # fmt: skip

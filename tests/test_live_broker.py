@@ -2,6 +2,7 @@
 
 import asyncio
 from collections.abc import Callable
+from pathlib import Path
 
 import pytest
 from helpers import Hooks
@@ -229,3 +230,80 @@ def test_polymarket_rejection_inside_a_200_reply() -> None:
 
     run(h, body)
     assert h.order().status == "rejected" and "would match" in h.order().reason
+
+
+def crash_run(fake: FakeExchange, journal: Path, act: Action_) -> Harness:
+    """A run that places orders and stops without canceling them (as a crash would)."""
+    h = Harness(fake, act, journal=journal)
+
+    async def body(h: Harness) -> None:
+        await h.until(
+            lambda: all(o.status != "pending" for o in h.engine.orders.values()) or bool(h.broker.disabled)
+        )
+
+    run(h, body)
+    return h
+
+
+def restart(fake: FakeExchange, journal: Path) -> Harness:
+    h = Harness(fake, lambda ctx: None, journal=journal)
+
+    async def go() -> None:
+        await h.broker.start()
+        await h.broker.aclose()
+
+    asyncio.run(go())
+    return h
+
+
+def test_restart_cancels_only_our_leftover_orders(tmp_path: Path) -> None:
+    fake = FakeExchange()
+    fake.set_book("KXBTC-UP", bids=[], asks=[(0.99, 10)])
+    fake.set_book("btc-up", bids=[], asks=[(0.99, 10)])
+    bot_k = fake._place(
+        "kalshi", "KXBTC-UP", True, 0.40, 5, False, False, "bot-1"
+    )  # another program's orders
+    bot_p = fake._place("polymarket_us", "btc-up", True, 0.40, 5, False, False)
+    journal = tmp_path / "exp.live.orders.jsonl"
+
+    def act(ctx: Context) -> None:
+        ctx.buy("kalshi:KXBTC-UP", Side.YES, 0.50, 1, post_only=True)
+        ctx.buy("polymarket_us:btc-up", Side.YES, 0.50, 1, post_only=True)
+
+    first = crash_run(fake, journal, act)
+    assert [o.status for o in first.engine.orders.values()] == ["open", "open"]
+    ours = [o for o in fake.orders.values() if o not in (bot_k, bot_p)]
+    assert len(ours) == 2 and not any(o.canceled for o in ours)
+
+    second = restart(fake, journal)
+    assert all(o.canceled for o in ours)
+    assert bot_k is not None and bot_p is not None and not bot_k.canceled and not bot_p.canceled
+    assert len(second.logs("leftover order canceled")) == 2
+    assert journal.read_text() == ""  # settled leftovers are dropped
+    assert all(o.client_id.startswith("quanty-") for o in ours if o.venue == "kalshi")
+
+
+def test_restart_finds_a_kalshi_order_whose_reply_was_lost(tmp_path: Path) -> None:
+    fake = FakeExchange()
+    fake.set_book("KXBTC-UP", bids=[], asks=[(0.99, 10)])
+    fake.fail_next("timeout")
+    journal = tmp_path / "j.jsonl"
+    first = crash_run(
+        fake, journal, lambda ctx: ctx.buy("kalshi:KXBTC-UP", Side.YES, 0.50, 1, post_only=True)
+    )
+    assert "outcome unknown" in first.broker.disabled
+    (placed,) = fake.orders.values()
+    assert not placed.canceled
+
+    second = restart(fake, journal)
+    assert placed.canceled and len(second.logs("leftover order canceled")) == 1
+
+
+def test_clean_run_leaves_nothing_to_clean(tmp_path: Path) -> None:
+    fake = FakeExchange()
+    fake.set_book("btc-up", bids=[], asks=[(0.45, 20)])
+    journal = tmp_path / "j.jsonl"
+    crash_run(fake, journal, lambda ctx: ctx.buy("polymarket_us:btc-up", Side.YES, 0.45, 5, tif=Tif.IOC))
+    n = len(fake.requests)
+    second = restart(fake, journal)
+    assert len(fake.requests) == n and second.logs("leftover order canceled") == []

@@ -120,7 +120,9 @@ max_notional = 100   # largest single order, $ (required)
 `quanty paper` and `quanty backtest` refuse live brokers; `quanty live experiment.toml --feeds
 feeds.toml --arm` runs them. A live broker disables itself after `error_limit` consecutive
 rejections, and at once if an order's reply never arrives (the order stays pending: check the
-venue before restarting). `quanty.venues.fake.FakeExchange` speaks both venues' order APIs with
+venue before restarting). Each live broker journals its orders next to the ledger
+(`<experiment>.<broker>.orders.jsonl`); on start it cancels any it left resting in a previous run,
+and nothing else, so other programs on the same account are safe. `quanty.venues.fake.FakeExchange` speaks both venues' order APIs with
 injectable faults, for testing brokers without real orders.
 
 ## Pieces

@@ -34,6 +34,7 @@ class FakeOrder:
     filled: float = 0.0
     fees: float = 0.0
     canceled: bool = False
+    client_id: str = ""
     executions: list[tuple[float, float]] = field(default_factory=list)  # (qty, yes price)
 
     @property
@@ -112,10 +113,12 @@ class FakeExchange:
         qty: float,
         ioc: bool,
         post_only: bool,
+        client_id: str = "",
     ) -> FakeOrder | None:
         if post_only and self._crosses(market, buys_yes, yes_price):
             return None
-        o = FakeOrder(f"{venue[:2]}-{next(self._ids)}", venue, market, buys_yes, yes_price, qty, ioc)
+        o = FakeOrder(f"{venue[:2]}-{next(self._ids)}", venue, market, buys_yes, yes_price, qty, ioc,
+                      client_id=client_id)  # fmt: skip
         self.orders[o.id] = o
         self._match(o)
         return o
@@ -216,6 +219,7 @@ class FakeExchange:
                 float(body["count"]),
                 ioc,
                 bool(body.get("post_only")),
+                body.get("client_order_id", ""),
             )
             if o is None:
                 return httpx.Response(400, json={"error": {"code": "post_only_cross"}})
@@ -236,6 +240,13 @@ class FakeExchange:
                 return httpx.Response(404, json={"error": "not_found"})
             o.canceled = True
             return httpx.Response(200, json={"order": {"order_id": o.id, "status": "canceled"}})
+        if method == "GET" and path == "/portfolio/orders":
+            resting = [o for o in self.orders.values() if o.venue == "kalshi" and o.left > 1e-9]
+            rows = [
+                {"order_id": o.id, "ticker": o.market, "client_order_id": o.client_id, "status": "resting"}
+                for o in resting
+            ]
+            return httpx.Response(200, json={"orders": rows, "cursor": ""})
         if method == "GET" and path.startswith("/portfolio/orders/"):
             o = self.orders.get(path.rsplit("/", 1)[1])
             if o is None:

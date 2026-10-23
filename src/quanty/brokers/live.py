@@ -11,11 +11,17 @@ cancel). Safety:
 - A request whose reply never arrives (timeout, dropped connection) leaves the order's outcome
   unknown: it stays pending and the broker disables itself at once, since the position it would
   report can no longer be trusted. Check the venue before restarting.
+- With a journal (quanty live keeps one per broker), every order is written down before it is
+  sent and when it is done. On start, orders a previous run left resting are canceled: by venue
+  order id, or on Kalshi by client order id when the reply never came. Only journaled orders are
+  ever touched, so other programs trading the same account are left alone.
 """
 
 import asyncio
+import json
 import time
 from collections.abc import Coroutine, Mapping
+from pathlib import Path
 from typing import Any
 
 import httpx
@@ -30,6 +36,7 @@ from quanty.venues.orders import OrderAPI, VenueError, VenueOrder, default_apis
 log = structlog.get_logger("quanty.live")
 
 EPS = 1e-9
+FRESH_404_S = 5  # Polymarket US can answer 404 to a read just after accepting the order
 NEVER_DONE_AFTER_CLOSE_S = 30  # stop reading an order the venue still hasn't finished this long after close
 
 
@@ -51,6 +58,7 @@ class LiveBroker(Broker):
         final_reads: int = 6,
         final_read_every_s: float = 0.25,
         transport: httpx.AsyncBaseTransport | None = None,
+        journal: Path | None = None,
     ) -> None:
         super().__init__(name)
         self.apis = dict(apis) if apis is not None else default_apis()
@@ -59,6 +67,8 @@ class LiveBroker(Broker):
         self.error_limit = error_limit
         self.poll_s, self.final_reads, self.final_read_every_s = poll_s, final_reads, final_read_every_s
         self.transport = transport
+        self.journal = journal
+        self._placed_at: dict[str, float] = {}
         self.disabled = ""  # why, once disabled
         self.errors = 0  # consecutive rejections
         self._client: httpx.AsyncClient | None = None
@@ -93,6 +103,64 @@ class LiveBroker(Broker):
             self._cancel_wanted.add(order.id)  # placement still in flight: cancel when it lands
             return
         self._spawn(self._cancel(order))
+
+    async def start(self) -> None:
+        """Cancel what a previous run left resting (see the module docstring)."""
+        if self.journal is None or not self.journal.exists():
+            return
+        left: dict[str, dict[str, Any]] = {}
+        for line in self.journal.read_text().splitlines():
+            rec = json.loads(line)
+            left.setdefault(rec["order"], {}).update(rec)
+        left = {k: r for k, r in left.items() if not r.get("done")}
+        by_client: dict[str, dict[str, tuple[str, str]]] = {}
+        for oid, rec in left.items():
+            api = self.apis.get(rec["venue"])
+            if api is None:
+                continue
+            venue_id = rec.get("venue_id")
+            if venue_id is None and rec.get("client_id"):  # sent, reply never came
+                if rec["venue"] not in by_client:
+                    by_client[rec["venue"]] = await api.resting_by_client_id(self.client)
+                venue_id = by_client[rec["venue"]].get(rec["client_id"], (None, ""))[0]
+            if venue_id is None:
+                self._startup_log(oid, rec, "leftover order of unknown outcome: check the venue", "error")
+                continue
+            vo = await self._settle_leftover(api, venue_id, rec["market"])
+            level = "warning" if vo is not None and vo.filled > EPS else "info"
+            filled = None if vo is None else vo.filled
+            self._startup_log(oid, rec, "leftover order canceled", level, venue_id=venue_id, filled=filled,
+                              done=vo is not None and vo.done)  # fmt: skip
+        # keep only what is still unsettled
+        still = [json.dumps(r) for oid, r in left.items() if not r.get("settled")]
+        self.journal.write_text("".join(f"{line}\n" for line in still))
+
+    async def _settle_leftover(self, api: OrderAPI, venue_id: str, market_id: str) -> VenueOrder | None:
+        try:
+            vo = await api.get(self.client, venue_id, market_id)
+            if not vo.done:
+                await api.cancel(self.client, venue_id, market_id)
+                for _ in range(self.final_reads):
+                    vo = await api.get(self.client, venue_id, market_id)
+                    if vo.done:
+                        break
+                    await asyncio.sleep(self.final_read_every_s)
+            return vo
+        except (VenueError, httpx.HTTPError) as exc:
+            log.warning("leftover order check failed", venue_id=venue_id, error=str(exc))
+            return None
+
+    def _startup_log(self, oid: str, rec: dict[str, Any], msg: str, level: str, **fields: Any) -> None:
+        if fields.get("done"):
+            rec["settled"] = True
+        info = {"order_id": oid, "venue": rec["venue"], "market": rec["market"], **fields}
+        self.engine.ledger.log(self.engine.now, f"broker:{self.name}", msg, info, level=level)
+        getattr(log, level)(msg, broker=self.name, **info)
+
+    def _write_journal(self, order: Order, **fields: Any) -> None:
+        if self.journal is not None:
+            with self.journal.open("a") as f:
+                f.write(json.dumps({"order": order.id, **fields}) + "\n")
 
     async def aclose(self) -> None:
         if self._poller is not None:
@@ -154,6 +222,9 @@ class LiveBroker(Broker):
     async def _place(self, order: Order) -> None:
         api, market = self._api(order)
         req = api.place_request(order, market)
+        self._write_journal(
+            order, venue=api.venue, market=order.market_id, client_id=req.body.get("client_order_id")
+        )
         t0 = time.perf_counter()
         try:
             vo = await api.place(self.client, req)
@@ -162,6 +233,7 @@ class LiveBroker(Broker):
             self._log(order, "live order rejected", level="warning", status=exc.status, detail=exc.detail,
                       request=req.body)  # fmt: skip
             self._emit_update(order, OrderStatus.REJECTED, 0.0, exc.detail)
+            self._write_journal(order, done=True)
             if self.errors >= self.error_limit:
                 self._disable(f"{self.errors} consecutive rejections")
             return
@@ -172,6 +244,8 @@ class LiveBroker(Broker):
             return
         self.errors = 0
         self._venue_id[order.id] = vo.id
+        self._placed_at[order.id] = time.monotonic()
+        self._write_journal(order, venue_id=vo.id)
         self._log(order, "live order", venue_id=vo.id, rtt_ms=round((time.perf_counter() - t0) * 1000, 1),
                   filled=vo.filled, request=req.body)  # fmt: skip
         self._apply(order, vo, taker=True)
@@ -183,7 +257,7 @@ class LiveBroker(Broker):
     async def _cancel(self, order: Order) -> None:
         api, market = self._api(order)
         try:
-            await api.cancel(self.client, self._venue_id[order.id], market)
+            await api.cancel(self.client, self._venue_id[order.id], market.id)
         except (VenueError, httpx.HTTPError) as exc:  # often: it filled first; the reads below tell
             self._log(order, "live cancel failed", level="warning", error=str(exc))
         for _ in range(self.final_reads):
@@ -195,9 +269,11 @@ class LiveBroker(Broker):
         """Read the order and apply any news. True once it is done."""
         api, market = self._api(order)
         try:
-            vo = await api.get(self.client, self._venue_id[order.id], market)
-        except (VenueError, httpx.HTTPError) as exc:
-            log.warning("live order read failed", order=order.id, error=str(exc))  # no fill news: try again
+            vo = await api.get(self.client, self._venue_id[order.id], market.id)
+        except (VenueError, httpx.HTTPError) as exc:  # no fill news: try again
+            fresh = time.monotonic() - self._placed_at.get(order.id, 0.0) < FRESH_404_S
+            if not (fresh and isinstance(exc, VenueError) and exc.status == 404):  # Polymarket lags a moment
+                log.warning("live order read failed", order=order.id, error=str(exc))
             return False
         self._apply(order, vo, taker=False)
         return vo.done
@@ -247,6 +323,7 @@ class LiveBroker(Broker):
 
     def _finish(self, order: Order, status: OrderStatus, reason: str = "") -> None:
         self._open.pop(order.id, None)
+        self._write_journal(order, done=True)
         self._emit_update(order, status, self._known.get(order.id, (0.0, 0.0, 0.0))[0], reason)
 
     def _ts(self) -> int:

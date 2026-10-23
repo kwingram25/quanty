@@ -20,6 +20,7 @@ from quanty.core.types import Action, Market, Side, Tif
 from quanty.venues.auth import KalshiSigner, PolymarketSigner
 
 EXPIRE_BEFORE_CLOSE_S = 2  # resting orders end this long before their market closes
+CLIENT_PREFIX = "quanty-"  # on client order ids, where the venue takes one (Kalshi)
 
 
 class Signer(Protocol):
@@ -63,8 +64,8 @@ class VenueError(Exception):
         self.status, self.detail = status, detail
 
 
-def native_id(market: Market) -> str:
-    return market.id.split(":", 1)[1]
+def native_id(market: Market | str) -> str:
+    return (market if isinstance(market, str) else market.id).split(":", 1)[1]
 
 
 def _json(resp: httpx.Response) -> dict[str, Any]:
@@ -100,10 +101,15 @@ class OrderAPI(ABC):
         """Send the order. VenueError when refused; an httpx error means the outcome is unknown."""
 
     @abstractmethod
-    async def get(self, client: httpx.AsyncClient, venue_id: str, market: Market) -> VenueOrder: ...
+    async def get(self, client: httpx.AsyncClient, venue_id: str, market_id: str) -> VenueOrder: ...
 
     @abstractmethod
-    async def cancel(self, client: httpx.AsyncClient, venue_id: str, market: Market) -> None: ...
+    async def cancel(self, client: httpx.AsyncClient, venue_id: str, market_id: str) -> None: ...
+
+    async def resting_by_client_id(self, client: httpx.AsyncClient) -> dict[str, tuple[str, str]]:
+        """client order id -> (venue order id, market id) of this account's resting orders, where the
+        venue keeps client ids (Kalshi); {} where it doesn't (Polymarket US)."""
+        return {}
 
     async def _send(self, client: httpx.AsyncClient, method: str, path: str, **kw: Any) -> dict[str, Any]:
         headers = self.signer.headers(method, path)
@@ -204,7 +210,7 @@ class PolymarketOrders(OrderAPI):
         done = ioc or state in self.DONE_STATES or filled >= float(req.body["quantity"]) - 1e-9
         return VenueOrder(str(res["id"]), filled, fees, done, state, price)
 
-    async def get(self, client: httpx.AsyncClient, venue_id: str, market: Market) -> VenueOrder:
+    async def get(self, client: httpx.AsyncClient, venue_id: str, market_id: str) -> VenueOrder:
         od = (await self._send(client, "GET", f"/v1/order/{venue_id}")).get("order") or {}
         if not od:
             raise VenueError(200, "no order in reply")  # seen live: no fill information, try again
@@ -215,9 +221,9 @@ class PolymarketOrders(OrderAPI):
         done = state in self.DONE_STATES or nothing_left
         return VenueOrder(venue_id, _num(od.get("cumQuantity")), 0.0, done, state, price)
 
-    async def cancel(self, client: httpx.AsyncClient, venue_id: str, market: Market) -> None:
+    async def cancel(self, client: httpx.AsyncClient, venue_id: str, market_id: str) -> None:
         await self._send(
-            client, "POST", f"/v1/order/{venue_id}/cancel", json={"marketSlug": native_id(market)}
+            client, "POST", f"/v1/order/{venue_id}/cancel", json={"marketSlug": native_id(market_id)}
         )
 
 
@@ -246,7 +252,7 @@ class KalshiOrders(OrderAPI):
             "side": "bid" if buys_yes else "ask",
             "price": f"{yes_price:.4f}",
             "count": f"{order.qty:.2f}",
-            "client_order_id": str(uuid.uuid4()),
+            "client_order_id": f"{CLIENT_PREFIX}{uuid.uuid4()}",
             "cancel_order_on_pause": True,
             "exchange_index": -1,
         }
@@ -288,7 +294,7 @@ class KalshiOrders(OrderAPI):
         done = ioc or (left is not None and _num(left) <= 1e-9) or filled >= float(req.body["count"]) - 1e-9
         return VenueOrder(str(res["order_id"]), filled, fees, done, "", price)
 
-    async def get(self, client: httpx.AsyncClient, venue_id: str, market: Market) -> VenueOrder:
+    async def get(self, client: httpx.AsyncClient, venue_id: str, market_id: str) -> VenueOrder:
         od = (await self._send(client, "GET", f"{self.READ_PATH}/{venue_id}")).get("order") or {}
         if not od:
             raise VenueError(200, "no order in reply")
@@ -296,10 +302,23 @@ class KalshiOrders(OrderAPI):
         status = str(od.get("status", ""))
         return VenueOrder(venue_id, _num(od.get("fill_count_fp")), fees, status in self.DONE_STATES, status)
 
-    async def cancel(self, client: httpx.AsyncClient, venue_id: str, market: Market) -> None:
+    async def cancel(self, client: httpx.AsyncClient, venue_id: str, market_id: str) -> None:
         await self._send(
-            client, "DELETE", f"{self.PATH}/{venue_id}", params={"market_ticker": native_id(market)}
+            client, "DELETE", f"{self.PATH}/{venue_id}", params={"market_ticker": native_id(market_id)}
         )
+
+    async def resting_by_client_id(self, client: httpx.AsyncClient) -> dict[str, tuple[str, str]]:
+        out: dict[str, tuple[str, str]] = {}
+        cursor = ""
+        while True:
+            params = {"status": "resting", "limit": 200, **({"cursor": cursor} if cursor else {})}
+            res = await self._send(client, "GET", self.READ_PATH, params=params)
+            for o in res.get("orders") or []:
+                if o.get("client_order_id"):
+                    out[o["client_order_id"]] = (str(o["order_id"]), f"{self.venue}:{o['ticker']}")
+            cursor = res.get("cursor") or ""
+            if not cursor:
+                return out
 
 
 def default_apis() -> dict[str, OrderAPI]:

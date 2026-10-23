@@ -41,6 +41,9 @@ class Broker(ABC):
     @abstractmethod
     def cancel(self, order: Order) -> None: ...
 
+    async def start(self) -> None:  # noqa: B027 - optional hook
+        """Called once by a live session before any market data (e.g. to clean up a previous run)."""
+
     async def aclose(self) -> None:  # noqa: B027 - optional hook
         """Finish in-flight venue requests and close connections (sessions call this on shutdown)."""
 
