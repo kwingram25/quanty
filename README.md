@@ -81,6 +81,7 @@ paper trading, shadow trading and live trading; [Deploying](docs/deploying.md) c
 | `quanty record`, `replay`, `feeds` | record venues and feeds; parse recordings back; feed kinds and health |
 | `quanty paper`, `live` | run an experiment in real time (`live` needs `--arm`) |
 | `quanty ui` | the dashboard |
+| `quanty doctor` | check a project before trading: config, keys, clock, venues, leftovers (read-only) |
 | `quanty list`, `params` | strategies quanty can find, and their parameters |
 
 ## Layout

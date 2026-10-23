@@ -244,6 +244,39 @@ def live(
 
 
 @app.command()
+def doctor(
+    path: Annotated[Path, typer.Argument(help="Project folder")] = Path("."),
+    experiment_: Annotated[
+        list[Path] | None,
+        typer.Option("--experiment", help="Experiment(s) to check (default: experiments/*.toml)"),
+    ] = None,
+    feeds: Annotated[Path | None, typer.Option(help="Feed config (default: feeds.toml)")] = None,
+    data: Annotated[Path | None, typer.Option(help="Data folder (default: data)")] = None,
+    offline: Annotated[bool, typer.Option(help="Skip the network checks")] = False,
+) -> None:
+    """Check a project before trading: config, keys, clock, each venue, leftovers, disk. Read-only."""
+    from quanty import doctor as dr
+
+    exps = experiment_ or sorted((path / "experiments").glob("*.toml"))
+    checks = dr.run(path.resolve(), exps, feeds or path / "feeds.toml", data or path / "data", offline)
+    marks = {"ok": ("✓", "green"), "warn": ("!", "yellow"), "fail": ("✗", "red"), "skip": ("–", None)}
+    section = None
+    for c in checks:
+        if c.section != section:
+            section = c.section
+            typer.echo(typer.style(f"\n{section}", bold=True))
+        mark, color = marks[c.status]
+        typer.echo(f"  {typer.style(mark, fg=color)} {c.name}: {c.detail}")
+        if c.fix:
+            typer.echo(typer.style(f"      fix: {c.fix}", dim=True))
+    fails = sum(c.status == "fail" for c in checks)
+    warns = sum(c.status == "warn" for c in checks)
+    typer.echo(f"\n{fails} problem(s), {warns} warning(s)" if fails or warns else "\nall good")
+    if fails:
+        raise typer.Exit(1)
+
+
+@app.command()
 def password(
     write: Annotated[bool, typer.Option("--write", help="Save it in ./.env instead of printing it")] = False,
 ) -> None:

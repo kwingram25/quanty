@@ -133,5 +133,6 @@ max_notional = 10     # required: largest single order, $
 ```
 
 ```sh
+uv run quanty doctor     # config, keys, clock, each venue: fix anything marked ✗ first
 uv run quanty live experiment.toml --feeds feeds.toml --data data --arm
 ```

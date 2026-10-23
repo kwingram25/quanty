@@ -80,5 +80,13 @@ and the same with `ExecStart=/usr/local/bin/quanty ui --data data` for `quanty-u
 
 ## Before going live
 
+Run `uv run quanty doctor` on the server (or `docker compose run --rm --entrypoint quanty trader doctor`). It
+checks, read-only: the experiments, strategies and `feeds.toml` load; keys are present, valid, and
+`.env` is private; the server's clock agrees with each venue's (signed requests carry a timestamp,
+so a drifting clock gets orders refused); each venue is reachable, accepts the keys, and has
+rate-limit headroom (a 429 now means something else is using this account's budget); no orders
+are left unresolved by a previous live run; and there's disk space for recordings. It exits 1 if
+anything fails, so a deploy script can run it first. `--offline` skips the network checks.
+
 Read [Live trading](live-trading.md): paper first, then shadow, then one small order watched closely,
 with `max_qty` and `max_notional` set to amounts you would not mind getting wrong.

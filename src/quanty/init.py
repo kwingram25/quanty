@@ -218,7 +218,8 @@ A quanty project: your strategy, its configuration, and what's needed to deploy 
 
 1. **Write the strategy** in `strategies/{a.strategy}.py` (the TODOs). `uv run quanty list` should show it
    (the first `uv run` sets up everything it needs in `.venv/`; nothing to install beforehand).
-2. **Check your keys** in `.env`, then record some data and look at it:
+2. **Check your keys** in `.env` with `uv run quanty doctor` (config, keys, clock, each venue; read-only),
+   then record some data and look at it:
    `uv run quanty record --config feeds.toml --data data` (Ctrl-C to stop),
    then `uv run quanty ui --data data`.
 3. **Backtest** on what you recorded: `uv run quanty backtest experiments/main.toml --data data`.
