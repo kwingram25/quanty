@@ -30,8 +30,16 @@ uv run quanty demo --ui        # backtest three variants on synthetic markets, o
 uv run quanty demo --live      # or watch them paper trade in real time, with the controls
 ```
 
-No keys, no setup. Then [Getting started](docs/getting-started.md) goes from experiments to
-recording real data, paper trading, shadow trading and live trading.
+No keys, no setup. To start your own project, with a strategy skeleton, configs, API keys and the
+files to deploy it:
+
+```sh
+uv run quanty init my-quanty          # a few questions; --yes for the defaults
+cd my-quanty && docker compose up -d --build   # on a server: trader + dashboard, restarted on failure
+```
+
+[Getting started](docs/getting-started.md) goes step by step from experiments to recording real data,
+paper trading, shadow trading and live trading; [Deploying](docs/deploying.md) covers servers.
 
 ## What's in it
 

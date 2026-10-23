@@ -47,6 +47,50 @@ def _fail(exc: Exception) -> typer.Exit:
     return typer.Exit(2)
 
 
+@app.command()
+def init(
+    path: Annotated[Path, typer.Argument(help="Project folder to create")] = Path("my-quanty"),
+    strategy: Annotated[str | None, typer.Option(help="Strategy name (a Python module name)")] = None,
+    venue: Annotated[list[str] | None, typer.Option(help="kalshi and/or polymarket_us (repeat)")] = None,
+    yes: Annotated[bool, typer.Option("--yes", "-y", help="Accept the defaults; ask nothing")] = False,
+    force: Annotated[bool, typer.Option(help="Overwrite files that already exist")] = False,
+) -> None:
+    """Create a project: a strategy skeleton, configs, API keys, and Docker files to deploy it."""
+    from quanty import init as project
+
+    a = project.Answers()
+    try:
+        a.strategy = project.check_name(
+            strategy or (a.strategy if yes else typer.prompt("Strategy name", a.strategy))
+        )
+        if venue is not None:
+            a.venues = venue
+        elif not yes:
+            raw = typer.prompt("Venues (kalshi, polymarket_us, or none)", "kalshi")
+            a.venues = [] if raw.strip() == "none" else [v.strip() for v in raw.split(",") if v.strip()]
+        unknown = set(a.venues) - set(project.DEFAULT_SERIES)
+        if unknown:
+            raise ValueError(f"unknown venue {', '.join(sorted(unknown))} (kalshi, polymarket_us)")
+        if not yes:
+            for v in a.venues:
+                raw = typer.prompt(f"{v} series", ", ".join(project.DEFAULT_SERIES[v]))
+                a.series[v] = [x.strip() for x in raw.split(",") if x.strip()]
+            typer.echo("API keys (leave blank to fill in .env later):")
+            if "kalshi" in a.venues:
+                a.kalshi_key_id = typer.prompt("  Kalshi key id", "", show_default=False)
+                a.kalshi_key_path = typer.prompt("  Kalshi private key file", "", show_default=False)
+            if "polymarket_us" in a.venues:
+                a.polymarket_key_id = typer.prompt("  Polymarket US key id", "", show_default=False)
+                a.polymarket_secret = typer.prompt(
+                    "  Polymarket US secret", "", hide_input=True, show_default=False
+                )
+        written = project.create(path, a, force=force)
+    except ValueError as exc:
+        raise _fail(exc) from None
+    typer.echo(f"created {path}/: " + ", ".join(written))
+    typer.echo(f"next: cd {path} && quanty list   (then see README.md)")
+
+
 @app.command("list")
 def list_() -> None:
     """List the strategies quanty can find."""
