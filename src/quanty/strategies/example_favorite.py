@@ -20,7 +20,7 @@ class FavoriteParams(Params):
 
 class FavoriteLate(Strategy[FavoriteParams]):
     params_type = FavoriteParams
-    series = ("synthetic:updown_5m",)
+    series = ("synthetic:updown_5m", "synthetic:updown_15m", "synthetic:updown_1h")
     description = "Buy the favorite under a price cap late in the window (example)"
 
     def on_book(self, ctx: Context, book: Book) -> None:

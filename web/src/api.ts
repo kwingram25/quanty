@@ -43,7 +43,7 @@ export interface SessionState {
   pid: number;
   heartbeat_ts: number;
   can_arm: boolean;
-  instances: Record<string, { halted: boolean; broker: string }>;
+  instances: Record<string, { halted: boolean; broker: string; blocked?: number }>;
   brokers: Record<string, Broker>;
   now: number | null;
   markets: OpenMarket[];

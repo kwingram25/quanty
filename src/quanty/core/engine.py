@@ -9,6 +9,7 @@ Events scheduled for the same ts as the next input are processed before it.
 
 import heapq
 import itertools
+from collections import defaultdict
 from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
@@ -150,6 +151,7 @@ class Engine:
         self.portfolio = Portfolio()
         self.risk = Risk(self.portfolio, self.live, self.markets)
         self.halted: set[str] = set()
+        self.blocked: dict[str, int] = defaultdict(int)  # buys refused while halted, per instance
         self.signals = {s.name: s for s in signals}
         if len(self.signals) != len(signals):
             raise ValueError("signal names must be unique")
@@ -258,8 +260,12 @@ class Engine:
             side=side, action=action, price=round(price, 9), qty=qty, tif=tif, post_only=post_only,
             tag=tag, created_ts=self.now,
         )  # fmt: skip
-        self.orders[order.id] = order
         reason = self._invalid(order) or self._risk(inst, order)
+        if reason == "halted":  # expected while halted: counted, not recorded order by order
+            order.status, order.reason = OrderStatus.REJECTED, reason
+            self.blocked[inst.id] += 1
+            return order
+        self.orders[order.id] = order
         if reason:
             order.status, order.reason = OrderStatus.REJECTED, reason
             self.ledger.order(order)
@@ -290,7 +296,7 @@ class Engine:
     def resume(self, instance_id: str | None = None) -> None:
         for iid in [instance_id] if instance_id else list(self.instances):
             self.halted.discard(iid)
-            self.ledger.log(self.now, iid, "resumed")
+            self.ledger.log(self.now, iid, "resumed", {"buys_blocked": self.blocked.pop(iid, 0)})
 
     def _invalid(self, o: Order) -> str | None:
         m = self.open_markets.get(o.market_id)

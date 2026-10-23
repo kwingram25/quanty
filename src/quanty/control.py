@@ -157,7 +157,8 @@ class Controller:
             if isinstance(b, LiveBroker):
                 info.update(armed=b.armed, disabled=b.disabled)
             brokers[name] = info
-        instances = {iid: {"halted": iid in self.trader.halted, "broker": inst.broker.name}
+        instances = {iid: {"halted": iid in self.trader.halted, "broker": inst.broker.name,
+                           "blocked": self.trader.blocked.get(iid, 0)}
                      for iid, inst in self.trader.instances.items()}  # fmt: skip
         return {"instances": instances, "brokers": brokers, "now": t.now, "markets": self.markets()}
 

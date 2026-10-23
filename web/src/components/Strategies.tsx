@@ -30,6 +30,7 @@ export function Strategies({ snap, slots }: { snap: Snapshot; slots: Record<stri
         {snap.strategies.map((st) => {
           const halted = pending[st.instance] ?? s?.instances[st.instance]?.halted ?? false;
           return <Row key={st.instance} st={st} slot={slots[st.instance] ?? 1} session={s} halted={halted}
+            blocked={s?.instances[st.instance]?.blocked ?? 0}
             onToggle={() => act(halted ? "resume" : "halt", st.instance, `${halted ? "Resumed" : "Halted"} ${st.instance}`)} />;
         })}
         {s && <Brokers s={s} act={act} />}
@@ -48,8 +49,8 @@ export function Strategies({ snap, slots }: { snap: Snapshot; slots: Record<stri
   );
 }
 
-function Row({ st, slot, session, halted, onToggle }: {
-  st: Strategy; slot: number; session: SessionState | null; halted: boolean; onToggle: () => void;
+function Row({ st, slot, session, halted, blocked, onToggle }: {
+  st: Strategy; slot: number; session: SessionState | null; halted: boolean; blocked: number; onToggle: () => void;
 }) {
   const prev = useRef(st.pnl);
   const [delta, setDelta] = useState<{ v: number; k: number } | null>(null);
@@ -84,7 +85,8 @@ function Row({ st, slot, session, halted, onToggle }: {
       </div>
       <div className="sub">
         <span className="grow" title={`${st.wins} won, ${st.losses} lost${st.rejected ? `, ${st.rejected} orders rejected` : ""}`}>
-          {st.fills} fills · {st.wins}–{st.losses}{st.rejected ? ` · ${st.rejected} rej` : ""}</span>
+          {st.fills} fills · {st.wins}–{st.losses}{st.rejected ? ` · ${st.rejected} rej` : ""}
+          {halted && blocked > 0 && <span className="blocked" title="buys refused while halted"> · {blocked} blocked</span>}</span>
         {session && session.instances[st.instance] && <>
           <span className={`pill ${halted ? "halted" : "trading"}`}><span className="dot" />{halted ? "halted" : "trading"}</span>
           <button className="btn" onClick={onToggle}>{halted ? "Resume" : "Halt"}</button>

@@ -95,8 +95,10 @@ def demo(
     try:
         instances = [{"id": strategy, "strategy": strategy, "params": _params(param or [])}]
         if ui and not param and strategy == "example_favorite":
-            instances = [{"id": f"fav_{round(c * 100)}", "strategy": strategy, "params": {"min_conf": c}}
-                         for c in (0.90, 0.95, 0.97)]  # fmt: skip
+            instances = [
+                {"id": f"fav_{round(c * 100)}", "strategy": strategy, "params": {"min_conf": c}}
+                for c in (0.90, 0.95, 0.97)
+            ]
         raw = {"brokers": {"sim": {"kind": "sim", "latency_ms": latency_ms}}, "instances": instances}
         if ui and ledger is not None:
             raise ValueError("--ui keeps its ledger in a temporary demo folder; leave out --ledger")
@@ -242,13 +244,20 @@ def _session(
         if isinstance(inst.broker, LiveBroker):
             inst.broker.journal = ledger_path.with_name(f"{path.stem}.{inst.broker.name}.orders.jsonl")
     book = Ledger(ledger_path, durable=True)
-    trader = Engine(instances, ledger=book, limits=exp.limits, clock_ms=exp.clock_ms, strict=False,
-                    signals=experiment.signals(exp))  # fmt: skip
+    trader = Engine(
+        instances,
+        ledger=book,
+        limits=exp.limits,
+        clock_ms=exp.clock_ms,
+        strict=False,
+        signals=experiment.signals(exp),
+    )
     run_name = f"{mode}/{ledger_path.stem}"
     store = ControlStore(data / "control.sqlite")
     controller = Controller(store, run_name, trader, can_arm=armed)
-    session = RecordSession(feed_objs, data, data / "quanty.sqlite", window_s=window, trader=trader,
-                            controller=controller)  # fmt: skip
+    session = RecordSession(
+        feed_objs, data, data / "quanty.sqlite", window_s=window, trader=trader, controller=controller
+    )
     ids = [i.id for i in instances]
 
     def report(windows: list[Window], status: dict[str, Status]) -> None:
@@ -309,7 +318,7 @@ def _demo_live(
     async def play() -> None:
         # the past (before now) at once, so the dashboard opens on a run with history; then live
         live_from, wall0 = _now_window_ms(), time.monotonic()
-        for ev in synthetic.events(spec):
+        for ev in synthetic.events_multi(spec):
             if ev.ts > live_from:
                 delay = (ev.ts - live_from) / 1000 / speed - (time.monotonic() - wall0)
                 if delay > 0:
@@ -328,7 +337,9 @@ def _demo_live(
             await asyncio.gather(*tasks, return_exceptions=True)
 
     url = f"http://127.0.0.1:{port}/runs/paper/{run}"
-    typer.echo(f"live demo: synthetic {spec.series} at {speed:g}x real time, paper trading")
+    typer.echo(
+        f"live demo: synthetic 5 min, 15 min and 1 h up/down markets at {speed:g}x real time, paper trading"
+    )
     typer.echo(f"dashboard: {url} (Ctrl-C to stop)")
     if browser:
         threading.Timer(1.5, webbrowser.open, args=[url]).start()
@@ -342,9 +353,14 @@ def _demo_live(
 
 
 def _backtest(
-    exp: experiment.Experiment, hours: float, seed: int, ledger_path: Path | None,
-    data: Path | None = None, start: str | None = None, end: str | None = None,
-) -> None:  # fmt: skip
+    exp: experiment.Experiment,
+    hours: float,
+    seed: int,
+    ledger_path: Path | None,
+    data: Path | None = None,
+    start: str | None = None,
+    end: str | None = None,
+) -> None:
     if ledger_path and ledger_path.exists():
         raise ValueError(f"{ledger_path} already exists")
     if ledger_path:
@@ -374,12 +390,16 @@ def _backtest(
 
 def _print_summary(rows: list[Summary], ids: list[str]) -> None:
     by_id = {r.instance: r for r in rows}
-    typer.echo(f"{'instance':24} {'orders':>7} {'rej':>5} {'fills':>6} {'contracts':>10} {'fees':>8} "
-               f"{'won':>5} {'lost':>5} {'P&L':>10}")  # fmt: skip
+    typer.echo(
+        f"{'instance':24} {'orders':>7} {'rej':>5} {'fills':>6} {'contracts':>10} {'fees':>8} "
+        f"{'won':>5} {'lost':>5} {'P&L':>10}"
+    )
     for iid in ids:
         r = by_id.get(iid, Summary(iid, 0, 0, 0, 0, 0.0, 0.0, 0, 0))
-        typer.echo(f"{iid:24} {r.orders:7} {r.rejected:5} {r.fills:6} {r.contracts:10g} {r.fees:8.2f} "
-                   f"{r.wins:5} {r.losses:5} {r.pnl:10.2f}")  # fmt: skip
+        typer.echo(
+            f"{iid:24} {r.orders:7} {r.rejected:5} {r.fills:6} {r.contracts:10g} {r.fees:8.2f} "
+            f"{r.wins:5} {r.losses:5} {r.pnl:10.2f}"
+        )
 
 
 if __name__ == "__main__":

@@ -116,3 +116,17 @@ def test_live_demo_plays_and_stops(tmp_path: Path, monkeypatch: pytest.MonkeyPat
     ledger = Ledger(tmp_path / "paper" / "demo-live.sqlite")
     assert sum(s.fills for s in ledger.summary()) > 0
     ledger.close()
+
+
+def test_multi_series_markets_overlap_in_time_order() -> None:
+    from collections import Counter
+    from itertools import pairwise
+
+    from quanty.core import MarketOpen, Settled
+
+    ev = list(synthetic.events_multi(synthetic.Spec(hours=2, seed=1)))
+    assert all(a.ts <= b.ts for a, b in pairwise(ev))
+    opened = Counter(e.market.series for e in ev if isinstance(e, MarketOpen))
+    assert opened == {"synthetic:updown_5m": 25, "synthetic:updown_15m": 9, "synthetic:updown_1h": 3}
+    assert sum(isinstance(e, Settled) for e in ev) == 34  # the last of each series is still open
+    assert ev == list(synthetic.events_multi(synthetic.Spec(hours=2, seed=1)))  # deterministic

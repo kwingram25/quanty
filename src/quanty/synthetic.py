@@ -53,9 +53,14 @@ def events(spec: Spec | None = None) -> Iterator[Event]:
         open_ts = spec.start_ms + w * spec.window_s * 1000
         close_ts = open_ts + spec.window_s * 1000
         market = Market(
-            id=f"{VENUE}:UPDOWN-{open_ts // 1000}", venue=VENUE, series=spec.series,
-            open_ts=open_ts, close_ts=close_ts, group=spec.series, terms={"strike": index},
-        )  # fmt: skip
+            id=f"{VENUE}:UPDOWN-{open_ts // 1000}",
+            venue=VENUE,
+            series=spec.series,
+            open_ts=open_ts,
+            close_ts=close_ts,
+            group=spec.series,
+            terms={"strike": index},
+        )
         strike = index
         yield MarketOpen(ts=open_ts, market=market)
         drift = 0.0
@@ -79,6 +84,67 @@ def events(spec: Spec | None = None) -> Iterator[Event]:
         yield MarketClose(ts=close_ts, market_id=market.id)
         outcome = Side.YES if index >= strike else Side.NO
         yield Settled(ts=close_ts, market_id=market.id, outcome=outcome)
+
+
+def events_multi(spec: Spec | None = None, windows: tuple[int, ...] = (300, 900, 3600)) -> Iterator[Event]:
+    """Several up/down series on one index at once (5 min, 15 min and 1 h by default): windows open
+    on their own clock boundaries, so markets of different lengths are open and closing at different
+    times. Deterministic per seed; `events` is unchanged by this."""
+    spec = spec or Spec()
+    rng = random.Random(spec.seed)
+    index = spec.index0
+    open_: dict[int, tuple[Market, float, float]] = {}  # window -> (market, strike, drift)
+    start_s = spec.start_ms // 1000
+    for k in range(int(spec.hours * 3600) + 1):
+        now_s = start_s + k
+        t = now_s * 1000
+        for w in windows:
+            held = open_.get(w)
+            if held is not None and now_s >= held[0].close_ts // 1000:
+                market, strike, _ = held
+                yield MarketClose(ts=t, market_id=market.id)
+                yield Settled(ts=t, market_id=market.id, outcome=Side.YES if index >= strike else Side.NO)
+                del open_[w]
+            if now_s % w == 0 and w not in open_:
+                length = _length(w)
+                market = Market(
+                    id=f"{VENUE}:UPDOWN{length.upper()}-{now_s}",
+                    venue=VENUE,
+                    series=f"{VENUE}:updown_{length}",
+                    open_ts=t,
+                    close_ts=t + w * 1000,
+                    group=f"{VENUE}:index",
+                    terms={"strike": index},
+                )
+                open_[w] = (market, index, 0.0)
+                yield MarketOpen(ts=t, market=market)
+        index *= math.exp(rng.gauss(0, spec.vol_per_s))
+        yield IndexValue(ts=t, src_ts=t, key=INDEX_KEY, value=index)
+        trades = []  # after every book of this second, so events stay in time order
+        for w, (market, strike, drift) in sorted(open_.items()):
+            drift = 0.95 * drift + rng.gauss(0, spec.noise * math.sqrt(1 - 0.95**2))
+            open_[w] = (market, strike, drift)
+            left = (market.close_ts - t) / 1000
+            book = _book(
+                market.id, t + 100, p_up(index, strike, left, spec.vol_per_s) + drift, spec.spread, rng
+            )
+            yield book
+            if rng.random() < spec.trade_prob and book.bids and book.asks:
+                buy = rng.random() < 0.5
+                trades.append(
+                    MarketTrade(
+                        ts=t + 200,
+                        market_id=market.id,
+                        price=(book.asks if buy else book.bids)[0][0],
+                        qty=rng.randint(1, 50),
+                        taker=Action.BUY if buy else Action.SELL,
+                    )
+                )
+        yield from trades
+
+
+def _length(window_s: int) -> str:
+    return f"{window_s // 3600}h" if window_s % 3600 == 0 else f"{window_s // 60}m"
 
 
 def _book(market_id: str, ts: int, mid: float, spread: float, rng: random.Random) -> Book:

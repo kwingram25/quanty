@@ -125,6 +125,8 @@ def test_halt_blocks_buys_but_allows_sells() -> None:
     e = make(s)
     e.run([*opened(), book(1, [(0.39, 10)], [(0.40, 10)]), book(2, [(0.39, 10)], [(0.40, 10)])])
     assert got[0].status is OrderStatus.REJECTED and got[0].reason == "halted"
+    assert not any(o.reason == "halted" for o in e.orders.values())  # counted, not kept order by order
+    assert e.blocked == {"s0": 1}
     assert got[1].status is OrderStatus.FILLED
 
 

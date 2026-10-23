@@ -148,6 +148,7 @@ a { color: inherit; }
 .strategy .sub { display: flex; align-items: center; gap: 8px; margin-top: 6px; font-size: 12px; color: var(--muted); }
 .strategy .sub .grow { flex: 1; }
 .strategy.halted .name, .strategy.halted .pnl { opacity: 0.55; }
+.strategy .blocked { color: var(--warning); }
 .swatch { width: 10px; height: 10px; border-radius: 3px; background: var(--c); flex: none; }
 .delta {
   position: absolute; right: 0; top: -14px; font-size: 12px; font-weight: 600; pointer-events: none;

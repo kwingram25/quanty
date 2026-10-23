@@ -45,7 +45,7 @@ def test_actions_apply_to_the_session(tmp_path: Path) -> None:
         "armed": True,
         "disabled": "",
     }
-    assert state["state"]["instances"]["a"] == {"halted": True, "broker": "sim"}
+    assert state["state"]["instances"]["a"] == {"halted": True, "broker": "sim", "blocked": 0}
 
 
 def test_bad_commands_fail_without_effect(tmp_path: Path) -> None:
