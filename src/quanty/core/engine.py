@@ -222,6 +222,7 @@ class Engine:
                 self._each(ev.market_id, lambda s, c: s.on_trade(c, ev))
             case DataEvent():
                 self.latest[ev.key] = ev
+                self._to_brokers(ev)
                 for sig in self._signals_by_key.get(ev.key, ()):
                     sig.update(ev)
                 self._each(None, lambda s, c: s.on_data(c, ev))

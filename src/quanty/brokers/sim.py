@@ -2,11 +2,13 @@
 
 from collections.abc import Mapping
 from dataclasses import dataclass
+from typing import Literal
 
 from quanty.core.broker import Broker
 from quanty.core.events import (
     Book,
     BrokerEvent,
+    DataEvent,
     Event,
     Fill,
     MarketClose,
@@ -60,14 +62,25 @@ class SimBroker(Broker):
     moves onto it. Liquidity taken is removed from this broker's copy of the book until the next
     book update. Our simulated orders never appear in the book, so several of them can see the
     same trade; subclass and override to model this more carefully.
+
+    arrival="next_event" is a more conservative timing: an order that has arrived is matched on
+    the next event the broker sees after it (a book update, a trade or a data tick), against the
+    book after that update, like a simulator that only checks pending orders when its next event arrives.
     """
 
     def __init__(
-        self, name: str = "sim", *, latency_ms: int = 0, fees: Mapping[str, FeeModel] | None = None
+        self,
+        name: str = "sim",
+        *,
+        latency_ms: int = 0,
+        fees: Mapping[str, FeeModel] | None = None,
+        arrival: Literal["at_latency", "next_event"] = "at_latency",
     ) -> None:
         """fees maps venue name -> FeeModel, for markets that don't carry their own; others trade free."""
         super().__init__(name)
         self.latency_ms = latency_ms
+        self.arrival = arrival
+        self._arrived: list[Order] = []  # next_event mode: arrived, waiting for the next event
         self.fees = dict(fees or {})
         self._fee: dict[str, FeeModel] = {}
         self._books: dict[str, tuple[list[_Level], list[_Level]]] = {}
@@ -87,7 +100,11 @@ class SimBroker(Broker):
     def handle(self, event: BrokerEvent) -> None:
         match event:
             case _Arrive():
-                self._arrive(self._pending.pop(event.order_id))
+                order = self._pending.pop(event.order_id)
+                if self.arrival == "next_event":
+                    self._arrived.append(order)
+                else:
+                    self._arrive(order)
             case _CancelArrive():
                 w = self._working.pop(event.order_id, None)
                 if w is not None:  # else already filled, expired or never accepted
@@ -105,11 +122,24 @@ class SimBroker(Broker):
                     [_Level(p, s) for p, s in event.bids],
                     [_Level(p, s) for p, s in event.asks],
                 )
+                self._match_arrived(event.market_id)
                 self._book_moved(event.market_id)
             case MarketTrade():
+                self._match_arrived(event.market_id)
                 self._trade(event)
+            case DataEvent():
+                self._match_arrived(None)
             case MarketClose() | Settled():
+                self._match_arrived(event.market_id)
                 self._expire(event.market_id)
+
+    def _match_arrived(self, market_id: str | None) -> None:
+        if not self._arrived:
+            return
+        due = [o for o in self._arrived if market_id is None or o.market_id == market_id]
+        self._arrived = [o for o in self._arrived if o not in due]
+        for order in due:
+            self._arrive(order)
 
     # --- matching ---
 

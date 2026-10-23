@@ -118,3 +118,24 @@ def test_fees_by_venue() -> None:
     s = buy(Side.YES, 0.40, 10, tif=Tif.IOC)
     make(s, fees={"t": QuadraticFee(0.07, round_up_cents=True)}).run([*opened(), book(1, [], [(0.40, 10)])])
     assert s.fills()[0].fee == pytest.approx(0.17)  # 0.07 × 10 × 0.4 × 0.6 = 0.168 -> 0.17
+
+
+def test_next_event_arrival_fills_against_the_book_after_the_next_update() -> None:
+    from quanty.brokers.sim import SimBroker
+    from quanty.core import Engine, IndexValue, Instance
+
+    def run(arrival: str) -> list[float]:
+        s = buy(Side.YES, 0.99, 100, tif=Tif.IOC)
+        e = Engine([Instance("s", s, SimBroker(latency_ms=100, arrival=arrival))], clock_ms=None)  # type: ignore[arg-type]
+        e.run(
+            [
+                *opened(),
+                book(1000, [], [(0.99, 100)]),
+                book(1130, [], []),
+                IndexValue(ts=1200, key="x", value=1.0),
+            ]
+        )
+        return [f.qty for f in s.fills()]
+
+    assert run("at_latency") == [100]  # the offer was still there at 1100
+    assert run("next_event") == []  # matched at 1130, after the offer went
