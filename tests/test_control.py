@@ -165,6 +165,7 @@ def test_demo_speed_switches_and_real_sessions_refuse_it(tmp_path: Path) -> None
         "value": 1.0,
         "options": [1.0, 10.0],
         "catching_up": False,
+        "progress": 0.0,
         "seed": None,
         "new_day": False,
     }
