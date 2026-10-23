@@ -137,8 +137,8 @@ def demo(
 ) -> None:
     """Backtest one strategy on synthetic up/down markets.
 
-    With --ui (and no --param), three variants of the example run side by side and the dashboard
-    opens on them: the whole loop with no keys and no setup.
+    With --ui (and no --param), four variants of the example (one with a stop loss) run side by side
+    and the dashboard opens on them: the whole loop with no keys and no setup.
     """
     ui = ui or live
     try:
@@ -147,7 +147,10 @@ def demo(
             instances = [
                 {"id": f"fav_{round(c * 100)}", "strategy": strategy, "params": {"min_conf": c}}
                 for c in (0.90, 0.95, 0.97)
-            ]
+            ]  # and fav_90 with a model stop, to compare: fewer bad days, a lower average
+            instances.insert(
+                1, {"id": "fav_90_stop", "strategy": strategy, "params": {"min_conf": 0.90, "stop_conf": 0.7}}
+            )
         if live and not param and strategy == "example_favorite":  # the live demo also has range markets
             instances.append({"id": "temp_buckets", "strategy": "example_bucket", "params": {}})
         if (own := _synthetic_series(strategy, live)) is not None:

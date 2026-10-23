@@ -14,8 +14,8 @@ uv sync
 uv run quanty demo --ui
 ```
 
-This backtests three variants of the example strategy on 6 hours of synthetic 5-minute up/down
-markets, prints a summary, and opens the dashboard on the result. The synthetic markets are
+This backtests four variants of the example strategy on 6 hours of synthetic 5-minute up/down
+markets (`fav_90_stop` is `fav_90` with a stop loss, to compare), prints a summary, and opens the dashboard on the result. The synthetic markets are
 deterministic per `--seed`, so the same command gives the same numbers anywhere.
 
 `quanty demo --live` does the same as a running session instead: it opens on a day of history

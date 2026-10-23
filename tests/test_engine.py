@@ -209,3 +209,23 @@ def test_orders_after_close_are_rejected() -> None:
     assert got[0].status is OrderStatus.REJECTED
     assert "not open" in got[0].reason
     assert M.id not in e.open_markets
+
+
+def test_entry_price_is_the_average_cost_held() -> None:
+    from quanty.core import Liquidity, Tif
+
+    class CentEach:  # a fee of 1¢ per contract
+        def fee(self, price: float, qty: float, liquidity: Liquidity) -> float:
+            return 0.01 * qty
+
+    seen: list[float | None] = []
+
+    def buy_twice(ctx: Context, b: Book) -> None:
+        seen.append(ctx.entry_price(M.id, Side.YES))  # nothing held yet
+        ctx.buy(M.id, Side.YES, 0.60, 10, tif=Tif.IOC)
+        ctx.buy(M.id, Side.YES, 0.70, 10, tif=Tif.IOC)
+
+    s = Hooks(book=once(buy_twice), fill=lambda ctx, f: seen.append(ctx.entry_price(M.id, Side.YES)))
+    make(s, fees={"t": CentEach()}).run([*opened(), book(1, [(0.55, 50)], [(0.60, 10), (0.70, 10)])])
+    assert seen[0] is None and len(s.fills()) == 2
+    assert seen[1] == pytest.approx(0.61) and seen[2] == pytest.approx(0.66)  # (6.10 + 7.10) / 20, fees in

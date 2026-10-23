@@ -85,6 +85,7 @@ order, with receive timestamps.
 | `ctx.latest(key)` | latest data event for a key, e.g. `"cfbenchmarks:BRTI"` |
 | `ctx.signal(name)` | a derived value declared in the experiment (`last`, `ewma`, `realized_vol`) |
 | `ctx.position(id, side)` | contracts held |
+| `ctx.entry_price(id, side)` | average cost per contract held, buy fees included (None when not holding) |
 | `ctx.outcomes(id)` | the open markets of the same question, when at most one can win |
 | `ctx.orders(id=None)` | your open orders (filled, canceled and rejected ones are gone) |
 | `ctx.buy(id, side, price, qty, tif=, post_only=, tag=)` | place a buy; returns the `Order` (`.status`, `.reason`) |
@@ -137,6 +138,52 @@ risk-checked one by one, which overstates rather than understates risk).
 - `Tif.IOC`: take what is there now, cancel the rest. The usual choice for taking liquidity.
 - `Tif.GTC` (default): rest until filled, canceled, or the market closes.
 - `post_only=True`: rejected rather than taking liquidity, for making markets.
+
+## Exits and stops
+
+There is no stop order type: a strategy exits by selling what it holds, so a stop loss is a few
+lines in the strategy, and it works the same in every mode. Selling still works while a strategy is
+halted (only buys stop), so a halted strategy can still get out.
+
+**A model stop** exits when the strategy's own model stops favoring what it holds. It needs no
+entry price, and it's what `example_favorite` does with `stop_conf`:
+
+```python
+def on_book(self, ctx: Context, book: Book) -> None:
+    mid = book.market_id
+    if mid in self.stopped:  # stopped out: don't buy back in
+        return
+    for side in (Side.YES, Side.NO):
+        held = ctx.position(mid, side)
+        fair = self.fair_yes(ctx, mid)  # your model's P(YES)
+        if held and fair is not None and (fair if side is Side.YES else 1 - fair) < self.params.stop_conf:
+            self.stopped.add(mid)
+            ctx.sell(mid, side, 0.01, held, tif=Tif.IOC, tag="stop")  # into the bids, down to 1¢
+            return
+    ...  # entries
+```
+
+**A price stop** exits when the price to sell falls some way below what was paid:
+
+```python
+held, paid, bid = ctx.position(mid, side), ctx.entry_price(mid, side), book.bid(side)
+if held and paid is not None and bid is not None and bid <= paid - self.params.stop:
+    ctx.sell(mid, side, bid, held, tif=Tif.IOC, tag="stop")
+```
+
+Things to know:
+
+- **No exit price is guaranteed.** An IOC sell takes the bids that are there and cancels the rest:
+  a thin book fills part or none. Sell at a low limit (as the model stop does) to take whatever is
+  there, or check `ctx.position` again on the next book and retry.
+- **Prices jump near the close.** A contract can go from 60¢ to 5¢ in seconds, so a stop often
+  fills well below its trigger, or the market closes first.
+- **Remember what you stopped out of** (a set, cleared in `on_market_close`), or the entry logic
+  buys straight back in.
+- **Stops trade average for tail.** On the synthetic markets, `example_favorite` at `min_conf` 0.9
+  with `stop_conf` 0.7 made less on an average day ($15.61 against $23.37 over 10 days) but its
+  worst day was −$3.41 instead of −$48.67. `quanty demo --ui` runs both side by side
+  (`fav_90` and `fav_90_stop`); decide on recordings, not on synthetic data.
 
 ## Signals and external data
 

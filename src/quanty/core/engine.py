@@ -118,6 +118,12 @@ class Context:
     def position(self, market_id: str, side: Side) -> float:
         return self._e.portfolio.position(self._i.id, market_id, side).qty
 
+    def entry_price(self, market_id: str, side: Side) -> float | None:
+        """Average cost per contract held on that side, buy fees included (None when not holding):
+        what a price-based stop compares the bid with."""
+        pos = self._e.portfolio.position(self._i.id, market_id, side)
+        return pos.avg_cost if pos.qty > 1e-9 else None
+
     def orders(self, market_id: str | None = None) -> list[Order]:
         """This instance's live orders."""
         return [

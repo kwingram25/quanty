@@ -334,13 +334,22 @@ then later `on_settled(ctx, market, outcome)`, and `on_params(ctx, old)` after a
 
 **`ctx`**: `now` (ms), `markets()`, `market(id)`, `seconds_left(id)`, `book(id)`,
 `latest(key)` (the latest data event, `.value`, e.g. for `"cfbenchmarks:BRTI"`), `signal(name)`,
-`position(id, side)` (contracts held), `orders(id)` (*open* orders only: filled, canceled and
+`position(id, side)` (contracts held), `entry_price(id, side)` (average cost per contract held,
+fees included; None when flat), `orders(id)` (*open* orders only: filled, canceled and
 rejected ones are gone), `outcomes(id)`, `buy(id, side, price, qty, tif=, post_only=, tag=)`,
 `sell(...)` (only what you hold), `cancel(order)`, `cancel_all(id)`, `log(msg, **fields)` (plain
 values: numbers, strings, lists, dicts). `buy`/`sell` return the `Order`: an order that breaks a rule
 (price outside 0–1, tick size, a risk limit, market closed) comes back with `.status` REJECTED and a
 `.reason` instead of raising. `Tif.IOC` takes what is there and cancels the rest; the default `GTC`
 rests until filled, canceled or the market closes.
+
+**Exits and stops**: there is no stop order; a strategy exits by selling what it holds. A model
+stop: when the model's probability for the side held drops below a threshold, remember the market
+(so the entry logic doesn't buy back in) and `ctx.sell(mid, side, 0.01, ctx.position(mid, side),
+tif=Tif.IOC, tag="stop")`, which sells into whatever bids there are. A price stop: compare
+`book.bid(side)` with `ctx.entry_price(mid, side)`. IOC sells can fill partly or not at all in a
+thin book, and prices jump near the close. Selling works while a strategy is halted.
+`example_favorite.py` has a model stop (`stop_conf`).
 
 Full reference: {REPO}/blob/main/docs/strategies.md (may be private). Working examples, in the
 installed package: `.venv/lib/python3.*/site-packages/quanty/strategies/example_favorite.py` (a
@@ -357,8 +366,9 @@ probability model from an index) and `example_bucket.py` (range markets).
 3. To check *what* it did, not just the totals: add `--ledger data/backtest/<name>.sqlite` (a new
    file each run: it refuses to overwrite), then either `uv run quanty ui --data data` (the
    dashboard: every trade with its outcome) or query the SQLite tables `orders`, `fills`,
-   `settlements`, `markets` and `logs` (times in ms, `side` is `yes`/`no`, `logs.fields` is JSON
-   from `ctx.log`, settlement `pnl` is after fees).
+   `settlements`, `markets` and `logs` (times in ms: `orders.created_ts`, `fills.ts`,
+   `markets.close_ts`; `side` is `yes`/`no`; `fills.realized` and `settlements.pnl` are P&L after
+   fees; `logs.fields` is the JSON from `ctx.log`).
 4. Add it to `experiments/main.toml` (an `[[instances]]` entry) to run it with the others. Without
    `--data`, `uv run quanty backtest experiments/main.toml` uses synthetic markets, where only
    instances trading synthetic series trade (it says which can't). Don't put a synthetic `series`

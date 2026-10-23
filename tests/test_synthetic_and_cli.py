@@ -108,8 +108,9 @@ def test_demo_ui_refuses_a_custom_ledger(tmp_path: Path) -> None:
 
 def test_live_demo_plays_and_stops(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("tempfile.mkdtemp", lambda prefix="": str(tmp_path))
-    res = run("demo", "--live", "--no-browser", "--port", "0", "--hours", "0.05", "--history", "1",
-              "--speed", "500")  # fmt: skip
+    res = run(
+        "demo", "--live", "--no-browser", "--port", "0", "--hours", "0.05", "--history", "1", "--speed", "500"
+    )
     assert res.exit_code == 0, res.output
     from quanty.core import Ledger
 
@@ -166,3 +167,29 @@ def test_synthetic_books_stay_between_one_and_99_cents() -> None:
     for ev in synthetic.events(synthetic.Spec(hours=24, seed=1)):
         if isinstance(ev, Book):
             assert all(0.01 - 1e-9 <= p <= 0.99 + 1e-9 for p, _ in ev.bids + ev.asks), ev
+
+
+def test_example_stop_sells_and_never_buys_back_in() -> None:
+    from sqlalchemy import text
+
+    from quanty import experiment, plugins
+    from quanty.core import Engine, Ledger
+
+    raw = {
+        "instances": [
+            {"id": "x", "strategy": "example_favorite", "params": {"min_conf": 0.9, "stop_conf": 0.7}}
+        ]
+    }
+    exp = experiment.parse(raw)
+    ledger = Ledger(":memory:")
+    found = plugins.discover([], local=None)
+    engine = Engine(experiment.build(exp, found, synthetic.FEES), ledger=ledger, clock_ms=exp.clock_ms)
+    engine.run(synthetic.events(synthetic.Spec(hours=24, seed=0)))
+    with ledger.engine.connect() as conn:
+        rows = conn.execute(
+            text("select market_id, action, tag, created_ts as ts from orders order by created_ts")
+        ).all()
+    stops = [r for r in rows if r.tag == "stop"]
+    assert stops and all(r.action == "sell" for r in stops)
+    for stop in stops:  # after a stop, no more buys in that market
+        assert not [r for r in rows if r.market_id == stop.market_id and r.action == "buy" and r.ts > stop.ts]
