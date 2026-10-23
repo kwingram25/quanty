@@ -396,3 +396,6 @@ tbody tr:hover td { background: var(--raised); }
 .params > div { display: flex; justify-content: space-between; gap: 8px; color: var(--muted); }
 .params > div.set { color: var(--ink); font-weight: 600; }
 .params dt, .params dd { margin: 0; }
+
+/* anything that explains itself on hover says so (buttons and links keep their pointer) */
+[title]:not(button):not(a):not(input):not([role="tab"]):not([role="radio"]):not(svg) { cursor: help; }
