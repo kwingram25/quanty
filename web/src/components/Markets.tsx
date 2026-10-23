@@ -26,6 +26,16 @@ function useEventClock(s: SessionState | null): number | null {
   return s.now + (Date.now() - s.heartbeat_ts) * rate.current;
 }
 
+/** Two numbers that would print the same get enough decimals to tell them apart. */
+const close = (a: number, b: number): [string, string] => {
+  const big = Math.max(Math.abs(a), Math.abs(b)) >= 1000;
+  const fmt = (v: number, d: number) => v.toLocaleString("en-US", { minimumFractionDigits: d, maximumFractionDigits: d });
+  for (const d of big ? [0, 1, 2, 4] : [2, 3, 4, 6]) {
+    if (fmt(a, d) !== fmt(b, d)) return [fmt(a, d), fmt(b, d)];
+  }
+  return [fmt(a, big ? 4 : 6), fmt(b, big ? 4 : 6)];
+};
+
 const fmtNum = (v: number) => (Math.abs(v) >= 1000 ? v.toLocaleString("en-US", { maximumFractionDigits: 0 }) : v.toFixed(2));
 
 /** Open markets grouped into events: an up/down window is an event of one market; a range ladder
@@ -63,56 +73,75 @@ function Event({ ms, now, slots, exposure }: {
   const closing = frac < 0.15;
   const ladder = ms.length > 1;
   const ref = m0.reference_value;
+  const above = !ladder && ref != null && m0.strike != null ? ref >= m0.strike : null;
   return (
     <motion.div className={`market ${closing ? "closing" : ""}`} layout
       initial={{ opacity: 0, x: 24 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -24, transition: { duration: 0.2 } }}
       transition={{ type: "spring", stiffness: 380, damping: 32 }}>
-      <div className="top">
+      <div className="head">
+        <div className="title" title={m0.id}>{m0.title}</div>
         <span className="clock">{duration(left)}</span>
-        {!ladder && <span className="quote"><span>bid {cents(m0.bid)}</span><span>ask {cents(m0.ask)}</span></span>}
       </div>
-      <div className="title" title={m0.id}>{m0.title}</div>
-      <div className="name">
+      <div className="meta">
         {seriesName(m0.series)} · closes {closesAt(m0.close_ts, now)}
-        {ref != null && <> · now <b className="num">{fmtNum(ref)}{m0.unit}</b></>}
-        {!ladder && m0.strike != null && <> · strike <span className="num">{fmtNum(m0.strike)}</span></>}
+        {ladder && ref != null && <> · now <b className="num">{fmtNum(ref)}{m0.unit}</b></>}
       </div>
-      {ladder ? (
-        <div className="outcomes">
-          {ms.map((m) => (
-            <div key={m.id} className="outcome">
-              <span className="label">{m.subtitle || m.id}</span>
-              <span className="quote"><span>{cents(m.bid)}</span><span>{cents(m.ask)}</span></span>
-              <Held m={m} slots={slots} />
-            </div>
-          ))}
-        </div>
-      ) : (
-        <Held m={m0} slots={slots} />
-      )}
-      {exposure && (
-        <div className="exposure" title="Across this question's outcomes: what could still be lost, and the most it could pay">
-          {Object.entries(exposure).map(([iid, x]) => (
-            <span key={iid} className="chip">
-              <i className="swatch" style={{ ["--c" as string]: `var(--series-${slots[iid] ?? 1})` }} />
-              {iid} worst <span className="down">{money(-x.loss)}</span> · best <span className="up">{money(x.gain, true)}</span>
-            </span>
-          ))}
+      {!ladder && above != null && (
+        <div className={`vs ${above ? "up" : "down"}`}>
+          {above ? "▲" : "▼"} <b className="num">{close(ref!, m0.strike!)[0]}</b>
+          <span className="muted"> {above ? "above" : "below"} {close(ref!, m0.strike!)[1]}</span>
         </div>
       )}
+      <div className="outcomes">
+        {ms.map((m) => <Outcome key={m.id} m={m} label={ladder ? m.subtitle || m.id : null} slots={slots} />)}
+      </div>
+      {exposure && Object.entries(exposure).map(([iid, x]) => (
+        <div key={iid} className="exposure" title="Across this question's outcomes: the most that could still be lost, and the most it could make">
+          <i className="swatch" style={{ ["--c" as string]: `var(--series-${slots[iid] ?? 1})` }} />
+          {iid}: risk <span className="down num">{money(x.loss)}</span>, could make <span className="up num">{money(x.gain)}</span>
+        </div>
+      ))}
       <div className="drain" style={{ width: `${frac * 100}%` }} />
     </motion.div>
   );
 }
 
-function Held({ m, slots }: { m: OpenMarket; slots: Record<string, number> }) {
+const price = (p: number | null): number | null => (p != null && p > 0 && p < 1 ? p : null);
+
+/** One outcome as the venues' apps show it: its chance, then what Yes and No cost to buy now. */
+function Outcome({ m, label, slots }: { m: OpenMarket; label: string | null; slots: Record<string, number> }) {
+  const bid = price(m.bid), ask = price(m.ask);
+  const no = bid == null ? null : 1 - bid; // buying No = selling Yes at the best bid
+  const chance = bid != null && ask != null ? (bid + ask) / 2 : (bid ?? ask);
+  const pct = chance == null ? "–" : `${Math.round(chance * 100)}%`;
+  return (
+    <div className={`outcome ${label == null ? "single" : ""}`}>
+      {label != null ? (
+        <><span className="label">{label}</span><span className="chance num">{pct}</span></>
+      ) : (
+        <span className="label"><b className="num">{pct}</b> <span className="muted">chance</span></span>
+      )}
+      <span className="buy yes" title="Price to buy Yes">Yes <b className="num">{cents(ask)}</b></span>
+      <span className="buy no" title="Price to buy No">No <b className="num">{cents(no)}</b></span>
+      <Holders m={m} slots={slots} />
+    </div>
+  );
+}
+
+/** Who holds this outcome, with identical holdings on one line. */
+function Holders({ m, slots }: { m: OpenMarket; slots: Record<string, number> }) {
   if (!m.held.length) return null;
+  const groups = new Map<string, string[]>();
+  for (const h of m.held) {
+    const key = `${h.qty} ${h.side === "yes" ? "Yes" : "No"} at ${cents(h.avg)}`;
+    groups.set(key, [...(groups.get(key) ?? []), h.instance]);
+  }
   return (
     <div className="held">
-      {m.held.map((h) => (
-        <span key={`${h.instance}-${h.side}`} className="chip">
-          <i className="swatch" style={{ ["--c" as string]: `var(--series-${slots[h.instance] ?? 1})` }} />
-          {h.instance} {h.qty} {h.side.toUpperCase()} @ {cents(h.avg)}
+      {[...groups.entries()].map(([what, who]) => (
+        <span key={what} className="mine">
+          {who.map((w) => <i key={w} className="swatch" style={{ ["--c" as string]: `var(--series-${slots[w] ?? 1})` }} />)}
+          {who.join(", ")} {who.length > 1 ? "hold" : "holds"} {what.replace(" at ", who.length > 1 ? " each at " : " at ")}
         </span>
       ))}
     </div>

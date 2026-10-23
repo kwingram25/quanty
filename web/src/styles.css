@@ -306,7 +306,6 @@ tbody tr:hover td { background: var(--raised); }
 
 .right-col .tape li { grid-template-columns: 58px 1fr auto; gap: 8px; padding: 8px 10px; }
 
-.market .title { font-weight: 600; font-size: 13px; margin-top: 2px; }
 .market .name b { color: var(--ink); font-weight: 600; }
 .market .outcomes { margin-top: 8px; display: grid; gap: 2px; }
 .market .outcome { display: grid; grid-template-columns: 1fr auto; gap: 2px 10px; align-items: center;
@@ -316,4 +315,33 @@ tbody tr:hover td { background: var(--raised); }
 .market .outcome .held { grid-column: 1 / -1; margin-top: 2px; }
 
 .right-col .market .name { white-space: normal; }
-.market .exposure { margin-top: 8px; display: flex; flex-wrap: wrap; gap: 6px; }
+
+/* market cards, styled like the venues' apps: green Yes, red No, with the price to buy each */
+.market .head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
+.market .head .title { margin: 0; font-size: 13px; font-weight: 600; }
+.market .head .clock { font-size: 15px; font-weight: 600; flex: none; }
+.market.closing .head .clock { color: var(--warning); }
+.market .meta { font-size: 12px; color: var(--muted); margin-top: 2px; }
+.market .meta b { color: var(--ink); font-weight: 600; }
+.market .vs { font-size: 12px; margin-top: 4px; }
+.market .outcomes { margin-top: 8px; display: grid; gap: 4px; }
+.market .outcome {
+  display: grid; grid-template-columns: 1fr auto auto auto; gap: 6px; align-items: center;
+  padding: 0; background: none; font-size: 12px;
+}
+.market .outcome:nth-child(odd) { background: none; }
+.market .outcome .label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.market .outcome .chance { color: var(--ink-2); min-width: 34px; text-align: right; font-weight: 500; }
+.market .buy {
+  display: inline-flex; align-items: baseline; justify-content: space-between; gap: 6px; min-width: 64px;
+  padding: 3px 8px; border-radius: 6px; font-size: 11px; font-weight: 500;
+}
+.market .buy b { font-size: 12px; font-weight: 600; }
+.market .buy.yes { color: var(--up); background: var(--up-wash); }
+.market .buy.no { color: var(--down); background: var(--down-wash); }
+.market .outcome .held { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 4px 10px; margin: 0 0 2px; }
+.market .mine { display: inline-flex; align-items: center; gap: 5px; font-size: 11px; color: var(--ink-2); }
+.market .mine .swatch, .market .exposure .swatch { width: 8px; height: 8px; border-radius: 2px; }
+.market .exposure { display: flex; align-items: center; gap: 5px; margin-top: 8px; font-size: 11px; color: var(--ink-2); }
+.market .outcome.single { grid-template-columns: 1fr auto auto; }
+.market .outcome.single .label b { color: var(--ink); font-size: 14px; }

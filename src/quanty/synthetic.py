@@ -250,6 +250,8 @@ def _book(market_id: str, ts: int, mid: float, spread: float, rng: random.Random
     bids = tuple(
         (round(bid - i * 0.01, 2), rng.randint(20, 300)) for i in range(3) if bid - i * 0.01 >= 0.01 - 1e-9
     )
+    # a price can't reach $1; filtered after the draws so the random stream (and every result) is unchanged
+    bids = tuple(lv for lv in bids if lv[0] <= 0.99 + 1e-9)
     asks = tuple(
         (round(ask + i * 0.01, 2), rng.randint(20, 300)) for i in range(3) if ask + i * 0.01 <= 0.99 + 1e-9
     )
