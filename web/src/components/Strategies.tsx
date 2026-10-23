@@ -19,8 +19,19 @@ export function Strategies({ snap, slots }: { snap: Snapshot; slots: Record<stri
     const r = await sendCommand(run, action, target, confirmText);
     const same = r.result.trim().toLowerCase() === label.trim().toLowerCase();
     toast({ kind: r.ok ? "ok" : "error", title: r.ok ? label : `${label} failed`, body: same ? undefined : r.result });
-    setPending((p) => { const { [target]: _, ...rest } = p; return rest; });
+    if (!r.ok) drop(target); // otherwise kept until the session reports it, so the row doesn't flick back
   };
+  const drop = (target: string) => setPending((p) => { const { [target]: _, ...rest } = p; return rest; });
+  useEffect(() => {
+    for (const [iid, want] of Object.entries(pending)) {
+      if (s?.instances[iid]?.halted === want) drop(iid);
+    }
+  }, [s, pending]);
+  useEffect(() => {
+    if (!Object.keys(pending).length) return;
+    const t = setTimeout(() => setPending({}), 5000); // never confirmed: show what the session says
+    return () => clearTimeout(t);
+  }, [pending]);
 
   return (
     <aside className="panel side fill">

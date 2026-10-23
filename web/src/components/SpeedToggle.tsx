@@ -1,5 +1,5 @@
 import { motion } from "motion/react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { sendCommand, type SessionState } from "../api";
 import { useToast } from "./Toasts";
 
@@ -8,14 +8,26 @@ export function SpeedToggle({ run, session }: { run: string; session: SessionSta
   const toast = useToast();
   const [pending, setPending] = useState<number | null>(null);
   const sp = session?.speed;
+  // the choice shows at once and stays until the session reports it (the command's reply comes
+  // before the next pushed snapshot, so clearing it then would flick back to the old speed)
+  useEffect(() => {
+    if (pending != null && sp?.value === pending) setPending(null);
+  }, [sp?.value, pending]);
+  useEffect(() => {
+    if (pending == null) return;
+    const t = setTimeout(() => setPending(null), 5000); // never confirmed: show what the session says
+    return () => clearTimeout(t);
+  }, [pending]);
   if (!sp || sp.options.length < 2) return null;
   const current = pending ?? sp.value;
   const pick = async (v: number) => {
     if (v === current) return;
     setPending(v);
     const r = await sendCommand(run, "speed", String(v));
-    if (!r.ok) toast({ kind: "error", title: "Speed not changed", body: r.result });
-    setPending(null);
+    if (!r.ok) {
+      toast({ kind: "error", title: "Speed not changed", body: r.result });
+      setPending(null);
+    }
   };
   return (
     <div className="segmented" role="radiogroup" aria-label="Demo speed">
