@@ -1,4 +1,7 @@
-"""Record feeds live: raw messages to disk, health and latency to the database every window."""
+"""Record feeds live: raw messages to disk, health and latency to the database every window.
+
+With a trader attached (quanty paper), every parsed event also drives the engine in real time.
+"""
 
 import asyncio
 import dataclasses
@@ -9,6 +12,9 @@ import structlog
 from sqlalchemy import Engine, insert
 
 from quanty import db
+from quanty.core.engine import Engine as Trader
+from quanty.core.events import Event
+from quanty.core.events import Status as StatusEvent
 from quanty.db.models import FeedMetricRow
 from quanty.feeds.base import Feed, Link, Raw, now_ms
 from quanty.feeds.health import FeedHealth, Status, Window
@@ -16,6 +22,7 @@ from quanty.feeds.recording import Recorder
 
 log = structlog.get_logger("quanty.record")
 
+TICK_S = 0.01
 OnWindow = Callable[[list[Window], dict[str, Status]], None]
 
 
@@ -27,8 +34,15 @@ class RecordSession:
     """
 
     def __init__(
-        self, feeds: Mapping[str, Feed], root: Path, db_path: Path | None = None, window_s: float = 60
+        self,
+        feeds: Mapping[str, Feed],
+        root: Path,
+        db_path: Path | None = None,
+        window_s: float = 60,
+        trader: "Trader | None" = None,
     ) -> None:
+        """trader: an engine to drive with the live events (paper/shadow/live); None = record only."""
+        self.trader = trader
         self.feeds = dict(feeds)
         self.recorder = Recorder(root)
         self.db: Engine | None = db.connect(db_path) if db_path else None
@@ -43,6 +57,7 @@ class RecordSession:
         if isinstance(item, Link):
             health.on_link(item)
             self.feeds[item.feed].on_link(item)
+            self._drive([StatusEvent(ts=item.t, key=f"{item.feed}:link", text=item.state)])
             return
         try:
             events = self.feeds[item.feed].parse(item)
@@ -52,6 +67,22 @@ class RecordSession:
                 log.error("parse error", feed=item.feed, error=repr(exc), message=item.text[:200])
             events = None
         health.on_raw(item, events)
+        if events:
+            self._drive(events)
+
+    def _drive(self, events: list[Event]) -> None:
+        if self.trader is None:
+            return
+        for ev in events:
+            self.trader.advance(ev.ts)  # due order arrivals, cancels and clock ticks first
+            self.trader.process(ev)
+
+    async def _tick(self) -> None:
+        """Advance the engine with the wall clock, so order latency and clock ticks fire on time."""
+        assert self.trader is not None
+        while True:
+            self.trader.advance(now_ms())
+            await asyncio.sleep(TICK_S)
 
     def status(self) -> dict[str, Status]:
         now = now_ms()
@@ -59,6 +90,8 @@ class RecordSession:
 
     async def run(self, duration_s: float | None = None, on_window: OnWindow | None = None) -> None:
         tasks = [asyncio.create_task(f.run(self.sink), name=f"feed:{n}") for n, f in self.feeds.items()]
+        if self.trader is not None:
+            tasks.append(asyncio.create_task(self._tick(), name="engine clock"))
         end = None if duration_s is None else now_ms() + int(duration_s * 1000)
         next_window = (now_ms() // self.window_ms + 1) * self.window_ms
         try:
@@ -76,6 +109,9 @@ class RecordSession:
             for t in tasks:
                 t.cancel()
             await asyncio.gather(*tasks, return_exceptions=True)
+            if self.trader is not None:
+                self.trader.advance(now_ms())
+                self.trader.ledger.commit()
             self.recorder.close()
             if self.db is not None:
                 self.db.dispose()

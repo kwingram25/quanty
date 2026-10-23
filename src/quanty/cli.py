@@ -1,17 +1,22 @@
 """quanty: record, backtest, paper and live trade repeated prediction markets."""
 
+import asyncio
+import sys
 import tomllib
 from collections.abc import Iterable
 from pathlib import Path
 from types import ModuleType
 from typing import Annotated, Any
 
+import structlog
 import typer
 
 from quanty import config, experiment, plugins, synthetic
 from quanty.core import Engine, Event, Ledger, Summary
-from quanty.feeds.cli import feeds_app, load_feeds, record, recorded, recorded_range, replay
+from quanty.feeds.cli import feeds_app, load_feeds, print_windows, record, recorded, recorded_range, replay
+from quanty.feeds.health import Status, Window
 from quanty.feeds.replay import Replay
+from quanty.feeds.session import RecordSession
 
 app = typer.Typer(help=__doc__, no_args_is_help=True, add_completion=False)
 app.command()(record)
@@ -94,6 +99,52 @@ def backtest(
         _backtest(experiment.load(path), hours, seed, ledger, data, start, end)
     except ValueError as exc:
         raise _fail(exc) from None
+
+
+@app.command()
+def paper(
+    path: Annotated[Path, typer.Argument(help="Experiment config (TOML)", exists=True, dir_okay=False)],
+    feeds: Annotated[
+        Path, typer.Option(help="Feed config (see feeds.example.toml)", exists=True, dir_okay=False)
+    ],
+    data: Annotated[Path, typer.Option(help="Recordings and databases directory")] = Path("data"),
+    ledger: Annotated[
+        Path | None, typer.Option(help="Ledger (default: <data>/paper/<experiment>.sqlite)")
+    ] = None,
+    duration: Annotated[float | None, typer.Option(help="Stop after this many seconds")] = None,
+    window: Annotated[float, typer.Option(help="Seconds between status reports")] = 60,
+) -> None:
+    """Paper trade: run an experiment's strategies on live feeds with simulated fills (no orders)."""
+    structlog.configure(logger_factory=structlog.PrintLoggerFactory(sys.stderr))
+    try:
+        exp = experiment.load(path)
+        instances = experiment.build(exp, _strategies())
+        feed_objs = load_feeds(feeds, None)
+    except ValueError as exc:
+        raise _fail(exc) from None
+    ledger_path = ledger or data / "paper" / f"{path.stem}.sqlite"
+    ledger_path.parent.mkdir(parents=True, exist_ok=True)
+    book = Ledger(ledger_path, durable=True)
+    trader = Engine(instances, ledger=book, limits=exp.limits, clock_ms=exp.clock_ms, strict=False,
+                    signals=experiment.signals(exp))  # fmt: skip
+    session = RecordSession(feed_objs, data, data / "quanty.sqlite", window_s=window, trader=trader)
+    ids = [i.id for i in instances]
+
+    def report(windows: list[Window], status: dict[str, Status]) -> None:
+        print_windows(windows, status)
+        _print_summary(book.summary(), ids)
+        if trader.halted:
+            typer.echo(f"halted: {', '.join(sorted(trader.halted))}")
+
+    typer.echo(
+        f"paper trading {', '.join(ids)} on {', '.join(feed_objs)}; ledger {ledger_path} (Ctrl-C to stop)"
+    )
+    try:
+        asyncio.run(session.run(duration, on_window=report))
+    except KeyboardInterrupt:
+        typer.echo("stopped")
+    finally:
+        book.close()
 
 
 def _params(pairs: list[str]) -> dict[str, Any]:

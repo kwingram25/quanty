@@ -68,7 +68,7 @@ def _fail(exc: Exception) -> typer.Exit:
     return typer.Exit(2)
 
 
-def _print_windows(windows: list[Window], status: dict[str, Status] | None = None) -> None:
+def print_windows(windows: list[Window], status: dict[str, Status] | None = None) -> None:
     typer.echo(f"{'feed':14} {'status':8} {'msgs':>8} {'events':>8} {'err':>4} {'lag p50':>8} {'p99':>8} "
                f"{'max':>8} {'gaps':>5} {'max gap s':>9} {'reconn':>6}")  # fmt: skip
 
@@ -102,7 +102,7 @@ def record(
     session = RecordSession(feeds, data, db or data / "quanty.sqlite", window_s=window)
     typer.echo(f"recording {', '.join(feeds)} to {data}/ (Ctrl-C to stop)")
     try:
-        asyncio.run(session.run(duration, on_window=_print_windows))
+        asyncio.run(session.run(duration, on_window=print_windows))
     except KeyboardInterrupt:
         typer.echo("stopped")
 
@@ -165,4 +165,4 @@ def health(
         return datetime.fromtimestamp(t / 1000, UTC).strftime("%Y-%m-%d %H:%M")
 
     typer.echo(f"{utc(lo)} to {utc(hi)} UTC")
-    _print_windows(rp.windows())
+    print_windows(rp.windows())
