@@ -156,7 +156,6 @@ def _session(
     *,
     armed: bool,
 ) -> None:
-    structlog.configure(logger_factory=structlog.PrintLoggerFactory(sys.stderr))
     try:
         exp = experiment.load(path)
         live_names = experiment.live_brokers(exp)
@@ -170,6 +169,7 @@ def _session(
         feed_objs = load_feeds(feeds, None)
     except ValueError as exc:
         raise _fail(exc) from None
+    structlog.configure(logger_factory=structlog.PrintLoggerFactory(sys.stderr))  # after any refusal
     ledger_path = ledger or data / mode / f"{path.stem}.sqlite"
     ledger_path.parent.mkdir(parents=True, exist_ok=True)
     book = Ledger(ledger_path, durable=True)

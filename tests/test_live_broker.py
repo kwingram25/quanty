@@ -217,3 +217,15 @@ def test_sell_order_terms() -> None:
     _, kx = markets()
     b = KalshiOrders(FakeSigner()).place_request(o, kx).body
     assert (b["side"], b["price"]) == ("bid", "0.9500")  # selling NO at ≥ 5¢ = buying YES at ≤ 95¢
+
+
+def test_polymarket_rejection_inside_a_200_reply() -> None:
+    fake = FakeExchange()
+    fake.set_book("btc-up", bids=[], asks=[(0.99, 10)])
+    h = Harness(fake, lambda ctx: ctx.buy("polymarket_us:btc-up", Side.YES, 0.99, 5, post_only=True))
+
+    async def body(h: Harness) -> None:
+        await h.until(lambda: h.order().status.done)
+
+    run(h, body)
+    assert h.order().status == "rejected" and "would match" in h.order().reason

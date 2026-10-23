@@ -183,19 +183,26 @@ class PolymarketOrders(OrderAPI):
     DONE_STATES: ClassVar[set[str]] = {"ORDER_STATE_FILLED", "ORDER_STATE_CANCELED", "ORDER_STATE_REJECTED",
                                        "ORDER_STATE_EXPIRED", "ORDER_STATE_REPLACED"}  # fmt: skip
 
+    FILL_TYPES: ClassVar[set[str]] = {"EXECUTION_TYPE_FILL", "EXECUTION_TYPE_PARTIAL_FILL"}
+
     async def place(self, client: httpx.AsyncClient, req: VenueRequest) -> VenueOrder:
         res = await self._send(client, req.method, req.path, json=req.body)
         if not res.get("id"):
             raise VenueError(200, f"no order id in reply: {json.dumps(res)[:300]}")
-        ex = [e for e in res.get("executions") or [] if _num(e.get("lastShares")) > 0]
+        # executions report every event (new, fills, cancel, reject), each with the order as it then stood
+        executions = res.get("executions") or []
+        for e in executions:
+            if e.get("type") == "EXECUTION_TYPE_REJECTED":
+                reason = f"{e.get('orderRejectReason', 'rejected')}: {e.get('text', '')}"
+                raise VenueError(200, reason.rstrip(": "))
+        ex = [e for e in executions if e.get("type") in self.FILL_TYPES and _num(e.get("lastShares")) > 0]
         filled = sum(_num(e["lastShares"]) for e in ex)
         price = sum(_num(e["lastShares"]) * _num(e.get("lastPx")) for e in ex) / filled if filled else None
         fees = sum(_num(e.get("commissionNotionalCollected")) for e in ex)
-        ioc = req.body.get("tif") == "TIME_IN_FORCE_IMMEDIATE_OR_CANCEL"
-        done = (
-            ioc or filled >= float(req.body["quantity"]) - 1e-9
-        )  # a synchronous IOC is over when it returns
-        return VenueOrder(str(res["id"]), filled, fees, done, str(res.get("state", "")), price)
+        state = str((executions[-1].get("order") or {}).get("state", "")) if executions else ""
+        ioc = req.body.get("tif") == "TIME_IN_FORCE_IMMEDIATE_OR_CANCEL"  # synchronous: over when it returns
+        done = ioc or state in self.DONE_STATES or filled >= float(req.body["quantity"]) - 1e-9
+        return VenueOrder(str(res["id"]), filled, fees, done, state, price)
 
     async def get(self, client: httpx.AsyncClient, venue_id: str, market: Market) -> VenueOrder:
         od = (await self._send(client, "GET", f"/v1/order/{venue_id}")).get("order") or {}
@@ -277,9 +284,9 @@ class KalshiOrders(OrderAPI):
         price = _num(res.get("average_fill_price")) if filled else None
         fees = filled * _num(res.get("average_fee_paid"))
         ioc = req.body.get("time_in_force") == "immediate_or_cancel"
-        status = str(res.get("status", ""))
-        done = ioc or status in self.DONE_STATES or filled >= float(req.body["count"]) - 1e-9
-        return VenueOrder(str(res["order_id"]), filled, fees, done, status, price)
+        left = res.get("remaining_count")  # the reply has no status field
+        done = ioc or (left is not None and _num(left) <= 1e-9) or filled >= float(req.body["count"]) - 1e-9
+        return VenueOrder(str(res["order_id"]), filled, fees, done, "", price)
 
     async def get(self, client: httpx.AsyncClient, venue_id: str, market: Market) -> VenueOrder:
         od = (await self._send(client, "GET", f"{self.READ_PATH}/{venue_id}")).get("order") or {}

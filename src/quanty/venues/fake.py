@@ -155,16 +155,31 @@ class FakeExchange:
                 ioc,
                 bool(body.get("participateDontInitiate")),
             )
-            if o is None:
-                return httpx.Response(400, json={"code": "ORDER_REJECT_REASON_PARTICIPATE_DONT_INITIATE"})
-            ex = [
+            if o is None:  # the API reports rejections as an execution
+                rejected = {
+                    "type": "EXECUTION_TYPE_REJECTED",
+                    "orderRejectReason": "ORD_REJECT_REASON_EXCHANGE_OPTION",
+                    "text": "participateDontInitiate order would match",
+                    "order": {"state": "ORDER_STATE_REJECTED"},
+                }
+                return httpx.Response(200, json={"id": f"po-rej-{next(self._ids)}", "executions": [rejected]})
+            snap = {"id": o.id, "state": self._pm_state(o), "cumQuantity": f"{o.filled:g}"}
+            ex: list[dict[str, Any]] = [
+                {"type": "EXECUTION_TYPE_NEW", "order": {**snap, "state": "ORDER_STATE_NEW"}}
+            ]
+            ex += [
                 {
+                    "type": "EXECUTION_TYPE_FILL",
                     "lastShares": f"{q:g}",
                     "lastPx": {"value": f"{p:.2f}"},
+                    "aggressor": True,
                     "commissionNotionalCollected": {"value": f"{q * self.taker_fee:.4f}"},
+                    "order": snap,
                 }
                 for q, p in o.executions
             ]
+            if o.canceled:  # an IOC's unfilled rest
+                ex.append({"type": "EXECUTION_TYPE_CANCELED", "order": snap})
             return httpx.Response(200, json={"id": o.id, "executions": ex})
         if path.startswith("/v1/order/"):
             parts = path.split("/")
@@ -176,14 +191,7 @@ class FakeExchange:
                 return httpx.Response(200, json={})
             if fault == "lost_read":
                 return httpx.Response(200, json={})
-            filled = o.filled >= o.qty - 1e-9
-            state = (
-                "ORDER_STATE_FILLED"
-                if filled
-                else "ORDER_STATE_CANCELED"
-                if o.canceled
-                else "ORDER_STATE_NEW"
-            )
+            state = self._pm_state(o)
             return httpx.Response(
                 200,
                 json={
@@ -219,7 +227,7 @@ class FakeExchange:
                     "fill_count": f"{o.filled:.2f}",
                     "average_fill_price": f"{avg:.4f}",
                     "average_fee_paid": f"{self.taker_fee:.4f}",
-                    "status": self._kalshi_status(o),
+                    "remaining_count": f"{o.left:.2f}",
                 },
             )
         if method == "DELETE" and path.startswith("/portfolio/events/orders/"):
@@ -247,6 +255,14 @@ class FakeExchange:
                 },
             )
         return httpx.Response(404, json={"error": f"no route {method} {path}"})
+
+    @staticmethod
+    def _pm_state(o: FakeOrder) -> str:
+        if o.filled >= o.qty - 1e-9:
+            return "ORDER_STATE_FILLED"
+        if o.canceled:
+            return "ORDER_STATE_CANCELED"
+        return "ORDER_STATE_PARTIALLY_FILLED" if o.filled else "ORDER_STATE_NEW"
 
     @staticmethod
     def _kalshi_status(o: FakeOrder) -> str:
