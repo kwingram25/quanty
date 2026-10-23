@@ -30,6 +30,7 @@ app.command()(replay)
 app.add_typer(feeds_app, name="feeds")
 
 Hours = Annotated[float, typer.Option(help="Synthetic hours to simulate")]
+DEFAULT_HOURS = 6.0
 Seed = Annotated[int, typer.Option(help="Random seed for the synthetic markets")]
 LedgerPath = Annotated[Path | None, typer.Option("--ledger", help="Write the ledger to this new SQLite file")]
 
@@ -73,7 +74,7 @@ def demo(
     strategy: Annotated[str, typer.Option(help="Strategy to run")] = "example_favorite",
     param: Annotated[list[str] | None, typer.Option(help="Override a parameter: KEY=VALUE")] = None,
     latency_ms: Annotated[int, typer.Option(help="Simulated order latency")] = 50,
-    hours: Hours = 6.0,
+    hours: Hours = DEFAULT_HOURS,
     seed: Seed = 0,
     ledger: LedgerPath = None,
     ui: Annotated[bool, typer.Option("--ui", help="Then open the dashboard on the result")] = False,
@@ -106,6 +107,7 @@ def demo(
         if live:
             assert data is not None
             start = _now_window_ms() - int(history * 3_600_000) // 300_000 * 300_000
+            hours = hours if hours != DEFAULT_HOURS else 24 * 365  # runs until stopped unless --hours says
             spec = synthetic.Spec(hours=hours + history, seed=seed, start_ms=start)
             _demo_live(exp, data, spec, speed, port, browser)
             return

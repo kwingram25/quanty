@@ -15,6 +15,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
 from quanty.control import ControlStore
+from quanty.core.ledger import Summary
 from quanty.ui import charts, queries
 
 HERE = Path(__file__).parent
@@ -135,6 +136,11 @@ def create_app(data: Path, refresh_s: int = 5) -> FastAPI:
         slots = charts.color_slots([s.instance for s in v.summaries])
         chart = charts.step_chart(curves, slots, label=f"Cumulative realized P&L, {r.name}")
         session, history = control_view(r.name)
+        # every strategy: those with activity, plus a running session's that haven't traded yet
+        summaries = {x.instance: x for x in v.summaries}
+        for iid in (session or {}).get("state", {}).get("instances", {}):
+            summaries.setdefault(iid, Summary(iid, 0, 0, 0, 0.0, 0.0, 0.0, 0, 0))
+        strategies = [summaries[k] for k in sorted(summaries)]
         return page(
             request,
             "run.html",
@@ -145,6 +151,8 @@ def create_app(data: Path, refresh_s: int = 5) -> FastAPI:
             chart=chart,
             positions=queries.positions(r),
             recent=queries.recent(r),
+            activity=queries.activity(r),
+            strategies=strategies,
             session=session,
             history=history,
             token=token,

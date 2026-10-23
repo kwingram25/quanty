@@ -51,12 +51,12 @@ header button {
   background: none; border: 1px solid var(--border); border-radius: 6px; color: var(--ink-2);
   padding: 4px 10px; cursor: pointer; font: inherit;
 }
-main { max-width: 1160px; margin: 0 auto; padding: 20px 24px 48px; }
+main { max-width: 1320px; margin: 0 auto; padding: 20px 24px 48px; }
 h1 { font-size: 20px; margin: 0 0 4px; }
 h2 { font-size: 15px; margin: 28px 0 10px; }
 .sub { color: var(--ink-2); margin: 0 0 16px; overflow-wrap: anywhere; }
 .muted, .empty { color: var(--muted); }
-section.card {
+.card {
   background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 16px;
   margin-bottom: 16px; overflow-x: auto;
 }
@@ -126,3 +126,48 @@ svg.spark { width: 140px; height: 28px; vertical-align: middle; }
 .notice { padding: 8px 12px; border-radius: 8px; border: 1px solid var(--border); background: var(--surface); }
 .notice::before { content: "✓ "; color: var(--good); }
 .notice.bad::before { content: "✕ "; color: var(--critical); }
+
+/* run page: strategies left, chart and events right, tabs below */
+.layout { display: grid; grid-template-columns: minmax(260px, 320px) minmax(0, 1fr); gap: 16px; align-items: start; }
+.layout .card { margin-bottom: 0; }
+.main-col { display: grid; gap: 16px; min-width: 0; }
+.card h2 { margin: 0 0 10px; }
+.card h2 .muted { font-weight: 400; font-size: 12px; margin-left: 6px; }
+.side h2 + form, .side h2 + ul { margin-top: 0; }
+.side h2:not(:first-child) { margin-top: 18px; }
+ul.strategies, ul.feed { list-style: none; margin: 0; padding: 0; }
+ul.strategies li { padding: 10px 0; border-bottom: 1px solid var(--grid); }
+ul.strategies li:last-child { border-bottom: none; }
+ul.strategies .row1, ul.strategies .row2 { display: flex; align-items: center; gap: 8px; }
+ul.strategies .row1 { justify-content: space-between; font-weight: 600; }
+ul.strategies .row2 { margin-top: 4px; font-size: 12px; }
+ul.strategies .row2 .muted { flex: 1; }
+.side .confirm { display: block; font-size: 12px; color: var(--ink-2); margin-bottom: 8px; }
+.side .confirm input { display: block; width: 100%; margin: 4px 0 0; }
+.side .kill { width: 100%; margin-top: 14px; }
+.side .hint { font-size: 12px; color: var(--muted); margin: 8px 0 0; }
+.controls button { padding: 2px 10px; font-size: 12px; }
+.controls button.kill { padding: 6px 12px; font-size: 13px; }
+ul.feed { max-height: 280px; overflow-y: auto; }
+ul.feed li { display: grid; grid-template-columns: auto auto 1fr; gap: 8px; align-items: baseline;
+  padding: 6px 0; border-bottom: 1px solid var(--grid); font-size: 13px; }
+ul.feed .when { font-variant-numeric: tabular-nums; font-size: 12px; }
+ul.feed .detail { display: block; color: var(--ink-2); font-size: 12px; overflow-wrap: anywhere; }
+.tabs { margin-top: 16px; }
+.tablist { display: flex; gap: 4px; border-bottom: 1px solid var(--grid); margin: -4px 0 12px; }
+.tablist button {
+  font: inherit; background: none; border: none; color: var(--ink-2); padding: 8px 12px; cursor: pointer;
+  border-bottom: 2px solid transparent; margin-bottom: -1px;
+}
+.tablist button:hover { color: var(--ink); }
+.tablist button[aria-selected="true"] { color: var(--ink); border-bottom-color: var(--ink); font-weight: 600; }
+.tablist button .muted { font-weight: 400; margin-left: 4px; }
+/* the shown panel follows <html data-tab-run>, which refreshes never replace */
+[data-tabs="run"] [role=tabpanel] { display: none; overflow-x: auto; }
+:root:not([data-tab-run]) [data-panel="activity"],
+:root[data-tab-run="activity"] [data-panel="activity"],
+:root[data-tab-run="positions"] [data-panel="positions"],
+:root[data-tab-run="commands"] [data-panel="commands"] { display: block; }
+@media (max-width: 860px) {
+  .layout { grid-template-columns: minmax(0, 1fr); }
+}

@@ -124,7 +124,7 @@ def test_button_press_reaches_the_session(ui: tuple[TestClient, Controller, Path
         t.join()
     assert r.status_code == 200 and "halted a" in r.text
     assert c.trader.halted == {"a"}
-    assert "Command history" in r.text
+    assert 'data-panel="commands"' in r.text and "halted a" in r.text.split('data-panel="commands"')[1]
 
 
 def test_not_running_session_gets_no_command(ui: tuple[TestClient, Controller, Path]) -> None:

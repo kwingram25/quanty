@@ -15,7 +15,7 @@ One strategy file runs unchanged in four modes. Only the broker behind it change
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/images/dashboard-dark.png">
-  <img alt="The quanty dashboard: cumulative realized P&L of three strategy variants over 24 synthetic hours, with a hover tooltip" src="docs/images/dashboard-light.png">
+  <img alt="The quanty dashboard during a paper session: strategies with halt controls on the left, cumulative realized P&L with a hover tooltip and the event feed on the right" src="docs/images/dashboard-light.png">
 </picture>
 
 ## Try it

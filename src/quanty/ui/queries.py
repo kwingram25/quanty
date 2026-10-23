@@ -174,6 +174,57 @@ def recent(run: Run, limit: int = 50) -> dict[str, list[Any]]:
     return {"orders": orders, "fills": fills, "logs": list(logs)}
 
 
+@dataclass(frozen=True)
+class Activity:
+    """An order with its fills folded in."""
+
+    order: OrderRow
+    fills: int
+    avg_price: float | None
+    fees: float
+    realized: float
+    liquidity: str  # maker / taker / mixed / ""
+
+
+def activity(run: Run, limit: int = 100) -> list[Activity]:
+    """The latest orders, newest first, each with what filled, at what price and cost."""
+    engine = _open(run.path)
+    try:
+        with Session(engine) as conn:
+            orders = list(
+                conn.execute(select(OrderRow).order_by(OrderRow.created_ts.desc()).limit(limit)).scalars()
+            )
+            ids = [o.id for o in orders]
+            agg = {
+                r.order_id: r
+                for r in conn.execute(
+                    select(
+                        FillRow.order_id,
+                        func.count().label("n"),
+                        func.sum(FillRow.qty).label("qty"),
+                        func.sum(FillRow.qty * FillRow.price).label("cost"),
+                        func.sum(FillRow.fee).label("fees"),
+                        func.sum(FillRow.realized).label("realized"),
+                        func.min(FillRow.liquidity).label("liq_lo"),
+                        func.max(FillRow.liquidity).label("liq_hi"),
+                    )
+                    .where(FillRow.order_id.in_(ids))
+                    .group_by(FillRow.order_id)
+                )
+            }
+    finally:
+        engine.dispose()
+    out = []
+    for o in orders:
+        a = agg.get(o.id)
+        if a is None:
+            out.append(Activity(o, 0, None, 0.0, 0.0, ""))
+            continue
+        liq = str(a.liq_lo) if a.liq_lo == a.liq_hi else "mixed"
+        out.append(Activity(o, a.n, a.cost / a.qty if a.qty else None, a.fees or 0.0, a.realized or 0.0, liq))
+    return out
+
+
 def feed_states(data: Path, hours: float = 2.0) -> list[FeedState]:
     path = data / "quanty.sqlite"
     if not path.exists():

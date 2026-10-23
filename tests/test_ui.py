@@ -106,7 +106,8 @@ def test_live_run_shows_positions_and_only_notable_events(data: Path) -> None:
     msgs = [r.msg for r in queries.recent(run)["logs"]]
     assert set(msgs) == {"shadow preview", "live order rejected", "live broker disabled"}
     html = TestClient(create_app(data)).get("/runs/live/acct").text
-    assert "live broker disabled" in html and "tick" not in html.split("Events")[1].split("Recent fills")[0]
+    events = html.split('id="events"')[1].split("</section>")[0]
+    assert "live broker disabled" in events and ">tick<" not in events
     assert '"big"' not in html  # request bodies are left out of the details column
 
 

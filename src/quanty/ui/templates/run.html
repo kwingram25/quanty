@@ -1,7 +1,8 @@
 {% extends "base.html" %}
 {% block title %}quanty · {{ v.run.name }}{% endblock %}
 {% block main %}
-<h1>{{ v.run.name.split("/", 1)[1] }} <span class="badge {{ v.run.mode }}">{{ v.run.mode }}</span></h1>
+<h1>{{ v.run.name.split("/", 1)[1] }} <span class="badge {{ v.run.mode }}">{{ v.run.mode }}</span>
+  {% if session %}<span class="badge ok">running</span>{% endif %}</h1>
 <p class="sub"><span title="{{ v.run.path }}">{{ v.run.mode }}/{{ v.run.path.name }}</span> · last activity {{ v.last_ts | ago }}</p>
 
 <div class="stats">
@@ -13,159 +14,148 @@
 
 {% if msg %}<p class="notice {{ 'bad' if msg_bad else '' }}" role="status">{{ msg }}</p>{% endif %}
 
-{% if session %}
-<section class="card controls">
-  <h2 style="margin-top:0">Controls <span class="badge ok">running</span> <span class="muted">pid {{ session.pid }}</span></h2>
-  <p class="sub">Halt stops new buys and cancels resting buys; exits and stops still go through. Disarm makes a
-    live broker refuse every order, exits included, and cancels its resting orders.</p>
-  <form method="post" action="/runs/{{ v.run.name }}/control">
-    <input type="hidden" name="token" value="{{ token }}">
-    {% if v.run.mode == "live" %}
-    <p><label>Type <strong>{{ v.run.name.split("/", 1)[1] }}</strong> to confirm actions on this live run:
-      <input name="confirm" autocomplete="off" placeholder="run name" required></label></p>
+{% set instances = session.state.instances if session else {} %}
+<div class="layout">
+  {# --- left: strategies (and, for a running session, its controls) --- #}
+  <aside class="card side {{ 'controls' if session }}">
+    <h2>Strategies</h2>
+    {% if session %}<form method="post" action="/runs/{{ v.run.name }}/control">
+      <input type="hidden" name="token" value="{{ token }}">
+      {% if v.run.mode == "live" %}
+      <label class="confirm">Type <strong>{{ v.run.name.split("/", 1)[1] }}</strong> to confirm actions on this live run
+        <input name="confirm" autocomplete="off" placeholder="run name" required></label>
+      {% endif %}
     {% endif %}
-    <table>
-      <thead><tr><th>Strategy</th><th>Broker</th><th>State</th><th></th></tr></thead>
-      <tbody>
-      {% for iid, s in session.state.instances | dictsort %}
-        <tr><td>{{ iid }}</td><td>{{ s.broker }}</td>
-          <td>{% if s.halted %}<span class="badge warning">halted</span>{% else %}<span class="badge ok">trading</span>{% endif %}</td>
-          <td class="num">{% if s.halted %}<button name="cmd" value="resume:{{ iid }}">Resume</button>
-            {% else %}<button name="cmd" value="halt:{{ iid }}">Halt</button>{% endif %}</td></tr>
-      {% endfor %}
-      </tbody>
-    </table>
-    {% set live_brokers = session.state.brokers | dictsort | selectattr("1.kind", "equalto", "live") | list %}
-    {% if live_brokers %}
-    <table style="margin-top:12px">
-      <thead><tr><th>Live broker</th><th>State</th><th></th></tr></thead>
-      <tbody>
-      {% for name, b in live_brokers %}
-        <tr><td>{{ name }}</td>
-          <td>{% if b.disabled %}<span class="badge error">disabled</span> <span class="muted">{{ b.disabled }}</span>
-              {% elif b.armed %}<span class="badge live">armed</span>{% else %}<span class="badge warning">disarmed</span>{% endif %}</td>
-          <td class="num">{% if b.armed %}<button name="cmd" value="disarm:{{ name }}">Disarm</button>
-            {% elif session.can_arm and not b.disabled %}<button name="cmd" value="arm:{{ name }}">Arm</button>{% endif %}</td></tr>
-      {% endfor %}
-      </tbody>
-    </table>
-    {% endif %}
-    <p style="margin-top:14px"><button class="danger" name="cmd" value="kill:">Kill switch: halt everything</button></p>
-  </form>
-  {% if history %}
-  <h2>Command history</h2>
-  <table>
-    <thead><tr><th>Sent</th><th>Action</th><th>Target</th><th>Status</th><th>Result</th></tr></thead>
-    <tbody>
-    {% for c in history %}
-      <tr><td class="muted">{{ c.created_ts | clock }}</td><td>{{ c.action }}</td><td>{{ c.target or "all" }}</td>
-        <td><span class="badge {{ {'done': 'ok', 'failed': 'error'}.get(c.status, 'warning') }}">{{ c.status }}</span></td>
-        <td class="wrap">{{ c.result }}</td></tr>
+    <ul class="strategies">
+    {% for s in strategies %}
+      {% set st = instances.get(s.instance) %}
+      <li>
+        <div class="row1">
+          <span class="name">{% if s.instance in slots %}<span class="swatch s{{ slots[s.instance] }}"></span>{% endif %}{{ s.instance }}</span>
+          <span class="num {{ s.pnl | sign }}">{{ s.pnl | money }}</span>
+        </div>
+        <div class="row2">
+          <span class="muted">{{ s.fills }} fills · {{ s.wins }}–{{ s.losses }}{% if s.rejected %} · {{ s.rejected }} rejected{% endif %}</span>
+          {% if st %}
+            {% if st.halted %}<span class="badge warning">halted</span>
+              <button name="cmd" value="resume:{{ s.instance }}">Resume</button>
+            {% else %}<span class="badge ok">trading</span>
+              <button name="cmd" value="halt:{{ s.instance }}">Halt</button>{% endif %}
+          {% endif %}
+        </div>
+      </li>
+    {% else %}
+      <li class="empty">No activity yet.</li>
     {% endfor %}
-    </tbody>
-  </table>
-  {% endif %}
-</section>
-{% endif %}
+    </ul>
+    {% if session %}
+      {% set live_brokers = session.state.brokers | dictsort | selectattr("1.kind", "equalto", "live") | list %}
+      {% if live_brokers %}
+      <h2>Live brokers</h2>
+      <ul class="strategies">
+      {% for name, b in live_brokers %}
+        <li><div class="row1"><span class="name">{{ name }}</span>
+          {% if b.disabled %}<span class="badge error">disabled</span>
+          {% elif b.armed %}<span class="badge live">armed</span>{% else %}<span class="badge warning">disarmed</span>{% endif %}</div>
+          <div class="row2"><span class="muted">{{ b.disabled }}</span>
+          {% if b.armed %}<button name="cmd" value="disarm:{{ name }}">Disarm</button>
+          {% elif session.can_arm and not b.disabled %}<button name="cmd" value="arm:{{ name }}">Arm</button>{% endif %}</div></li>
+      {% endfor %}
+      </ul>
+      {% endif %}
+      <button class="danger kill" name="cmd" value="kill:">Kill switch: halt everything</button>
+      <p class="hint">Halt: no new buys, resting buys canceled, exits still allowed. Disarm: a live broker
+        refuses every order, exits included.</p>
+    </form>
+    {% endif %}
+  </aside>
 
-<section class="card">
-  <h2 style="margin-top:0">Cumulative realized P&amp;L</h2>
-  {% if curves | length > 1 %}
-  <div class="legend">
-    {% for name in curves | sort %}<span><span class="swatch s{{ slots[name] }}"></span>{{ name }}</span>{% endfor %}
+  {# --- right: chart and event feed --- #}
+  <div class="main-col">
+    <section class="card">
+      <h2>Cumulative realized P&amp;L</h2>
+      {% if curves | length > 1 %}
+      <div class="legend">
+        {% for name in curves | sort %}<span><span class="swatch s{{ slots[name] }}"></span>{{ name }}</span>{% endfor %}
+      </div>
+      {% endif %}
+      {{ chart }}
+    </section>
+    <section class="card" id="events">
+      <h2>Events <span class="muted">warnings, errors, controls, shadow and live broker events</span></h2>
+      {% if recent.logs %}
+      <ul class="feed">
+      {% for r in recent.logs %}
+        <li><span class="muted when">{{ r.ts | clock }}</span>
+          <span class="badge {{ r.level }}">{{ r.level }}</span>
+          <span class="what"><strong>{{ r.msg }}</strong> <span class="muted">{{ r.instance }}</span>
+            <span class="detail">{{ r.fields | brief }}</span></span></li>
+      {% endfor %}
+      </ul>
+      {% else %}<p class="empty">Nothing notable.</p>{% endif %}
+    </section>
+  </div>
+</div>
+
+{# --- tabs: the remaining views --- #}
+<section class="card tabs" data-tabs="run">
+  <div class="tablist" role="tablist">
+    <button type="button" role="tab" data-tab="activity">Activity <span class="muted">{{ activity | length }}</span></button>
+    <button type="button" role="tab" data-tab="positions">Positions <span class="muted">{{ positions | length }}</span></button>
+    {% if session or history %}<button type="button" role="tab" data-tab="commands">Commands <span class="muted">{{ history | length }}</span></button>{% endif %}
+  </div>
+
+  <div role="tabpanel" data-panel="activity">
+    {% if activity %}
+    <table>
+      <thead><tr><th>Time</th><th>Strategy</th><th>Market</th><th>Order</th><th class="num">Limit</th>
+        <th class="num">Qty</th><th class="num">Filled</th><th class="num">Avg fill</th><th class="num">Fees</th>
+        <th>Liquidity</th><th class="num">Realized</th><th>Status</th></tr></thead>
+      <tbody>
+      {% for a in activity %}{% set o = a.order %}
+        <tr><td class="muted">{{ o.created_ts | clock }}</td><td>{{ o.instance }}</td><td>{{ o.market_id }}</td>
+          <td>{{ o.action }} {{ o.side }} {{ o.tif }}{% if o.post_only %} post-only{% endif %}</td>
+          <td class="num">{{ "%.3f" | format(o.price) }}</td><td class="num">{{ "%g" | format(o.qty) }}</td>
+          <td class="num">{{ "%g" | format(o.filled) }}</td>
+          <td class="num">{% if a.avg_price is not none %}{{ "%.3f" | format(a.avg_price) }}{% endif %}</td>
+          <td class="num">{% if a.fills %}{{ a.fees | money }}{% endif %}</td><td>{{ a.liquidity }}</td>
+          <td class="num {{ a.realized | sign }}">{% if a.realized %}{{ a.realized | money }}{% endif %}</td>
+          <td>{{ o.status }}{% if o.reason %} <span class="muted" title="{{ o.reason }}">· {{ o.reason | truncate(40) }}</span>{% endif %}</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    {% else %}<p class="empty">No orders yet.</p>{% endif %}
+  </div>
+
+  <div role="tabpanel" data-panel="positions">
+    {% if positions %}
+    <table>
+      <thead><tr><th>Strategy</th><th>Market</th><th>Side</th><th class="num">Contracts</th><th class="num">Avg price</th></tr></thead>
+      <tbody>
+      {% for p in positions %}
+        <tr><td>{{ p.instance }}</td><td>{{ p.market_id }}</td><td>{{ p.side }}</td>
+          <td class="num">{{ "%g" | format(p.qty) }}</td><td class="num">{{ "%.3f" | format(p.avg_price) }}</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    {% else %}<p class="empty">No open positions.</p>{% endif %}
+  </div>
+
+  {% if session or history %}
+  <div role="tabpanel" data-panel="commands">
+    {% if history %}
+    <table>
+      <thead><tr><th>Sent</th><th>Action</th><th>Target</th><th>Status</th><th>Result</th></tr></thead>
+      <tbody>
+      {% for c in history %}
+        <tr><td class="muted">{{ c.created_ts | clock }}</td><td>{{ c.action }}</td><td>{{ c.target or "all" }}</td>
+          <td><span class="badge {{ {'done': 'ok', 'failed': 'error'}.get(c.status, 'warning') }}">{{ c.status }}</span></td>
+          <td class="wrap">{{ c.result }}</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    {% else %}<p class="empty">No commands sent yet.</p>{% endif %}
   </div>
   {% endif %}
-  {{ chart }}
-</section>
-
-<section class="card">
-  <h2 style="margin-top:0">Strategies</h2>
-  <table>
-    <thead><tr>
-      <th>Instance</th><th class="num">Orders</th><th class="num">Rejected</th><th class="num">Fills</th>
-      <th class="num">Contracts</th><th class="num">Fees</th><th class="num">Won</th><th class="num">Lost</th>
-      <th class="num">Realized P&amp;L</th>
-    </tr></thead>
-    <tbody>
-    {% for s in v.summaries %}
-      <tr>
-        <td>{% if s.instance in slots %}<span class="swatch s{{ slots[s.instance] }}"></span>{% endif %}{{ s.instance }}</td>
-        <td class="num">{{ s.orders }}</td><td class="num">{{ s.rejected }}</td><td class="num">{{ s.fills }}</td>
-        <td class="num">{{ "%g" | format(s.contracts) }}</td><td class="num">{{ s.fees | money }}</td>
-        <td class="num">{{ s.wins }}</td><td class="num">{{ s.losses }}</td>
-        <td class="num {{ s.pnl | sign }}">{{ s.pnl | money }}</td>
-      </tr>
-    {% else %}
-      <tr><td colspan="9" class="empty">No activity yet.</td></tr>
-    {% endfor %}
-    </tbody>
-  </table>
-</section>
-
-<section class="card">
-  <h2 style="margin-top:0">Open positions</h2>
-  {% if positions %}
-  <table>
-    <thead><tr><th>Instance</th><th>Market</th><th>Side</th><th class="num">Contracts</th><th class="num">Avg price</th></tr></thead>
-    <tbody>
-    {% for p in positions %}
-      <tr><td>{{ p.instance }}</td><td>{{ p.market_id }}</td><td>{{ p.side }}</td>
-        <td class="num">{{ "%g" | format(p.qty) }}</td><td class="num">{{ "%.3f" | format(p.avg_price) }}</td></tr>
-    {% endfor %}
-    </tbody>
-  </table>
-  {% else %}<p class="empty">None.</p>{% endif %}
-</section>
-
-<section class="card">
-  <h2 style="margin-top:0">Events</h2>
-  <p class="sub">Warnings, errors, shadow previews and live broker events, newest first.</p>
-  {% if recent.logs %}
-  <table>
-    <thead><tr><th>Time</th><th>Level</th><th>Source</th><th>Event</th><th>Details</th></tr></thead>
-    <tbody>
-    {% for r in recent.logs %}
-      <tr><td class="muted">{{ r.ts | clock }}</td><td><span class="badge {{ r.level }}">{{ r.level }}</span></td>
-        <td>{{ r.instance }}</td><td>{{ r.msg }}</td><td class="wrap">{{ r.fields | brief }}</td></tr>
-    {% endfor %}
-    </tbody>
-  </table>
-  {% else %}<p class="empty">Nothing notable.</p>{% endif %}
-</section>
-
-<section class="card">
-  <h2 style="margin-top:0">Recent fills</h2>
-  {% if recent.fills %}
-  <table>
-    <thead><tr><th>Time</th><th>Instance</th><th>Market</th><th>Order</th><th class="num">Qty</th>
-      <th class="num">Price</th><th class="num">Fee</th><th>Liquidity</th><th class="num">Realized</th></tr></thead>
-    <tbody>
-    {% for f in recent.fills %}
-      <tr><td class="muted">{{ f.ts | clock }}</td><td>{{ f.instance }}</td><td>{{ f.market_id }}</td>
-        <td>{{ f.action }} {{ f.side }}</td><td class="num">{{ "%g" | format(f.qty) }}</td>
-        <td class="num">{{ "%.3f" | format(f.price) }}</td><td class="num">{{ f.fee | money }}</td><td>{{ f.liquidity }}</td>
-        <td class="num {{ f.realized | sign }}">{% if f.realized %}{{ f.realized | money }}{% endif %}</td></tr>
-    {% endfor %}
-    </tbody>
-  </table>
-  {% else %}<p class="empty">No fills yet.</p>{% endif %}
-</section>
-
-<section class="card">
-  <h2 style="margin-top:0">Recent orders</h2>
-  {% if recent.orders %}
-  <table>
-    <thead><tr><th>Time</th><th>Instance</th><th>Market</th><th>Order</th><th class="num">Price</th>
-      <th class="num">Qty</th><th class="num">Filled</th><th>Status</th><th>Reason</th></tr></thead>
-    <tbody>
-    {% for o in recent.orders %}
-      <tr><td class="muted">{{ o.created_ts | clock }}</td><td>{{ o.instance }}</td><td>{{ o.market_id }}</td>
-        <td>{{ o.action }} {{ o.side }} {{ o.tif }}{% if o.post_only %} post-only{% endif %}</td>
-        <td class="num">{{ "%.3f" | format(o.price) }}</td><td class="num">{{ "%g" | format(o.qty) }}</td>
-        <td class="num">{{ "%g" | format(o.filled) }}</td><td>{{ o.status }}</td><td class="wrap">{{ o.reason }}</td></tr>
-    {% endfor %}
-    </tbody>
-  </table>
-  {% else %}<p class="empty">No orders yet.</p>{% endif %}
 </section>
 {% endblock %}
