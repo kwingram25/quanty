@@ -84,7 +84,7 @@ def demo(
         bool, typer.Option("--live", help="Play the markets in real time with the dashboard open (paper)")
     ] = False,
     speed: Annotated[float, typer.Option(help="With --live: market time per wall-clock second")] = 10.0,
-    history: Annotated[float, typer.Option(help="With --live: hours already traded when it opens")] = 2.0,
+    history: Annotated[float, typer.Option(help="With --live: hours already traded when it opens")] = 24.0,
 ) -> None:
     """Backtest one strategy on synthetic up/down markets.
 
@@ -321,9 +321,13 @@ def _demo_live(
     async def play() -> None:
         # the past (before now) at once, so the dashboard opens on a run with history; then live
         live_from = _now_window_ms()
-        for ev in synthetic.events_multi(spec, ladder=True):
+        playback.catching_up = True
+        for n, ev in enumerate(synthetic.events_multi(spec, ladder=True)):
             if ev.ts > live_from:
+                playback.catching_up = False
                 await playback.wait_for(ev.ts)
+            elif n % 5000 == 0:
+                await asyncio.sleep(0)  # the history plays at once; let the dashboard serve meanwhile
             trader.advance(ev.ts)
             trader.process(ev)
         server.should_exit = True

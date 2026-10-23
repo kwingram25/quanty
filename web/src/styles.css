@@ -371,3 +371,5 @@ tbody tr:hover td { background: var(--raised); }
 .pill.platform.stale .dot, .pill.platform.waiting .dot { background: var(--warning); }
 .pill.platform.down .dot { background: var(--critical); }
 @media (max-width: 760px) { .accounts .venue { display: none; } }
+
+.tabbar .ranges { margin-left: auto; align-self: center; }

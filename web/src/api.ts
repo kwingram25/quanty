@@ -57,7 +57,7 @@ export interface SessionState {
   /** exclusive event -> instance -> worst-case loss and best-case gain */
   exposure?: Record<string, Record<string, { loss: number; gain: number }>>;
   /** a demo's playback speed (x real time) and the speeds it can switch to */
-  speed?: { value: number; options: number[] } | null;
+  speed?: { value: number; options: number[]; catching_up?: boolean } | null;
   /** feeds this session is connected to and their health ("simulated" in a demo) */
   platforms?: { name: string; status: string }[];
 }

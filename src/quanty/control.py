@@ -149,6 +149,7 @@ class Playback:
 
     def __init__(self, speed: float, options: tuple[float, ...]) -> None:
         self.speed, self.options = speed, options
+        self.catching_up = False  # playing the history before now, as fast as it can
         self._anchor: tuple[float, int] | None = None  # (monotonic s, event ms) at the last change
 
     def set(self, speed: float) -> None:
@@ -215,7 +216,11 @@ class Controller:
             "platforms": self.platforms(),
             "speed": None
             if self.playback is None
-            else {"value": self.playback.speed, "options": list(self.playback.options)},
+            else {
+                "value": self.playback.speed,
+                "options": list(self.playback.options),
+                "catching_up": self.playback.catching_up,
+            },
         }
 
     def platforms(self) -> list[dict[str, str]]:

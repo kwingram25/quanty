@@ -149,7 +149,11 @@ def test_demo_speed_switches_and_real_sessions_refuse_it(tmp_path: Path) -> None
     r = run_cmd(c, store, "speed", "1")
     assert r["status"] == "done" and r["result"] == "real time" and c.playback.speed == 1.0
     assert run_cmd(c, store, "speed", "3")["status"] == "failed" and c.playback.speed == 1.0
-    assert store.session("live/acct")["state"]["speed"] == {"value": 1.0, "options": [1.0, 10.0]}  # type: ignore[index]
+    assert store.session("live/acct")["state"]["speed"] == {
+        "value": 1.0,
+        "options": [1.0, 10.0],
+        "catching_up": False,
+    }  # type: ignore[index]
 
 
 def test_playback_reanchors_without_jumping() -> None:

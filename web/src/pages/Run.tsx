@@ -54,6 +54,7 @@ function Run({ snap, live }: { snap: Snapshot; live: boolean }) {
               </span>
             ))}
             <SpeedToggle run={snap.run.name} session={snap.session} />
+            {snap.session?.speed?.catching_up && <span className="pill warning"><span className="dot" />loading history…</span>}
           </h1>
           <p>{snap.run.file} · last activity {ago(snap.run.last_ts)}</p>
         </div>
@@ -85,6 +86,8 @@ function Run({ snap, live }: { snap: Snapshot; live: boolean }) {
 const TABS = ["chart", "activity", "positions", "commands"] as const;
 type Tab = (typeof TABS)[number];
 
+const RANGES: Record<string, number | null> = { "1h": 3_600_000, "6h": 21_600_000, "24h": 86_400_000, All: null };
+
 /** The center panel: the P&L chart, or one of the tables, in the same space. */
 function Center({ snap, slots, halted }: { snap: Snapshot; slots: Record<string, number>; halted: Set<string> }) {
   const [tab, setTab] = useState<Tab>(() => {
@@ -107,6 +110,10 @@ function Center({ snap, slots, halted }: { snap: Snapshot; slots: Record<string,
     chart: null, activity: snap.activity.length, positions: snap.positions.length, commands: snap.commands.length,
   };
   const label = (t: Tab) => (t === "chart" ? "P&L" : t[0].toUpperCase() + t.slice(1));
+  const [range, setRange] = useState<string>(() => {
+    try { const r = localStorage.getItem("chart:range"); return r && r in RANGES ? r : "All"; } catch { return "All"; }
+  });
+  const pickRange = (r: string) => { setRange(r); try { localStorage.setItem("chart:range", r); } catch { /* private mode */ } };
   return (
     <section className="panel center">
       <div className="tabbar" role="tablist">
@@ -116,9 +123,20 @@ function Center({ snap, slots, halted }: { snap: Snapshot; slots: Record<string,
             {tab === t && <motion.span className="underline" layoutId="tab-underline" />}
           </button>
         ))}
+              {tab === "chart" && (
+          <div className="segmented ranges" role="radiogroup" aria-label="Chart range">
+            {Object.keys(RANGES).map((r) => (
+              <button key={r} role="radio" aria-checked={range === r} onClick={() => pickRange(r)}>
+                {range === r && <motion.span className="thumb" layoutId="range-thumb" transition={{ type: "spring", stiffness: 500, damping: 38 }} />}
+                <span>{r}</span>
+              </button>
+            ))}
+          </div>
+        )}
       </div>
       <div className={tab === "chart" ? "chart-pane" : "table-wrap"} role="tabpanel">
-        {tab === "chart" && <PnlChart curves={snap.curves} slots={slots} halted={halted} />}
+        {tab === "chart" && <PnlChart curves={snap.curves} slots={slots} halted={halted} range={RANGES[range]}
+          now={snap.session?.now ?? null} />}
         {tab === "activity" && <Activity snap={snap} />}
         {tab === "positions" && <Positions snap={snap} />}
         {tab === "commands" && <Commands snap={snap} />}
