@@ -80,27 +80,33 @@ def ui(tmp_path: Path) -> tuple[TestClient, Controller, Path]:
     return TestClient(create_app(tmp_path)), c, tmp_path
 
 
-def form_token(client: TestClient) -> str:
-    html = client.get("/runs/live/acct").text
-    return str(html.split('name="token" value="')[1].split('"')[0])
+def token(client: TestClient) -> str:
+    html = client.get("/").text
+    return str(html.split('name="quanty-token" content="')[1].split('"')[0])
 
 
-def test_controls_shown_only_for_a_running_session(ui: tuple[TestClient, Controller, Path]) -> None:
+URL = "/api/runs/live/acct/control"
+
+
+def post(client: TestClient, body: dict[str, str], tok: str | None = None, **headers: str) -> object:
+    return client.post(
+        URL, json=body, headers={"x-quanty-token": tok if tok is not None else token(client), **headers}
+    )
+
+
+def test_session_state_is_in_the_snapshot(ui: tuple[TestClient, Controller, Path]) -> None:
     client, _, _ = ui
-    html = client.get("/runs/live/acct").text
-    assert "Kill switch" in html and 'value="halt:a"' in html and 'value="disarm:real"' in html
+    s = client.get("/api/runs/live/acct").json()["session"]
+    assert set(s["instances"]) == {"a", "b"} and s["brokers"]["real"]["kind"] == "live" and s["can_arm"]
 
 
 def test_ui_gates(ui: tuple[TestClient, Controller, Path]) -> None:
     client, _, tmp = ui
-    token = form_token(client)
-    url = "/runs/live/acct/control"
-    assert client.post(url, data={"cmd": "kill:", "token": "wrong", "confirm": "acct"}).status_code == 403
-    cross = client.post(url, data={"cmd": "kill:", "token": token, "confirm": "acct"},
-                        headers={"origin": "https://evil.example"})  # fmt: skip
-    assert cross.status_code == 403
-    r = client.post(url, data={"cmd": "kill:", "token": token}, follow_redirects=False)
-    assert r.status_code == 303 and "type+acct+to+confirm" in r.headers["location"]
+    assert post(client, {"action": "kill", "confirm": "acct"}, tok="wrong").status_code == 403  # type: ignore[attr-defined]
+    cross = post(client, {"action": "kill", "confirm": "acct"}, origin="https://evil.example")
+    assert cross.status_code == 403  # type: ignore[attr-defined]
+    r = post(client, {"action": "kill"})
+    assert r.status_code == 400 and "type acct to confirm" in r.json()["detail"]  # type: ignore[attr-defined]
     assert ControlStore(tmp / "control.sqlite").history("live/acct") == []  # nothing was sent
 
 
@@ -116,23 +122,19 @@ def test_button_press_reaches_the_session(ui: tuple[TestClient, Controller, Path
     t = threading.Thread(target=session)
     t.start()
     try:
-        r = client.post(
-            "/runs/live/acct/control", data={"cmd": "halt:a", "token": form_token(client), "confirm": "acct"}
-        )
+        r = post(client, {"action": "halt", "target": "a", "confirm": "acct"})
     finally:
         stop.set()
         t.join()
-    assert r.status_code == 200 and "halted a" in r.text
+    assert r.json() == {"ok": True, "result": "halted a"}  # type: ignore[attr-defined]
     assert c.trader.halted == {"a"}
-    assert 'data-panel="commands"' in r.text and "halted a" in r.text.split('data-panel="commands"')[1]
+    assert client.get("/api/runs/live/acct").json()["commands"][0]["result"] == "halted a"
 
 
 def test_not_running_session_gets_no_command(ui: tuple[TestClient, Controller, Path]) -> None:
     client, _, tmp = ui
-    token = form_token(client)
     store = ControlStore(tmp / "control.sqlite")
     with store.engine.begin() as conn:
         conn.exec_driver_sql("UPDATE sessions SET heartbeat_ts = 0")
-    r = client.post("/runs/live/acct/control", data={"cmd": "kill:", "token": token, "confirm": "acct"},
-                    follow_redirects=False)  # fmt: skip
-    assert "not+running" in r.headers["location"] and store.history("live/acct") == []
+    r = post(client, {"action": "kill", "confirm": "acct"})
+    assert r.status_code == 409 and store.history("live/acct") == []  # type: ignore[attr-defined]

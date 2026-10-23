@@ -78,7 +78,7 @@ recording real data, paper trading, shadow trading and live trading.
 | `brokers/` | simulated (with `QueueModel`), shadow and live brokers |
 | `feeds/` | transports, Coinbase and Binance adapters, recording, replay, health |
 | `venues/` | Kalshi and Polymarket US; order APIs; the fake exchange |
-| `ui/`, `control.py` | the dashboard, and the command channel to running sessions |
+| `ui/`, `control.py`, `web/` | the dashboard's API and live stream, the command channel to running sessions, and the React app |
 | `signals.py`, `synthetic.py` | derived values rebuilt identically in replay; deterministic synthetic markets |
 | `db/` | SQLAlchemy models and Alembic migrations |
 
@@ -88,6 +88,15 @@ recording real data, paper trading, shadow trading and live trading.
 uv sync
 uv run pytest && uv run ruff check && uv run mypy
 pre-commit install   # gitleaks, ruff, private-name guard
+```
+
+The dashboard is a React app in `web/` (TypeScript, Vite, Motion). Its build is committed to
+`src/quanty/ui/dist`, so using quanty never needs Node; changing the dashboard does:
+
+```sh
+cd web && npm ci
+npm run dev        # hot reload on :5173, proxying the API of a running `quanty ui` on :8765
+npm run build      # before committing: CI checks the committed build matches the source
 ```
 
 Database tables are SQLAlchemy models in `src/quanty/db/models.py`, migrated automatically when a

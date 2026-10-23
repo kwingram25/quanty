@@ -225,6 +225,82 @@ def activity(run: Run, limit: int = 100) -> list[Activity]:
     return out
 
 
+def tape(run: Run, limit: int = 60) -> list[dict[str, Any]]:
+    """Fills, settlements and notable log rows merged, newest first: what the event feed shows."""
+    engine = _open(run.path)
+    try:
+        with Session(engine) as conn:
+            fills = conn.execute(select(FillRow).order_by(FillRow.id.desc()).limit(limit)).scalars().all()
+            settles = (
+                conn.execute(select(SettlementRow).order_by(SettlementRow.id.desc()).limit(limit))
+                .scalars()
+                .all()
+            )
+            logs = (
+                conn.execute(
+                    select(LogRow)
+                    .where(
+                        (LogRow.level != "info")
+                        | LogRow.msg.like("shadow%")
+                        | LogRow.msg.like("live%")
+                        | LogRow.msg.like("leftover%")
+                    )
+                    .order_by(LogRow.id.desc())
+                    .limit(limit)
+                )
+                .scalars()
+                .all()
+            )
+    finally:
+        engine.dispose()
+    items: list[dict[str, Any]] = []
+    for f in fills:
+        items.append(
+            {
+                "key": f"f{f.id}",
+                "kind": "fill",
+                "ts": f.ts,
+                "instance": f.instance,
+                "market_id": f.market_id,
+                "side": str(f.side),
+                "action": str(f.action),
+                "price": f.price,
+                "qty": f.qty,
+                "fee": f.fee,
+                "realized": f.realized,
+                "liquidity": str(f.liquidity),
+            }
+        )
+    for x in settles:
+        items.append(
+            {
+                "key": f"s{x.id}",
+                "kind": "settlement",
+                "ts": x.ts,
+                "instance": x.instance,
+                "market_id": x.market_id,
+                "side": str(x.side),
+                "qty": x.qty,
+                "payout": x.payout,
+                "pnl": x.pnl,
+            }
+        )
+    for g in logs:
+        items.append(
+            {
+                "key": f"l{g.id}",
+                "kind": "log",
+                "ts": g.ts,
+                "instance": g.instance,
+                "level": g.level,
+                "msg": g.msg,
+                "fields": {k: v for k, v in (g.fields or {}).items() if k != "request"},
+            }
+        )
+    items.sort(key=lambda i: (i["ts"], i["key"]), reverse=True)
+    return items[:limit]
+
+
 def feed_states(data: Path, hours: float = 2.0) -> list[FeedState]:
     path = data / "quanty.sqlite"
     if not path.exists():

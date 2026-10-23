@@ -91,10 +91,14 @@ SQLAlchemy models with Alembic migrations, applied automatically when a file is 
 
 ## Dashboard and controls
 
-`ui/` is a FastAPI app with server-rendered pages, HTMX refreshes and SVG charts; it opens every
-database read-only. Controls go through `control.py`: the dashboard writes commands to
-`data/control.sqlite`; each running session polls for its own, applies them (halt, resume,
-disarm, arm, kill), records the outcome and publishes a heartbeat with its state.
+`ui/` is a FastAPI app serving a JSON API and, per run, a WebSocket that pushes a fresh snapshot
+whenever the ledger or the session's heartbeat changes, along with the rows that are new since the
+last push. The React app in `web/` (built into `ui/dist`) renders it: open markets counting down to
+their close, the P&L chart, a tape of fills, settlements and alerts, and toasts for anything that
+needs attention. Every database is opened read-only. Controls go through `control.py`: the
+dashboard writes commands to `data/control.sqlite`; each running session polls for its own, applies
+them (halt, resume, disarm, arm, kill), records the outcome and publishes a heartbeat with its state,
+including its open markets and the event clock (so countdowns stay right in sped-up demos).
 
 ## Determinism
 

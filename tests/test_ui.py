@@ -11,7 +11,7 @@ from quanty.core import Engine, Instance, Ledger, Side, Tif
 from quanty.db.models import FeedMetricRow
 from quanty.experiment import strategy_class
 from quanty.plugins import discover
-from quanty.ui import charts, queries
+from quanty.ui import queries
 
 pytest.importorskip("fastapi")
 from fastapi.testclient import TestClient
@@ -82,56 +82,60 @@ def data(tmp_path: Path) -> Path:
     return tmp_path
 
 
-def test_pages_render_with_the_ledgers_numbers(data: Path) -> None:
+def test_api_lists_runs_and_snapshots_with_the_ledgers_numbers(data: Path) -> None:
     c = TestClient(create_app(data))
     bt = Ledger(data / "backtest" / "bt.sqlite")
     total = sum(s.pnl for s in bt.summary())
     bt.close()
-    home = c.get("/")
-    assert home.status_code == 200
-    assert "bt" in home.text and "acct" in home.text and "kalshi" in home.text and "ok</span>" in home.text
-    page = c.get("/runs/backtest/bt")
-    assert page.status_code == 200
-    assert f"${total:,.2f}" in page.text
-    assert page.text.count('class="line s') == 2 and page.text.count('class="direct"') == 2
-    assert c.get("/runs/live/missing").status_code == 404
-    assert c.get("/feeds").status_code == 200
+    runs = {r["name"]: r for r in c.get("/api/runs").json()}
+    assert set(runs) == {"backtest/bt", "live/acct"} and not runs["backtest/bt"]["running"]
+    snap = c.get("/api/runs/backtest/bt").json()
+    assert abs(snap["stats"]["pnl"] - total) < 1e-9
+    assert set(snap["curves"]) == {"fav_90", "fav_97"} and snap["session"] is None
+    assert snap["activity"] and {"avg_price", "fees", "status"} <= set(snap["activity"][0])
+    assert c.get("/api/runs/live/missing").status_code == 404
+    (feed,) = c.get("/api/feeds").json()
+    assert feed["feed"] == "kalshi" and feed["status"] == "ok"
 
 
-def test_live_run_shows_positions_and_only_notable_events(data: Path) -> None:
+def test_spa_is_served_with_the_control_token(data: Path) -> None:
+    c = TestClient(create_app(data))
+    page = c.get("/runs/backtest/bt")  # client-side route: the app's index page
+    assert page.status_code == 200 and '<div id="root">' in page.text
+    assert "__QUANTY_TOKEN__" not in page.text and 'name="quanty-token"' in page.text
+
+
+def test_tape_merges_fills_and_only_notable_events(data: Path) -> None:
     run = queries.run_by_name(data, "live/acct")
     assert run is not None
     (pos,) = queries.positions(run)
     assert (pos.instance, pos.qty, round(pos.avg_price, 2)) == ("live_a", 10, 0.45)
-    msgs = [r.msg for r in queries.recent(run)["logs"]]
-    assert set(msgs) == {"shadow preview", "live order rejected", "live broker disabled"}
-    html = TestClient(create_app(data)).get("/runs/live/acct").text
-    events = html.split('id="events"')[1].split("</section>")[0]
-    assert "live broker disabled" in events and ">tick<" not in events
-    assert '"big"' not in html  # request bodies are left out of the details column
+    tape = queries.tape(run)
+    assert {t["kind"] for t in tape} == {"fill", "log"}
+    msgs = {t["msg"] for t in tape if t["kind"] == "log"}
+    assert msgs == {"shadow preview", "live order rejected", "live broker disabled"}
+    assert all("request" not in t.get("fields", {}) for t in tape)  # request bodies left out
+
+
+def test_stream_pushes_a_snapshot(data: Path) -> None:
+    c = TestClient(create_app(data))
+    with c.websocket_connect("/api/runs/live/acct/stream") as ws:
+        msg = ws.receive_json()
+    assert msg["type"] == "snapshot" and msg["data"]["run"]["name"] == "live/acct"
 
 
 def test_reads_while_a_run_is_writing(tmp_path: Path) -> None:
     (tmp_path / "paper").mkdir()
     writer = live_ledger(tmp_path / "paper" / "now.sqlite")  # still open, as in a running session
-    writer.log(3000, "live_a", "live order rejected", {}, level="warning")
-    writer.commit()
     c = TestClient(create_app(tmp_path))
-    assert c.get("/runs/paper/now").status_code == 200
+    assert c.get("/api/runs/paper/now").status_code == 200
     writer.log(4000, "live_a", "live order rejected", {}, level="warning")
     writer.commit()
-    assert c.get("/runs/paper/now").status_code == 200
+    assert c.get("/api/runs/paper/now").json()["tape"][0]["ts"] == 4000  # the new row, read mid-write
     writer.close()
 
 
 def test_ui_never_creates_files(tmp_path: Path) -> None:
     c = TestClient(create_app(tmp_path))
-    assert "No runs yet" in c.get("/").text and "No feed metrics yet" in c.get("/feeds").text
+    assert c.get("/api/runs").json() == [] and c.get("/api/feeds").json() == []
     assert list(tmp_path.iterdir()) == []
-
-
-def test_chart_colors_follow_names_and_json_is_script_safe() -> None:
-    assert charts.color_slots(["b", "a"]) == {"a": 1, "b": 2}
-    assert charts.color_slots(["a", "b", "c"])["b"] == 2  # adding a series doesn't repaint the others
-    svg = charts.step_chart({"</script><b>": [(0, 1.0), (120_000, 2.0)]}, {"</script><b>": 1}, label="x")
-    assert "</script><b>" not in svg and "&lt;/script&gt;&lt;b&gt;" in svg

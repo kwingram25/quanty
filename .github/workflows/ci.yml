@@ -22,6 +22,22 @@ jobs:
       - run: uv run mypy
       - run: uv run pytest
 
+  web:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: npm ci
+        working-directory: web
+      - run: npm run build   # type-checks, then builds into src/quanty/ui/dist
+        working-directory: web
+      - name: the committed build matches the source
+        run: git diff --exit-code --stat -- src/quanty/ui/dist && test -z "$(git status --porcelain -- src/quanty/ui/dist)"
+
   secrets:
     runs-on: ubuntu-latest
     steps:

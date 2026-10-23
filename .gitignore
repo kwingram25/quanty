@@ -42,3 +42,6 @@ experiments/*
 
 # local feed config (feeds.example.toml is the template)
 feeds.toml
+
+# the dashboard build ships in the package (see web/)
+!src/quanty/ui/dist/
