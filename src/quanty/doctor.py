@@ -136,11 +136,33 @@ def _keys(out: list[Check], project: Path, venues: set[str]) -> None:
             signer.from_env()
         except RuntimeError as exc:
             out.append(Check(sec, VENUES[venue], "fail", str(exc), "add the key to .env"))
+        except OSError as exc:
+            out.append(
+                Check(
+                    sec,
+                    VENUES[venue],
+                    "fail",
+                    f"can't read the key file: {exc.strerror or exc}",
+                    "put the key itself in .env as KALSHI_SECRET_KEY",
+                )
+            )
         except (ValueError, TypeError) as exc:
             out.append(
                 Check(sec, VENUES[venue], "fail", f"key isn't valid: {exc}", "re-copy it from the venue")
             )
         else:
+            if venue == "kalshi" and keys().kalshi_private_key_path is not None:
+                out.append(
+                    Check(
+                        sec,
+                        VENUES[venue],
+                        "warn",
+                        "key read from a file (KALSHI_PRIVATE_KEY_PATH), "
+                        "which won't exist on a server or in a container",
+                        "put the key itself in .env as KALSHI_SECRET_KEY",
+                    )
+                )
+                continue
             out.append(Check(sec, VENUES[venue], "ok", "keys present and well-formed"))
     pw = keys().quanty_ui_password
     if pw is None:

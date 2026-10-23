@@ -1,15 +1,18 @@
 """quanty: record, backtest, paper and live trade repeated prediction markets."""
 
 import asyncio
+import contextlib
 import dataclasses
 import random
+import shlex
+import subprocess
 import sys
 import tempfile
 import threading
 import time
 import tomllib
 import webbrowser
-from collections.abc import Iterable
+from collections.abc import Iterable, Iterator
 from pathlib import Path
 from types import ModuleType
 from typing import Annotated, Any
@@ -207,6 +210,9 @@ LedgerOpt = Annotated[Path | None, typer.Option(help="Ledger (default: <data>/<m
 DurationOpt = Annotated[float | None, typer.Option(help="Stop after this many seconds")]
 WindowOpt = Annotated[float, typer.Option(help="Seconds between status reports")]
 ExpArg = Annotated[Path, typer.Argument(help="Experiment config (TOML)", exists=True, dir_okay=False)]
+UiOpt = Annotated[bool, typer.Option("--ui", help="Also serve the dashboard (a separate process)")]
+UiHostOpt = Annotated[str, typer.Option(help="Dashboard interface, with --ui")]
+UiPortOpt = Annotated[int, typer.Option(help="Dashboard port, with --ui")]
 
 
 @app.command()
@@ -217,12 +223,16 @@ def paper(
     ledger: LedgerOpt = None,
     duration: DurationOpt = None,
     window: WindowOpt = 60,
+    ui: UiOpt = False,
+    ui_host: UiHostOpt = "127.0.0.1",
+    ui_port: UiPortOpt = 8765,
 ) -> None:
     """Paper trade: run an experiment's strategies on live feeds with simulated fills (no orders).
 
     Brokers with kind = "shadow" also check every order with the venue (nothing is placed).
     """
-    _session("paper", path, feeds, data, ledger, duration, window, armed=False)
+    with _dashboard(data, ui_host, ui_port) if ui else contextlib.nullcontext():
+        _session("paper", path, feeds, data, ledger, duration, window, armed=False)
 
 
 @app.command()
@@ -236,11 +246,31 @@ def live(
     ledger: LedgerOpt = None,
     duration: DurationOpt = None,
     window: WindowOpt = 60,
+    ui: UiOpt = False,
+    ui_host: UiHostOpt = "127.0.0.1",
+    ui_port: UiPortOpt = 8765,
 ) -> None:
     """Trade for real: kind = "live" brokers place orders on the venues. Needs --arm."""
     if not arm:
         raise _fail(ValueError("quanty live places real orders: pass --arm to confirm"))
-    _session("live", path, feeds, data, ledger, duration, window, armed=True)
+    with _dashboard(data, ui_host, ui_port) if ui else contextlib.nullcontext():
+        _session("live", path, feeds, data, ledger, duration, window, armed=True)
+
+
+@contextlib.contextmanager
+def _dashboard(data: Path, host: str, port: int) -> Iterator[None]:
+    """`quanty ui` alongside a session, in its own process so serving pages never delays trading;
+    stopped with the session. For one-container deployments (Fly.io)."""
+    cmd = [sys.executable, "-m", "quanty", "ui", "--data", str(data), "--host", host, "--port", str(port)]
+    proc = subprocess.Popen(cmd)
+    try:
+        yield
+    finally:
+        proc.terminate()
+        try:
+            proc.wait(5)
+        except subprocess.TimeoutExpired:
+            proc.kill()
 
 
 @app.command()
@@ -274,6 +304,41 @@ def doctor(
     typer.echo(f"\n{fails} problem(s), {warns} warning(s)" if fails or warns else "\nall good")
     if fails:
         raise typer.Exit(1)
+
+
+@app.command()
+def deploy(
+    host: Annotated[
+        str, typer.Argument(help="The server, as you'd give ssh: user@host or a ~/.ssh/config name")
+    ],
+    path: Annotated[Path, typer.Option(help="Project folder")] = Path("."),
+    to: Annotated[
+        str | None, typer.Option(help="Folder on the server (default: the project's name, in your home)")
+    ] = None,
+    check: Annotated[bool, typer.Option(help="Run `quanty doctor` on the server before starting")] = True,
+    dry_run: Annotated[bool, typer.Option("--dry-run", help="Print the commands; run nothing")] = False,
+) -> None:
+    """Copy this project to a server with Docker, check it there, and (re)start it. Run it again after
+    every change. Never sends or deletes data/."""
+    from quanty import deploy as dp
+
+    try:
+        cmds = dp.commands(host, path, to or path.resolve().name, check=check)
+    except ValueError as exc:
+        raise _fail(exc) from None
+    for cmd in cmds:
+        typer.echo(typer.style("$ " + shlex.join(cmd), dim=True))
+        if dry_run:
+            continue
+        try:
+            done = subprocess.run(cmd)
+        except FileNotFoundError:
+            raise _fail(ValueError(f"{cmd[0]} isn't installed here")) from None
+        if done.returncode:
+            typer.echo(f"stopped: {cmd[0]} exited {done.returncode}", err=True)
+            raise typer.Exit(1)
+    if not dry_run:
+        typer.echo(f"deployed. Dashboard: ssh -N -L 8765:127.0.0.1:8765 {host}, then http://127.0.0.1:8765")
 
 
 @app.command()

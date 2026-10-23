@@ -47,3 +47,43 @@ def test_init_command_without_questions(tmp_path: Path, monkeypatch: pytest.Monk
     assert "[feeds.polymarket_us]" in (tmp_path / "q" / "feeds.toml").read_text()
     bad = runner.invoke(cli.app, ["init", str(tmp_path / "r"), "--yes", "--venue", "nasdaq"])
     assert bad.exit_code == 2 and "unknown venue" in bad.stderr
+
+
+def test_kalshi_key_travels_inline_in_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from cryptography.hazmat.primitives import serialization
+    from cryptography.hazmat.primitives.asymmetric import ed25519
+
+    from quanty.venues.auth import KalshiSigner, keys
+
+    pem = ed25519.Ed25519PrivateKey.generate().private_bytes(
+        serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8, serialization.NoEncryption()
+    )
+    (tmp_path / "k.pem").write_bytes(pem)
+    proj = tmp_path / "p"
+    create(proj, Answers(kalshi_key_id="kid", kalshi_key_path=str(tmp_path / "k.pem")), vendor=False)
+    env = (proj / ".env").read_text()
+    assert "KALSHI_PRIVATE_KEY_PATH" not in env and 'KALSHI_SECRET_KEY="-----BEGIN' in env
+    for var in ("KALSHI_KEY_ID", "KALSHI_SECRET_KEY", "KALSHI_PRIVATE_KEY_PATH"):
+        monkeypatch.delenv(var, raising=False)
+    monkeypatch.chdir(proj)
+    keys.cache_clear()
+    try:
+        assert KalshiSigner.from_env().key_id == "kid"  # the .env value loads as the key
+    finally:
+        keys.cache_clear()
+    with pytest.raises(ValueError, match="key file"):
+        create(tmp_path / "q", Answers(kalshi_key_path=str(tmp_path / "missing.pem")), vendor=False)
+
+
+def test_deploy_files(tmp_path: Path) -> None:
+    import tomllib
+
+    create(tmp_path / "My Bot", Answers(), vendor=False)
+    fly = tomllib.loads((tmp_path / "My Bot" / "fly.toml").read_text())
+    assert fly["app"] == "my-bot" and fly["mounts"]["destination"] == "/app/data"
+    assert (
+        fly["processes"]["app"].startswith("paper experiments/main.toml")
+        and "--ui" in fly["processes"]["app"]
+    )
+    cloud = (tmp_path / "My Bot" / "deploy" / "cloud-init.yaml").read_text()
+    assert cloud.startswith("#cloud-config\n") and "get.docker.com" in cloud and "ufw --force enable" in cloud

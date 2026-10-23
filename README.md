@@ -79,8 +79,9 @@ paper trading, shadow trading and live trading; [Deploying](docs/deploying.md) c
 | `quanty demo` | backtest a strategy on synthetic markets (`--ui` opens the dashboard) |
 | `quanty backtest` | run an experiment on synthetic markets, or on recordings with `--data` |
 | `quanty record`, `replay`, `feeds` | record venues and feeds; parse recordings back; feed kinds and health |
-| `quanty paper`, `live` | run an experiment in real time (`live` needs `--arm`) |
+| `quanty paper`, `live` | run an experiment in real time (`live` needs `--arm`; `--ui` adds the dashboard) |
 | `quanty ui` | the dashboard |
+| `quanty init`, `deploy` | create a project; copy it to a Docker server, check it there and start it |
 | `quanty doctor` | check a project before trading: config, keys, clock, venues, leftovers (read-only) |
 | `quanty list`, `params` | strategies quanty can find, and their parameters |
 

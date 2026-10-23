@@ -111,3 +111,11 @@ def test_rate_limited_and_unreachable() -> None:
     got = venue_checks(httpx.MockTransport(handle))
     assert got["Kalshi"].status == "warn" and "rate limited" in got["Kalshi"].detail
     assert got["Polymarket US"].status == "fail" and "unreachable" in got["Polymarket US"].detail
+
+
+def test_a_key_file_path_is_reported_not_raised(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    proj = project(tmp_path, monkeypatch)
+    monkeypatch.setenv("KALSHI_KEY_ID", "kid")
+    monkeypatch.setenv("KALSHI_PRIVATE_KEY_PATH", str(tmp_path / "gone.pem"))
+    got = checks(proj)["Kalshi"]
+    assert got.status == "fail" and "KALSHI_SECRET_KEY" in got.fix

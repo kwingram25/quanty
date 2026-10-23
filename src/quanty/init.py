@@ -7,6 +7,8 @@ my-quanty/
   experiments/main.toml    the strategy, its broker (paper to start) and limits
   strategies/<name>.py     a strategy skeleton aimed at the first series
   Dockerfile, compose.yaml trader + dashboard, persistent data, restart on failure
+  deploy/cloud-init.yaml   server setup to paste as "user data" (Docker, firewall, swap, updates)
+  fly.toml                 the same project on Fly.io (one machine, a volume for data/)
   vendor/                  a quanty wheel, when init runs from a source checkout
   pyproject.toml           so `uv run quanty ...` works here with nothing installed first
   README.md                next steps
@@ -51,8 +53,8 @@ def check_name(name: str) -> str:
     return name
 
 
-def files(a: Answers) -> dict[str, str]:
-    """Project files, relative path -> content."""
+def files(a: Answers, name: str = "my-quanty") -> dict[str, str]:
+    """Project files, relative path -> content. name: the project's (folder) name."""
     first = next((f"{v}:{a.series[v][0]}" for v in a.venues if a.series.get(v)), "kalshi:KXBTC15M")
     return {
         ".env": _env(a),
@@ -63,7 +65,9 @@ def files(a: Answers) -> dict[str, str]:
         f"strategies/{a.strategy}.py": _strategy(a.strategy, first),
         "Dockerfile": DOCKERFILE,
         "compose.yaml": COMPOSE,
-        "README.md": _readme(a),
+        "deploy/cloud-init.yaml": CLOUD_INIT,
+        "fly.toml": FLY.format(app=name),
+        "README.md": _readme(a, name),
     }
 
 
@@ -71,7 +75,7 @@ def create(dest: Path, a: Answers, *, force: bool = False, vendor: bool | None =
     """Write the project; returns what was written. Refuses to overwrite without force.
     vendor: build a quanty wheel into vendor/ (None = when running from a source checkout)."""
     check_name(a.strategy)
-    out = files(a)
+    out = files(a, _slug(dest))
     clash = [p for p in out if (dest / p).exists()]
     if clash and not force:
         raise ValueError(f"{dest} already has {', '.join(clash)} (use --force to overwrite)")
@@ -106,9 +110,13 @@ def _vendor(checkout: Path, into: Path) -> list[str]:
     return [f"vendor/{w.name}" for w in into.glob("quanty-*.whl")]
 
 
+def _slug(dest: Path) -> str:
+    return re.sub(r"[^a-z0-9]+", "-", dest.resolve().name.lower()).strip("-") or "quanty-project"
+
+
 def _pyproject(dest: Path, wheel: str | None) -> str:
     """A uv project depending on quanty (the vendored wheel, else GitHub), so `uv run quanty` just works."""
-    name = re.sub(r"[^a-z0-9]+", "-", dest.resolve().name.lower()).strip("-") or "quanty-project"
+    name = _slug(dest)
     source = f'{{ path = "{wheel}" }}' if wheel else f'{{ git = "{REPO}" }}'
     return f"""[project]
 name = "{name}"
@@ -134,9 +142,10 @@ def _env(a: Answers) -> str:
     ]
     if "kalshi" in a.venues:
         lines += [
-            "# Kalshi: key id and PEM private key file (Ed25519 or RSA)",
+            "# Kalshi: key id and PEM private key (Ed25519 or RSA), inline so it travels with .env to a",
+            "# server or container (a key file path would point at nothing there)",
             f"KALSHI_KEY_ID={a.kalshi_key_id}",
-            f"KALSHI_PRIVATE_KEY_PATH={a.kalshi_key_path}",
+            f"KALSHI_SECRET_KEY={inline_pem(a.kalshi_key_path) if a.kalshi_key_path else ''}",
             "",
         ]
     if "polymarket_us" in a.venues:
@@ -147,6 +156,18 @@ def _env(a: Answers) -> str:
             "",
         ]
     return "\n".join(lines)
+
+
+def inline_pem(path: str) -> str:
+    """A PEM key file as one double-quoted .env value, newlines escaped (dotenv, compose and
+    `fly secrets import` all read it; quanty also accepts the quotes and escapes left in)."""
+    try:
+        text = Path(path).expanduser().read_text().strip()
+    except OSError as exc:
+        raise ValueError(f"Kalshi private key file {path}: {exc.strerror or exc}") from None
+    if "-----BEGIN" not in text:
+        raise ValueError(f"Kalshi private key file {path}: not a PEM key")
+    return '"' + text.replace("\n", "\\n") + '\\n"'
 
 
 def _feeds(a: Answers) -> str:
@@ -209,7 +230,7 @@ def _strategy(name: str, series: str) -> str:
     )
 
 
-def _readme(a: Answers) -> str:
+def _readme(a: Answers, name: str) -> str:
     return f"""# {a.strategy}
 
 A quanty project: your strategy, its configuration, and what's needed to deploy it.
@@ -224,22 +245,27 @@ A quanty project: your strategy, its configuration, and what's needed to deploy 
    then `uv run quanty ui --data data`.
 3. **Backtest** on what you recorded: `uv run quanty backtest experiments/main.toml --data data`.
 4. **Paper trade** live markets with simulated fills, with the dashboard alongside:
-   `uv run quanty paper experiments/main.toml --feeds feeds.toml --data data`
-   and `uv run quanty ui --data data`.
+   `uv run quanty paper experiments/main.toml --feeds feeds.toml --data data --ui`.
 5. **Shadow, then live**: set `kind = "shadow"` in `experiments/main.toml` to have every order checked
    by the venue; for real orders, `kind = "live"` with `max_qty` and `max_notional`, and
    `uv run quanty live experiments/main.toml --feeds feeds.toml --data data --arm`.
 
 ## Deploy
 
-On a server with Docker, copy this folder (with `.env`) and run:
+Any Linux server with Docker (a DigitalOcean Droplet, AWS EC2 or Lightsail, Hetzner, ...): create it
+with `deploy/cloud-init.yaml` pasted as its "user data", then from this folder:
 
-    docker compose up -d --build
+    uv run quanty deploy root@your-server
 
-That starts the trader (paper by default; set `QUANTY_MODE=live` in `.env` to trade for real) and the
-dashboard on 127.0.0.1:8765 of the server. Reach it through an SSH tunnel:
-`ssh -L 8765:127.0.0.1:8765 you@server`, then open http://127.0.0.1:8765. Data persists in `data/`;
-both restart on failure and on reboot. After editing a strategy, `docker compose up -d --build` again.
+That copies this folder (with `.env`; never `data/`), checks it with `quanty doctor` on the server,
+and starts the trader (paper by default; `QUANTY_MODE=live` in `.env` trades for real) and the
+dashboard, both restarted on failure and on reboot. Run it again after every change. The dashboard
+listens on the server's 127.0.0.1:8765: `ssh -N -L 8765:127.0.0.1:8765 root@your-server`, then open
+http://127.0.0.1:8765.
+
+On Fly.io, `fly.toml` runs the same project on one machine with a volume for `data/`. Managed container
+services that wipe the disk on redeploy (App Platform, ECS/Fargate, Cloud Run, Render) don't fit:
+quanty keeps its state in `data/`. The full guide, per provider: {REPO}/blob/main/docs/deploying.md
 
 quanty is installed in the image from `vendor/*.whl` if there is one, otherwise from {REPO}
 (which needs access if the repository is private). Refresh the wheel from a quanty checkout with
@@ -293,6 +319,51 @@ services:
 
 # volumes:
 #   caddy: {}
+"""
+
+CLOUD_INIT = """#cloud-config
+# Server setup: paste as "user data" when creating it (DigitalOcean: Advanced options > Add
+# initialization scripts; AWS EC2: Advanced details > User data). For Ubuntu or Debian images.
+# It installs Docker and lets the login user run it, turns on the firewall with only SSH open, adds
+# 2 GB of swap (the image build needs it on a 1 GB server), and keeps security updates automatic.
+# Ports Docker publishes skip the firewall: compose.yaml publishes the dashboard on 127.0.0.1 only
+# (and 80/443 if you enable its https service). Then, from the project: uv run quanty deploy you@server
+package_update: true
+packages: [ca-certificates, curl, rsync, ufw, unattended-upgrades]
+runcmd:
+  - curl -fsSL https://get.docker.com | sh
+  - for u in ubuntu admin debian; do id "$u" >/dev/null 2>&1 && usermod -aG docker "$u"; done; true
+  - ufw allow 22/tcp
+  - ufw --force enable
+  - fallocate -l 2G /swapfile && chmod 600 /swapfile && mkswap /swapfile && swapon /swapfile
+  - echo '/swapfile none swap sw 0 0' >> /etc/fstab
+"""
+
+FLY = """# Fly.io: one machine runs the trader and the dashboard, with data/ on a volume. First time:
+#   fly apps create {app}                         (the name must be unique on Fly; change it here too)
+#   fly volumes create data --size 10 --region iad
+#   grep -E '^[A-Z_]+=.' .env | fly secrets import
+#   fly deploy --ha=false
+# After changes: fly deploy. Dashboard: fly proxy 8765:8765, then open http://127.0.0.1:8765
+# (it listens on Fly's private network only, reachable by your organization).
+app = "{app}"
+primary_region = "iad"
+
+[build]
+  dockerfile = "Dockerfile"
+
+[processes]
+  # arguments to the image's `quanty`; for real orders: "live experiments/main.toml ... --arm --ui ..."
+  app = "paper experiments/main.toml --feeds feeds.toml --data data --ui --ui-host ::"
+
+[mounts]
+  source = "data"
+  destination = "/app/data"
+
+[[vm]]
+  memory = "1gb"
+  cpu_kind = "shared"
+  cpus = 1
 """
 
 FALLBACK_TEMPLATE = '''"""Strategy template: copy to strategies/<name>.py and fill in the TODOs."""
