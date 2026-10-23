@@ -4,6 +4,7 @@ import asyncio
 import sys
 import tempfile
 import threading
+import time
 import tomllib
 import webbrowser
 from collections.abc import Iterable
@@ -78,12 +79,18 @@ def demo(
     ui: Annotated[bool, typer.Option("--ui", help="Then open the dashboard on the result")] = False,
     port: Annotated[int, typer.Option(help="Dashboard port, with --ui")] = 8765,
     browser: Annotated[bool, typer.Option(help="Open a browser, with --ui")] = True,
+    live: Annotated[
+        bool, typer.Option("--live", help="Play the markets in real time with the dashboard open (paper)")
+    ] = False,
+    speed: Annotated[float, typer.Option(help="With --live: market time per wall-clock second")] = 10.0,
+    history: Annotated[float, typer.Option(help="With --live: hours already traded when it opens")] = 2.0,
 ) -> None:
     """Backtest one strategy on synthetic up/down markets.
 
     With --ui (and no --param), three variants of the example run side by side and the dashboard
     opens on them: the whole loop with no keys and no setup.
     """
+    ui = ui or live
     try:
         instances = [{"id": strategy, "strategy": strategy, "params": _params(param or [])}]
         if ui and not param and strategy == "example_favorite":
@@ -92,11 +99,20 @@ def demo(
         raw = {"brokers": {"sim": {"kind": "sim", "latency_ms": latency_ms}}, "instances": instances}
         if ui and ledger is not None:
             raise ValueError("--ui keeps its ledger in a temporary demo folder; leave out --ledger")
+        if speed <= 0:
+            raise ValueError("--speed must be positive")
         data = Path(tempfile.mkdtemp(prefix="quanty-demo-")) if ui else None
+        exp = experiment.parse(raw, source="demo")
+        if live:
+            assert data is not None
+            start = _now_window_ms() - int(history * 3_600_000) // 300_000 * 300_000
+            spec = synthetic.Spec(hours=hours + history, seed=seed, start_ms=start)
+            _demo_live(exp, data, spec, speed, port, browser)
+            return
         if data is not None:
             ledger = data / "backtest" / f"demo-{hours:g}h-seed{seed}.sqlite"
             ledger.parent.mkdir(parents=True)
-        _backtest(experiment.parse(raw, source="demo"), hours, seed, ledger)
+        _backtest(exp, hours, seed, ledger)
     except ValueError as exc:
         raise _fail(exc) from None
     if data is not None:
@@ -261,6 +277,66 @@ def _params(pairs: list[str]) -> dict[str, Any]:
         except tomllib.TOMLDecodeError:
             out[key] = value
     return out
+
+
+def _now_window_ms(window_s: int = 300) -> int:
+    now = int(time.time() * 1000)
+    return now - now % (window_s * 1000)
+
+
+def _demo_live(
+    exp: experiment.Experiment, data: Path, spec: synthetic.Spec, speed: float, port: int, browser: bool
+) -> None:
+    """Synthetic markets played against the wall clock (sped up), traded as a paper session, with
+    the dashboard and its controls open on it: what a running session looks like, without keys."""
+    import uvicorn
+
+    from quanty.ui.app import create_app
+
+    instances = experiment.build(exp, _strategies(), synthetic.FEES)
+    run = "demo-live"
+    (data / "paper").mkdir(parents=True)
+    book = Ledger(data / "paper" / f"{run}.sqlite", durable=True)
+    trader = Engine(instances, ledger=book, limits=exp.limits, clock_ms=exp.clock_ms, strict=False)
+    store = ControlStore(data / "control.sqlite")
+    controller = Controller(store, f"paper/{run}", trader, can_arm=False)
+    server = uvicorn.Server(
+        uvicorn.Config(create_app(data, refresh_s=2), host="127.0.0.1", port=port, log_level="warning")
+    )
+
+    async def play() -> None:
+        # the past (before now) at once, so the dashboard opens on a run with history; then live
+        live_from, wall0 = _now_window_ms(), time.monotonic()
+        for ev in synthetic.events(spec):
+            if ev.ts > live_from:
+                delay = (ev.ts - live_from) / 1000 / speed - (time.monotonic() - wall0)
+                if delay > 0:
+                    await asyncio.sleep(delay)
+            trader.advance(ev.ts)
+            trader.process(ev)
+        server.should_exit = True
+
+    async def main() -> None:
+        tasks = [asyncio.create_task(play()), asyncio.create_task(controller.run_forever())]
+        try:
+            await server.serve()
+        finally:
+            for t in tasks:
+                t.cancel()
+            await asyncio.gather(*tasks, return_exceptions=True)
+
+    url = f"http://127.0.0.1:{port}/runs/paper/{run}"
+    typer.echo(f"live demo: synthetic {spec.series} at {speed:g}x real time, paper trading")
+    typer.echo(f"dashboard: {url} (Ctrl-C to stop)")
+    if browser:
+        threading.Timer(1.5, webbrowser.open, args=[url]).start()
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        pass
+    finally:
+        book.close()
+        store.close()
 
 
 def _backtest(

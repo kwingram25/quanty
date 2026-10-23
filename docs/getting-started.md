@@ -18,6 +18,11 @@ This backtests three variants of the example strategy on 6 hours of synthetic 5-
 markets, prints a summary, and opens the dashboard on the result. The synthetic markets are
 deterministic per `--seed`, so the same command gives the same numbers anywhere.
 
+`quanty demo --live` does the same as a running session instead: it opens on two hours of
+history, then plays the markets at 10x real time (`--speed`) while the strategies paper trade, so
+the dashboard updates as you watch and its controls (halt, resume, kill switch) work. The markets
+are still synthetic.
+
 ```sh
 uv run quanty demo --hours 24 --seed 3 --param min_conf=0.97   # one variant, your parameters
 uv run quanty params example_favorite                          # what you can change

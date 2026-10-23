@@ -104,3 +104,15 @@ def test_backtest_ledger_folder_is_created(tmp_path: Path) -> None:
 def test_demo_ui_refuses_a_custom_ledger(tmp_path: Path) -> None:
     res = run("demo", "--ui", "--ledger", str(tmp_path / "x.sqlite"))
     assert res.exit_code == 2 and "leave out --ledger" in res.stderr
+
+
+def test_live_demo_plays_and_stops(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("tempfile.mkdtemp", lambda prefix="": str(tmp_path))
+    res = run("demo", "--live", "--no-browser", "--port", "0", "--hours", "0.05", "--history", "1",
+              "--speed", "500")  # fmt: skip
+    assert res.exit_code == 0, res.output
+    from quanty.core import Ledger
+
+    ledger = Ledger(tmp_path / "paper" / "demo-live.sqlite")
+    assert sum(s.fills for s in ledger.summary()) > 0
+    ledger.close()

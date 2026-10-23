@@ -24,6 +24,7 @@ One strategy file runs unchanged in four modes. Only the broker behind it change
 git clone https://github.com/kwingram25/quanty && cd quanty
 uv sync
 uv run quanty demo --ui        # backtest three variants on synthetic markets, open the dashboard
+uv run quanty demo --live      # or watch them paper trade in real time, with the controls
 ```
 
 No keys, no setup. Then [Getting started](docs/getting-started.md) goes from experiments to
