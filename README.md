@@ -5,8 +5,8 @@ prediction markets** on Polymarket US and Kalshi: crypto up/down windows, daily 
 economic releases, or any market that recurs on a schedule and settles against a known source.
 
 > **Status: early development.** The engine, simulated broker, feed and venue recording/replay
-> (Kalshi, Polymarket US) and backtests work; paper/live trading and the web UI are next. Nothing
-> here places orders yet.
+> (Kalshi, Polymarket US), backtests, paper trading and shadow mode work; live trading and the web
+> UI are next. Nothing here places orders yet.
 
 ## Quickstart
 
@@ -94,6 +94,18 @@ class MyStrategy(Strategy[MyParams]):
 Experiments (`experiments/*.toml`, also gitignored except the example) pick strategies, params,
 brokers and risk limits; see `experiments/example.toml`.
 
+## Paper and shadow trading
+
+```sh
+uv run quanty paper experiment.toml --feeds feeds.toml --data data
+```
+
+runs an experiment's strategies in real time on live feeds. With `kind = "sim"` brokers fills are
+simulated; with `kind = "shadow"` they are simulated too, and every order is also turned into the
+venue's real request and checked: Polymarket US validates it server-side without placing it
+(`/v1/order/preview`), Kalshi requests are built, signed and checked locally. Results and round
+trips are in the ledger (`data/paper/<experiment>.sqlite`).
+
 ## Pieces
 
 | | |
@@ -102,7 +114,8 @@ brokers and risk limits; see `experiments/example.toml`.
 | `core/engine.py` | the loop: time-ordered events, strategy dispatch, order validation |
 | `core/risk.py` | per-instance and account limits: order size, position, open risk, group risk, daily loss, kill switch |
 | `core/portfolio.py`, `core/ledger.py` | positions and P&L from fills and settlements; SQLite record |
-| `brokers/sim.py` | simulated venue: latency, taker fills, queue position, post-only |
+| `brokers/sim.py` | simulated venue: latency, taker fills, queue position (configurable `QueueModel`), post-only |
+| `brokers/shadow.py` | simulated fills plus a real venue preview of every order |
 | `feeds/` | WebSocket and polling transports, Coinbase and Binance adapters, raw recording, replay, health and latency |
 | `venues/` | Kalshi and Polymarket US: discovery, books, trades, settlement, fees, request signing |
 | `signals.py` | derived values (last, EWMA, realized vol) rebuilt identically in replay |
