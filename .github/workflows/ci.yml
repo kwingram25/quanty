@@ -48,14 +48,14 @@ jobs:
           python-version: "3.12"
       - run: uv sync --locked
       - name: create a project (vendors a wheel of this commit)
-        run: uv run quanty init "$RUNNER_TEMP/proj" --yes --venue polymarket_us
+        run: uv run quanty init generated-project --yes --venue polymarket_us
       - name: build the image and backtest inside it
-        working-directory: ${{ runner.temp }}/proj
+        working-directory: generated-project
         run: |
           docker build -t quanty-proj .
           docker run --rm quanty-proj demo --hours 0.5
       - name: compose starts the trader and a dashboard that answers
-        working-directory: ${{ runner.temp }}/proj
+        working-directory: generated-project
         run: |
           docker compose up -d --build
           for i in $(seq 1 30); do curl -sf http://127.0.0.1:8765/api/runs && break; sleep 2; done
