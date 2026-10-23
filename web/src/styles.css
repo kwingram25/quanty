@@ -199,7 +199,7 @@ a { color: inherit; }
   padding: 9px 10px 9px 12px; margin: 0 0 6px; border-radius: 8px; background: var(--raised);
   border-left: 3px solid var(--edge, var(--axis));
 }
-.tape .when { font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; padding-top: 1px; }
+.tape .when { white-space: nowrap; font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; padding-top: 1px; }
 .tape .what { min-width: 0; }
 .tape .what b { font-weight: 600; }
 .tape .detail { display: block; font-size: 12px; color: var(--muted); overflow-wrap: anywhere; }
@@ -275,8 +275,8 @@ tbody tr:hover td { background: var(--raised); }
 .run-page .run-head { margin-bottom: 12px; flex: none; }
 .run-page .kpi.hero .value { font-size: 28px; }
 .workspace {
-  flex: 1; min-height: 0; display: grid; gap: 12px;
-  grid-template-columns: 280px minmax(0, 1fr) 340px;
+  flex: 1; min-height: 0; display: grid; gap: 0;
+  grid-template-columns: var(--left, 280px) 12px minmax(0, 1fr) 12px var(--right, 340px);
 }
 .workspace > *, .right-col > * { min-height: 0; }
 .panel.fill, .panel.center { display: flex; flex-direction: column; min-height: 0; }
@@ -284,7 +284,8 @@ tbody tr:hover td { background: var(--raised); }
 .panel-body.scroll { flex: 1; min-height: 0; overflow-y: auto; }
 .panel-foot { flex: none; padding: 0 16px 14px; border-top: 1px solid var(--grid); }
 .panel-foot .kill { margin-top: 12px; }
-.right-col { display: flex; flex-direction: column; gap: 12px; min-height: 0; }
+.right-col { display: flex; flex-direction: column; gap: 0; min-height: 0; }
+.workspace.sized .right-col > .panel:first-child { height: var(--markets); max-height: none; }
 .right-col > .panel:first-child { flex: none; max-height: 60%; display: flex; flex-direction: column; }
 .right-col > .panel:first-child .panel-body { overflow-y: auto; min-height: 0; }
 .right-col > .panel.fill { flex: 1; }
@@ -301,14 +302,17 @@ tbody tr:hover td { background: var(--raised); }
 
 @media (max-width: 1100px) {
   .run-page { height: auto; }
-  .workspace { grid-template-columns: minmax(0, 1fr); }
+  .workspace { grid-template-columns: minmax(0, 1fr); gap: 12px; }
+  .splitter { display: none; }
+  .right-col { gap: 12px; }
+  .workspace.sized .right-col > .panel:first-child { height: auto; }
   .panel.center { height: 440px; }
   .right-col > .panel:first-child { max-height: none; }
   .right-col > .panel.fill { height: 420px; flex: none; }
   .side.fill { max-height: none; }
 }
 
-.right-col .tape li { grid-template-columns: 58px 1fr auto; gap: 8px; padding: 8px 10px; }
+.right-col .tape li { grid-template-columns: max-content 1fr auto; gap: 8px; padding: 8px 10px; }
 
 .market .name b { color: var(--ink); font-weight: 600; }
 .market .outcomes { margin-top: 8px; display: grid; gap: 2px; }
@@ -427,7 +431,7 @@ tbody tr:hover td { background: var(--raised); }
 .param-edit .grow { flex: 1; }
 
 /* anything that explains itself on hover says so (buttons and links keep their pointer) */
-[title]:not(button):not(a):not(input):not([role="tab"]):not([role="radio"]):not(svg) { cursor: help; }
+[title]:not(button):not(a):not(input):not([role="tab"]):not([role="radio"]):not([role="separator"]):not(svg) { cursor: help; }
 
 /* trades table */
 .trades-summary { margin: 0; padding: 10px 12px 4px; font-size: 12px; color: var(--ink-2); }
@@ -471,3 +475,14 @@ table.orders td:last-child { white-space: normal; max-width: 320px; }
 .loading-day .bar { width: min(420px, 100%); height: 6px; border-radius: 999px; background: var(--raised); overflow: hidden;
   border: 1px solid var(--border); }
 .loading-day .bar span { display: block; height: 100%; background: var(--focus); border-radius: inherit; }
+
+/* drag handles between panels: a line appears on hover, focus and drag */
+.splitter { position: relative; flex: none; touch-action: none; outline: none; }
+.splitter.x { cursor: col-resize; }
+.splitter.y { cursor: row-resize; height: 12px; }
+.splitter::after { content: ""; position: absolute; border-radius: 2px; background: transparent; transition: background 0.15s; }
+.splitter.x::after { top: 8px; bottom: 8px; left: 5px; width: 2px; }
+.splitter.y::after { left: 8px; right: 8px; top: 5px; height: 2px; }
+.splitter:hover::after, .splitter.active::after { background: var(--axis); }
+.splitter:focus-visible::after { background: var(--focus); }
+body.resizing, body.resizing * { user-select: none; }

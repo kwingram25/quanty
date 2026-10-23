@@ -1,11 +1,12 @@
 import { motion } from "motion/react";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useParams } from "react-router-dom";
 import { useRunStream, type ActivityRow, type NewRows, type OrderStats, type Snapshot } from "../api";
 import { AnimatedNumber } from "../components/AnimatedNumber";
 import { Markets } from "../components/Markets";
 import { PnlChart } from "../components/PnlChart";
 import { DemoClock, NewDay, SpeedToggle } from "../components/SpeedToggle";
+import { Splitter, useLayout } from "../components/Splitter";
 import { Strategies } from "../components/Strategies";
 import { Tape } from "../components/Tape";
 import { useToast } from "../components/Toasts";
@@ -83,17 +84,57 @@ function Run({ snap, live }: { snap: Snapshot; live: boolean }) {
         </div>}
       </div>
 
-      {loading != null ? <LoadingDay progress={loading} /> : <div className="workspace">
+      {loading != null ? <LoadingDay progress={loading} /> : <Workspace>{(handles) => <>
         <Strategies snap={snap} slots={slots} />
+        {handles.left}
         <Center snap={snap} slots={slots} halted={halted} />
-        <div className="right-col">
+        {handles.right}
+        <div className="right-col" ref={handles.rightCol}>
           <Markets session={snap.session} slots={slots} />
+          {handles.markets}
           <section className="panel fill">
             <header><h2>Tape</h2><span className="hint">fills, settlements and alerts</span></header>
             <div className="panel-body scroll"><Tape items={snap.tape} slots={slots} names={snap.names} /></div>
           </section>
         </div>
-      </div>}
+      </>}</Workspace>}
+    </div>
+  );
+}
+
+const DEFAULT = { left: 280, right: 340 };
+const MIN = { left: 220, right: 280, center: 380, markets: 120, tape: 140 };
+
+/** The three columns (and the right column's two panels), with drag handles between them. */
+function Workspace({ children }: {
+  children: (h: { left: JSX.Element; right: JSX.Element; markets: JSX.Element;
+    rightCol: React.RefObject<HTMLDivElement> }) => JSX.Element;
+}) {
+  const [layout, setLayout] = useLayout();
+  const box = useRef<HTMLDivElement>(null);
+  const rightCol = useRef<HTMLDivElement>(null);
+  const left = layout.left ?? DEFAULT.left;
+  const right = layout.right ?? DEFAULT.right;
+  const width = () => box.current?.clientWidth ?? 1400;
+  const marketsPanel = () => rightCol.current?.firstElementChild as HTMLElement | null;
+  const style = {
+    ["--left" as string]: `${left}px`, ["--right" as string]: `${right}px`,
+    ...(layout.markets != null ? { ["--markets" as string]: `${layout.markets}px` } : {}),
+  };
+  return (
+    <div className={`workspace ${layout.markets != null ? "sized" : ""}`} ref={box} style={style}>
+      {children({
+        rightCol,
+        left: <Splitter axis="x" label="Strategies width" size={() => left} min={MIN.left}
+          max={() => width() - right - MIN.center - 24} onResize={(px) => setLayout({ left: px })}
+          onReset={() => setLayout({ left: undefined })} />,
+        right: <Splitter axis="x" sign={-1} label="Markets and tape width" size={() => right} min={MIN.right}
+          max={() => width() - left - MIN.center - 24} onResize={(px) => setLayout({ right: px })}
+          onReset={() => setLayout({ right: undefined })} />,
+        markets: <Splitter axis="y" label="Markets height" size={() => marketsPanel()?.offsetHeight ?? 300}
+          min={MIN.markets} max={() => (rightCol.current?.clientHeight ?? 800) - MIN.tape - 12}
+          onResize={(px) => setLayout({ markets: px })} onReset={() => setLayout({ markets: undefined })} />,
+      })}
     </div>
   );
 }
