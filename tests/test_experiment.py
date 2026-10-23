@@ -44,8 +44,8 @@ def inst(**kw: object) -> dict[str, object]:
         (inst(broker="nope"), "broker 'nope' is not defined"),
         ({**inst(), "brokers": {"a": {}, "b": {}}}, "broker None is not defined"),  # must name one
         ({"instances": [{"id": "a", "strategy": "s"}, {"id": "a", "strategy": "s"}]}, "unique"),
-        ({**inst(), "brokers": {"sim": {"kind": "magic"}}}, "exp.brokers.sim.kind"),
-        ({**inst(), "brokers": {"sim": {"latency_ms": -1}}}, "exp.brokers.sim.latency_ms"),
+        ({**inst(), "brokers": {"sim": {"kind": "magic"}}}, "exp.brokers.sim: Input tag 'magic'"),
+        ({**inst(), "brokers": {"sim": {"latency_ms": -1}}}, "exp.brokers.sim.sim.latency_ms"),
         ({**inst(), "clock_ms": 0}, "exp.clock_ms"),
     ],
 )

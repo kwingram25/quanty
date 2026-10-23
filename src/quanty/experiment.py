@@ -25,10 +25,11 @@ import tomllib
 from collections.abc import Mapping
 from pathlib import Path
 from types import ModuleType
-from typing import Any, Literal, Self
+from typing import Annotated, Any, Literal, Self
 
-from pydantic import Field, NonNegativeInt, PositiveInt, model_validator
+from pydantic import Discriminator, Field, NonNegativeInt, PositiveInt, Tag, model_validator
 
+from quanty.brokers.shadow import ShadowBroker
 from quanty.brokers.sim import SimBroker
 from quanty.core.broker import Broker
 from quanty.core.engine import Instance
@@ -43,9 +44,24 @@ from quanty.signals import make as make_signal
 class SimBrokerConfig(ConfigModel):
     kind: Literal["sim"] = "sim"
     latency_ms: NonNegativeInt = Field(0, description="Delay before orders and cancels reach the venue")
+    arrival: Literal["at_latency", "next_event"] = "at_latency"
 
 
-BrokerConfig = SimBrokerConfig  # becomes a union discriminated on `kind` as broker kinds are added
+class ShadowBrokerConfig(SimBrokerConfig):
+    """Simulated fills, plus a real venue preview of every order (nothing placed)."""
+
+    kind: Literal["shadow"] = "shadow"  # type: ignore[assignment]
+
+
+def _broker_kind(v: Any) -> str:
+    return str(v.get("kind", "sim") if isinstance(v, dict) else getattr(v, "kind", "sim"))
+
+
+# `kind` may be left out (= "sim")
+BrokerConfig = Annotated[
+    Annotated[SimBrokerConfig, Tag("sim")] | Annotated[ShadowBrokerConfig, Tag("shadow")],
+    Discriminator(_broker_kind),
+]
 
 
 class InstanceSpec(ConfigModel):
@@ -97,8 +113,10 @@ def strategy_class(module: ModuleType) -> type[Strategy[Any]]:
     return found[0]
 
 
-def make_broker(name: str, cfg: BrokerConfig, fees: Mapping[str, FeeModel]) -> Broker:
-    return SimBroker(name, latency_ms=cfg.latency_ms, fees=fees)
+def make_broker(name: str, cfg: SimBrokerConfig, fees: Mapping[str, FeeModel]) -> Broker:
+    if isinstance(cfg, ShadowBrokerConfig):
+        return ShadowBroker(name, latency_ms=cfg.latency_ms, arrival=cfg.arrival, fees=fees)
+    return SimBroker(name, latency_ms=cfg.latency_ms, arrival=cfg.arrival, fees=fees)
 
 
 def build(

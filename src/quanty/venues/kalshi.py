@@ -64,7 +64,7 @@ def market_of(m: dict[str, Any], series: str, cfg: KalshiConfig) -> Market:
     return Market(
         id=f"{VENUE}:{m['ticker']}", venue=VENUE, series=f"{VENUE}:{series}",
         open_ts=_ts(m["open_time"]), close_ts=_ts(m["close_time"]), tick=0.01, tick_ranges=ranges,
-        qty_step=1.0, group=f"{VENUE}:{m.get('event_ticker') or m['ticker']}",
+        qty_step=0.01, group=f"{VENUE}:{m.get('event_ticker') or m['ticker']}",
         fee=QuadraticFee(cfg.taker_fee_rate, cfg.maker_fee_rate, round_up_cents=True), terms=terms,
     )  # fmt: skip
 
