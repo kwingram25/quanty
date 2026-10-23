@@ -110,6 +110,8 @@ class RecordSession:
                 t.cancel()
             await asyncio.gather(*tasks, return_exceptions=True)
             if self.trader is not None:
+                for broker in {id(i.broker): i.broker for i in self.trader.instances.values()}.values():
+                    await broker.aclose()
                 self.trader.advance(now_ms())
                 self.trader.ledger.commit()
             self.recorder.close()

@@ -5,8 +5,8 @@ prediction markets** on Polymarket US and Kalshi: crypto up/down windows, daily 
 economic releases, or any market that recurs on a schedule and settles against a known source.
 
 > **Status: early development.** The engine, simulated broker, feed and venue recording/replay
-> (Kalshi, Polymarket US), backtests, paper trading and shadow mode work; live trading and the web
-> UI are next. Nothing here places orders yet.
+> (Kalshi, Polymarket US), backtests, paper trading, shadow mode and a live broker (tested against
+> a fake exchange) work; the web UI is next.
 
 ## Quickstart
 
@@ -106,6 +106,23 @@ venue's real request and checked: Polymarket US validates it server-side without
 (`/v1/order/preview`), Kalshi requests are built, signed and checked locally. Results and round
 trips are in the ledger (`data/paper/<experiment>.sqlite`).
 
+## Live trading
+
+Live brokers place real orders, so they are fenced off:
+
+```toml
+[brokers.real]
+kind = "live"
+max_qty = 100        # largest single order, contracts (required)
+max_notional = 100   # largest single order, $ (required)
+```
+
+`quanty paper` and `quanty backtest` refuse live brokers; `quanty live experiment.toml --feeds
+feeds.toml --arm` runs them. A live broker disables itself after `error_limit` consecutive
+rejections, and at once if an order's reply never arrives (the order stays pending: check the
+venue before restarting). `quanty.venues.fake.FakeExchange` speaks both venues' order APIs with
+injectable faults, for testing brokers without real orders.
+
 ## Pieces
 
 | | |
@@ -116,6 +133,8 @@ trips are in the ledger (`data/paper/<experiment>.sqlite`).
 | `core/portfolio.py`, `core/ledger.py` | positions and P&L from fills and settlements; SQLite record |
 | `brokers/sim.py` | simulated venue: latency, taker fills, queue position (configurable `QueueModel`), post-only |
 | `brokers/shadow.py` | simulated fills plus a real venue preview of every order |
+| `brokers/live.py` | real orders: placement, fill polling, cancel races, safety stops |
+| `venues/orders.py`, `venues/fake.py` | venue order APIs, and a fake exchange that speaks them |
 | `feeds/` | WebSocket and polling transports, Coinbase and Binance adapters, raw recording, replay, health and latency |
 | `venues/` | Kalshi and Polymarket US: discovery, books, trades, settlement, fees, request signing |
 | `signals.py` | derived values (last, EWMA, realized vol) rebuilt identically in replay |

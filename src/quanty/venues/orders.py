@@ -2,7 +2,7 @@
 
 Shadow mode previews every order (Polymarket US validates it server-side without placing it; Kalshi
 has no preview endpoint, so the request is built and checked locally). The live broker sends the
-same requests.
+same requests, and reads and cancels orders; every venue's answer is normalized to a VenueOrder.
 """
 
 import json
@@ -43,18 +43,77 @@ class Preview:
     response: dict[str, Any] = field(default_factory=dict)
 
 
+@dataclass(frozen=True)
+class VenueOrder:
+    """A venue's view of one order, in quanty terms."""
+
+    id: str
+    filled: float  # cumulative contracts
+    fees: float  # cumulative $, negative = rebate
+    done: bool
+    state: str = ""  # the venue's own state name
+    fill_yes_price: float | None = None  # average YES price of `filled`, when the venue reports it
+
+
+class VenueError(Exception):
+    """The venue refused a request (an HTTP error status); the order's outcome is known."""
+
+    def __init__(self, status: int, detail: str) -> None:
+        super().__init__(f"HTTP {status}: {detail}")
+        self.status, self.detail = status, detail
+
+
 def native_id(market: Market) -> str:
     return market.id.split(":", 1)[1]
 
 
+def _json(resp: httpx.Response) -> dict[str, Any]:
+    try:
+        data = resp.json()
+    except json.JSONDecodeError:
+        return {"text": resp.text[:300]}
+    return data if isinstance(data, dict) else {"data": data}
+
+
+def _num(v: Any) -> float:
+    if isinstance(v, dict):
+        v = v.get("value")
+    return float(v or 0)
+
+
 class OrderAPI(ABC):
     venue: str
+    base_url: str
+
+    @property
+    @abstractmethod
+    def signer(self) -> Signer: ...
 
     @abstractmethod
     def place_request(self, order: Order, market: Market) -> VenueRequest: ...
 
     @abstractmethod
     async def preview(self, client: httpx.AsyncClient, order: Order, market: Market) -> Preview: ...
+
+    @abstractmethod
+    async def place(self, client: httpx.AsyncClient, req: VenueRequest) -> VenueOrder:
+        """Send the order. VenueError when refused; an httpx error means the outcome is unknown."""
+
+    @abstractmethod
+    async def get(self, client: httpx.AsyncClient, venue_id: str, market: Market) -> VenueOrder: ...
+
+    @abstractmethod
+    async def cancel(self, client: httpx.AsyncClient, venue_id: str, market: Market) -> None: ...
+
+    async def _send(self, client: httpx.AsyncClient, method: str, path: str, **kw: Any) -> dict[str, Any]:
+        headers = self.signer.headers(method, path)
+        if "json" in kw:
+            headers["Content-Type"] = "application/json"
+        resp = await client.request(method, f"{self.base_url}{path}", headers=headers, **kw)
+        data = _json(resp)
+        if resp.status_code >= 300:
+            raise VenueError(resp.status_code, json.dumps(data)[:300])
+        return data
 
 
 class PolymarketOrders(OrderAPI):
@@ -91,6 +150,7 @@ class PolymarketOrders(OrderAPI):
         }
         if order.tif is Tif.IOC:
             body["tif"] = "TIME_IN_FORCE_IMMEDIATE_OR_CANCEL"
+            body["synchronousExecution"] = True  # the response carries the fills
         else:
             expire = datetime.fromtimestamp(market.close_ts / 1000 - EXPIRE_BEFORE_CLOSE_S, UTC)
             body["tif"] = "TIME_IN_FORCE_GOOD_TILL_DATE"
@@ -120,6 +180,39 @@ class PolymarketOrders(OrderAPI):
             data if isinstance(data, dict) else {},
         )
 
+    DONE_STATES: ClassVar[set[str]] = {"ORDER_STATE_FILLED", "ORDER_STATE_CANCELED", "ORDER_STATE_REJECTED",
+                                       "ORDER_STATE_EXPIRED", "ORDER_STATE_REPLACED"}  # fmt: skip
+
+    async def place(self, client: httpx.AsyncClient, req: VenueRequest) -> VenueOrder:
+        res = await self._send(client, req.method, req.path, json=req.body)
+        if not res.get("id"):
+            raise VenueError(200, f"no order id in reply: {json.dumps(res)[:300]}")
+        ex = [e for e in res.get("executions") or [] if _num(e.get("lastShares")) > 0]
+        filled = sum(_num(e["lastShares"]) for e in ex)
+        price = sum(_num(e["lastShares"]) * _num(e.get("lastPx")) for e in ex) / filled if filled else None
+        fees = sum(_num(e.get("commissionNotionalCollected")) for e in ex)
+        ioc = req.body.get("tif") == "TIME_IN_FORCE_IMMEDIATE_OR_CANCEL"
+        done = (
+            ioc or filled >= float(req.body["quantity"]) - 1e-9
+        )  # a synchronous IOC is over when it returns
+        return VenueOrder(str(res["id"]), filled, fees, done, str(res.get("state", "")), price)
+
+    async def get(self, client: httpx.AsyncClient, venue_id: str, market: Market) -> VenueOrder:
+        od = (await self._send(client, "GET", f"/v1/order/{venue_id}")).get("order") or {}
+        if not od:
+            raise VenueError(200, "no order in reply")  # seen live: no fill information, try again
+        state = str(od.get("state", ""))
+        left = od.get("leavesQuantity")
+        nothing_left = left is not None and _num(left) <= 1e-9
+        price = _num(od["avgPx"]) if od.get("avgPx") else None
+        done = state in self.DONE_STATES or nothing_left
+        return VenueOrder(venue_id, _num(od.get("cumQuantity")), 0.0, done, state, price)
+
+    async def cancel(self, client: httpx.AsyncClient, venue_id: str, market: Market) -> None:
+        await self._send(
+            client, "POST", f"/v1/order/{venue_id}/cancel", json={"marketSlug": native_id(market)}
+        )
+
 
 class KalshiOrders(OrderAPI):
     """Kalshi: orders in YES terms (bid/ask); counts in hundredths of a contract."""
@@ -127,6 +220,8 @@ class KalshiOrders(OrderAPI):
     venue = "kalshi"
     base_url = "https://api.elections.kalshi.com"
     PATH = "/trade-api/v2/portfolio/events/orders"
+    READ_PATH = "/trade-api/v2/portfolio/orders"
+    DONE_STATES: ClassVar[set[str]] = {"canceled", "executed"}
 
     def __init__(self, signer: Signer | None = None) -> None:
         self._signer = signer
@@ -172,6 +267,31 @@ class KalshiOrders(OrderAPI):
             problems.append(f"qty {order.qty} not a multiple of {market.qty_step:g}")
         return Preview(
             not problems, req, detail="; ".join(problems) or "checked locally (Kalshi has no preview)"
+        )
+
+    async def place(self, client: httpx.AsyncClient, req: VenueRequest) -> VenueOrder:
+        res = await self._send(client, req.method, req.path, json=req.body)
+        if not res.get("order_id"):
+            raise VenueError(200, f"no order id in reply: {json.dumps(res)[:300]}")
+        filled = _num(res.get("fill_count"))
+        price = _num(res.get("average_fill_price")) if filled else None
+        fees = filled * _num(res.get("average_fee_paid"))
+        ioc = req.body.get("time_in_force") == "immediate_or_cancel"
+        status = str(res.get("status", ""))
+        done = ioc or status in self.DONE_STATES or filled >= float(req.body["count"]) - 1e-9
+        return VenueOrder(str(res["order_id"]), filled, fees, done, status, price)
+
+    async def get(self, client: httpx.AsyncClient, venue_id: str, market: Market) -> VenueOrder:
+        od = (await self._send(client, "GET", f"{self.READ_PATH}/{venue_id}")).get("order") or {}
+        if not od:
+            raise VenueError(200, "no order in reply")
+        fees = _num(od.get("maker_fees_dollars")) + _num(od.get("taker_fees_dollars"))
+        status = str(od.get("status", ""))
+        return VenueOrder(venue_id, _num(od.get("fill_count_fp")), fees, status in self.DONE_STATES, status)
+
+    async def cancel(self, client: httpx.AsyncClient, venue_id: str, market: Market) -> None:
+        await self._send(
+            client, "DELETE", f"{self.PATH}/{venue_id}", params={"market_ticker": native_id(market)}
         )
 
 

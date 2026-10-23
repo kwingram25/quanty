@@ -41,6 +41,9 @@ class Broker(ABC):
     @abstractmethod
     def cancel(self, order: Order) -> None: ...
 
+    async def aclose(self) -> None:  # noqa: B027 - optional hook
+        """Finish in-flight venue requests and close connections (sessions call this on shutdown)."""
+
     def handle(self, event: BrokerEvent) -> None:
         """This broker's own scheduled events."""
         raise NotImplementedError(f"{type(self).__name__} schedules no events")

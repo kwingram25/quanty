@@ -27,8 +27,9 @@ from pathlib import Path
 from types import ModuleType
 from typing import Annotated, Any, Literal, Self
 
-from pydantic import Discriminator, Field, NonNegativeInt, PositiveInt, Tag, model_validator
+from pydantic import Discriminator, Field, NonNegativeInt, PositiveFloat, PositiveInt, Tag, model_validator
 
+from quanty.brokers.live import LiveBroker
 from quanty.brokers.shadow import ShadowBroker
 from quanty.brokers.sim import SimBroker
 from quanty.core.broker import Broker
@@ -53,13 +54,25 @@ class ShadowBrokerConfig(SimBrokerConfig):
     kind: Literal["shadow"] = "shadow"  # type: ignore[assignment]
 
 
+class LiveBrokerConfig(ConfigModel):
+    """Real orders. Runs only under `quanty live --arm`; the caps are required (fat-finger guard)."""
+
+    kind: Literal["live"] = "live"
+    max_qty: PositiveFloat = Field(description="Largest single order, in contracts")
+    max_notional: PositiveFloat = Field(description="Largest single order, in $ (qty × price)")
+    error_limit: PositiveInt = Field(3, description="Consecutive venue rejections that disable the broker")
+    poll_s: PositiveFloat = Field(1.0, description="Seconds between reads of resting orders")
+
+
 def _broker_kind(v: Any) -> str:
     return str(v.get("kind", "sim") if isinstance(v, dict) else getattr(v, "kind", "sim"))
 
 
 # `kind` may be left out (= "sim")
 BrokerConfig = Annotated[
-    Annotated[SimBrokerConfig, Tag("sim")] | Annotated[ShadowBrokerConfig, Tag("shadow")],
+    Annotated[SimBrokerConfig, Tag("sim")]
+    | Annotated[ShadowBrokerConfig, Tag("shadow")]
+    | Annotated[LiveBrokerConfig, Tag("live")],
     Discriminator(_broker_kind),
 ]
 
@@ -72,10 +85,14 @@ class InstanceSpec(ConfigModel):
     limits: Limits = Limits()
 
 
+def _default_brokers() -> dict[str, BrokerConfig]:
+    return {"sim": SimBrokerConfig()}
+
+
 class Experiment(ConfigModel):
     clock_ms: PositiveInt | None = 1000
     limits: Limits = Limits()
-    brokers: dict[str, BrokerConfig] = Field(default_factory=lambda: {"sim": SimBrokerConfig()}, min_length=1)
+    brokers: dict[str, BrokerConfig] = Field(default_factory=_default_brokers, min_length=1)
     instances: list[InstanceSpec] = Field(min_length=1)
     signals: list[AnySignalConfig] = Field(default_factory=list)
 
@@ -113,16 +130,30 @@ def strategy_class(module: ModuleType) -> type[Strategy[Any]]:
     return found[0]
 
 
-def make_broker(name: str, cfg: SimBrokerConfig, fees: Mapping[str, FeeModel]) -> Broker:
+def make_broker(
+    name: str, cfg: SimBrokerConfig | LiveBrokerConfig, fees: Mapping[str, FeeModel], *, armed: bool = False
+) -> Broker:
+    if isinstance(cfg, LiveBrokerConfig):
+        return LiveBroker(name, armed=armed, max_qty=cfg.max_qty, max_notional=cfg.max_notional,
+                          error_limit=cfg.error_limit, poll_s=cfg.poll_s)  # fmt: skip
     if isinstance(cfg, ShadowBrokerConfig):
         return ShadowBroker(name, latency_ms=cfg.latency_ms, arrival=cfg.arrival, fees=fees)
     return SimBroker(name, latency_ms=cfg.latency_ms, arrival=cfg.arrival, fees=fees)
 
 
+def live_brokers(exp: Experiment) -> list[str]:
+    return [name for name, cfg in exp.brokers.items() if isinstance(cfg, LiveBrokerConfig)]
+
+
 def build(
-    exp: Experiment, strategies: Mapping[str, ModuleType], fees: Mapping[str, FeeModel] | None = None
+    exp: Experiment,
+    strategies: Mapping[str, ModuleType],
+    fees: Mapping[str, FeeModel] | None = None,
+    *,
+    armed: bool = False,
 ) -> list[Instance]:
-    brokers = {name: make_broker(name, cfg, fees or {}) for name, cfg in exp.brokers.items()}
+    """armed: let live brokers place real orders (only `quanty live --arm` passes True)."""
+    brokers = {name: make_broker(name, cfg, fees or {}, armed=armed) for name, cfg in exp.brokers.items()}
     out = []
     for spec in exp.instances:
         if spec.strategy not in strategies:

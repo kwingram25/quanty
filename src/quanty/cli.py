@@ -101,28 +101,76 @@ def backtest(
         raise _fail(exc) from None
 
 
+FeedsOpt = Annotated[
+    Path, typer.Option(help="Feed config (see feeds.example.toml)", exists=True, dir_okay=False)
+]
+DataOpt = Annotated[Path, typer.Option(help="Recordings and databases directory")]
+LedgerOpt = Annotated[Path | None, typer.Option(help="Ledger (default: <data>/<mode>/<experiment>.sqlite)")]
+DurationOpt = Annotated[float | None, typer.Option(help="Stop after this many seconds")]
+WindowOpt = Annotated[float, typer.Option(help="Seconds between status reports")]
+ExpArg = Annotated[Path, typer.Argument(help="Experiment config (TOML)", exists=True, dir_okay=False)]
+
+
 @app.command()
 def paper(
-    path: Annotated[Path, typer.Argument(help="Experiment config (TOML)", exists=True, dir_okay=False)],
-    feeds: Annotated[
-        Path, typer.Option(help="Feed config (see feeds.example.toml)", exists=True, dir_okay=False)
-    ],
-    data: Annotated[Path, typer.Option(help="Recordings and databases directory")] = Path("data"),
-    ledger: Annotated[
-        Path | None, typer.Option(help="Ledger (default: <data>/paper/<experiment>.sqlite)")
-    ] = None,
-    duration: Annotated[float | None, typer.Option(help="Stop after this many seconds")] = None,
-    window: Annotated[float, typer.Option(help="Seconds between status reports")] = 60,
+    path: ExpArg,
+    feeds: FeedsOpt,
+    data: DataOpt = Path("data"),
+    ledger: LedgerOpt = None,
+    duration: DurationOpt = None,
+    window: WindowOpt = 60,
 ) -> None:
-    """Paper trade: run an experiment's strategies on live feeds with simulated fills (no orders)."""
+    """Paper trade: run an experiment's strategies on live feeds with simulated fills (no orders).
+
+    Brokers with kind = "shadow" also check every order with the venue (nothing is placed).
+    """
+    _session("paper", path, feeds, data, ledger, duration, window, armed=False)
+
+
+@app.command()
+def live(
+    path: ExpArg,
+    feeds: FeedsOpt,
+    arm: Annotated[
+        bool, typer.Option("--arm", help='Place real orders through kind = "live" brokers')
+    ] = False,
+    data: DataOpt = Path("data"),
+    ledger: LedgerOpt = None,
+    duration: DurationOpt = None,
+    window: WindowOpt = 60,
+) -> None:
+    """Trade for real: kind = "live" brokers place orders on the venues. Needs --arm."""
+    if not arm:
+        raise _fail(ValueError("quanty live places real orders: pass --arm to confirm"))
+    _session("live", path, feeds, data, ledger, duration, window, armed=True)
+
+
+def _session(
+    mode: str,
+    path: Path,
+    feeds: Path,
+    data: Path,
+    ledger: Path | None,
+    duration: float | None,
+    window: float,
+    *,
+    armed: bool,
+) -> None:
     structlog.configure(logger_factory=structlog.PrintLoggerFactory(sys.stderr))
     try:
         exp = experiment.load(path)
-        instances = experiment.build(exp, _strategies())
+        live_names = experiment.live_brokers(exp)
+        if mode == "paper" and live_names:
+            raise ValueError(
+                f'brokers {", ".join(live_names)} are live: use quanty live --arm, or kind = "shadow"'
+            )
+        if mode == "live" and not live_names:
+            raise ValueError('no kind = "live" broker in this experiment: use quanty paper')
+        instances = experiment.build(exp, _strategies(), armed=armed)
         feed_objs = load_feeds(feeds, None)
     except ValueError as exc:
         raise _fail(exc) from None
-    ledger_path = ledger or data / "paper" / f"{path.stem}.sqlite"
+    ledger_path = ledger or data / mode / f"{path.stem}.sqlite"
     ledger_path.parent.mkdir(parents=True, exist_ok=True)
     book = Ledger(ledger_path, durable=True)
     trader = Engine(instances, ledger=book, limits=exp.limits, clock_ms=exp.clock_ms, strict=False,
@@ -136,9 +184,8 @@ def paper(
         if trader.halted:
             typer.echo(f"halted: {', '.join(sorted(trader.halted))}")
 
-    typer.echo(
-        f"paper trading {', '.join(ids)} on {', '.join(feed_objs)}; ledger {ledger_path} (Ctrl-C to stop)"
-    )
+    verb = "LIVE trading" if mode == "live" else "paper trading"
+    typer.echo(f"{verb} {', '.join(ids)} on {', '.join(feed_objs)}; ledger {ledger_path} (Ctrl-C to stop)")
     try:
         asyncio.run(session.run(duration, on_window=report))
     except KeyboardInterrupt:
@@ -166,6 +213,8 @@ def _backtest(
 ) -> None:  # fmt: skip
     if ledger_path and ledger_path.exists():
         raise ValueError(f"{ledger_path} already exists")
+    if live_names := experiment.live_brokers(exp):
+        raise ValueError(f"brokers {', '.join(live_names)} are live; backtests need sim or shadow brokers")
     instances = experiment.build(exp, _strategies(), synthetic.FEES)
     signals = experiment.signals(exp)
     ledger = Ledger(ledger_path or ":memory:")
