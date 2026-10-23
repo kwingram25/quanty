@@ -56,6 +56,8 @@ export interface SessionState {
   markets: OpenMarket[];
   /** exclusive event -> instance -> worst-case loss and best-case gain */
   exposure?: Record<string, Record<string, { loss: number; gain: number }>>;
+  /** a demo's playback speed (x real time) and the speeds it can switch to */
+  speed?: { value: number; options: number[] } | null;
 }
 
 export interface ActivityRow {

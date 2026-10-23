@@ -23,7 +23,7 @@ function useEventClock(s: SessionState | null): number | null {
     return () => clearInterval(id);
   }, []);
   if (!s?.now) return null;
-  return s.now + (Date.now() - s.heartbeat_ts) * rate.current;
+  return s.now + (Date.now() - s.heartbeat_ts) * (s.speed?.value ?? rate.current);
 }
 
 /** Two numbers that would print the same get enough decimals to tell them apart. */

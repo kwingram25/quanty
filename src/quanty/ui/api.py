@@ -118,6 +118,7 @@ class Api:
                 "now": state.get("now"),
                 "markets": state.get("markets", []),
                 "exposure": state.get("exposure", {}),
+                "speed": state.get("speed"),
             },
             "commands": history,
         }

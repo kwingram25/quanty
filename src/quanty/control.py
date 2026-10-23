@@ -39,7 +39,7 @@ from quanty.core.portfolio import Position
 from quanty.core.risk import event_exposure
 from quanty.core.types import Side
 
-ACTIONS = ("halt", "resume", "disarm", "arm", "kill")
+ACTIONS = ("halt", "resume", "disarm", "arm", "kill", "speed")
 ALIVE_S = 10  # a session whose heartbeat is older than this is not running
 
 meta = MetaData()
@@ -142,6 +142,27 @@ class ControlStore:
                 conn.execute(insert(sessions).values(run=run, **row))
 
 
+class Playback:
+    """Paces recorded or synthetic events against the wall clock at a speed that can change while
+    running (the demo's fast / real-time toggle). Changing it re-anchors, so time never jumps."""
+
+    def __init__(self, speed: float, options: tuple[float, ...]) -> None:
+        self.speed, self.options = speed, options
+        self._anchor: tuple[float, int] | None = None  # (monotonic s, event ms) at the last change
+
+    def set(self, speed: float) -> None:
+        self.speed = speed
+        self._anchor = None  # re-anchored at the next event
+
+    async def wait_for(self, ts: int) -> None:
+        if self._anchor is None:
+            self._anchor = (time.monotonic(), ts)
+        wall0, ev0 = self._anchor
+        delay = (ts - ev0) / 1000 / self.speed - (time.monotonic() - wall0)
+        if delay > 0:
+            await asyncio.sleep(delay)
+
+
 def broker_kind(broker: object) -> str:
     return (
         "live" if isinstance(broker, LiveBroker) else "shadow" if isinstance(broker, ShadowBroker) else "sim"
@@ -152,9 +173,18 @@ class Controller:
     """Runs inside a session: heartbeat plus the run's commands, applied to its engine."""
 
     def __init__(
-        self, store: ControlStore, run: str, trader: Trader, *, can_arm: bool, poll_s: float = 1.0
+        self,
+        store: ControlStore,
+        run: str,
+        trader: Trader,
+        *,
+        can_arm: bool,
+        poll_s: float = 1.0,
+        playback: Playback | None = None,
     ) -> None:
+        """playback: a demo's pacing, which the dashboard can switch between speeds."""
         self.store, self.run, self.trader, self.can_arm, self.poll_s = store, run, trader, can_arm, poll_s
+        self.playback = playback
         self.started_ts = now_ms()
         self.brokers = {i.broker.name: i.broker for i in trader.instances.values()}
 
@@ -180,6 +210,9 @@ class Controller:
             "now": t.now,
             "markets": self.markets(),
             "exposure": self.exposure(),
+            "speed": None
+            if self.playback is None
+            else {"value": self.playback.speed, "options": list(self.playback.options)},
         }
 
     def exposure(self) -> dict[str, dict[str, dict[str, float]]]:
@@ -249,6 +282,19 @@ class Controller:
 
     def apply(self, action: str, target: str) -> str:
         t = self.trader
+        if action == "speed":
+            if self.playback is None:
+                raise ValueError("this session runs in real time; only demos change speed")
+            try:
+                speed = float(target)
+            except ValueError:
+                raise ValueError(f"speed {target!r} is not a number") from None
+            if speed not in self.playback.options:
+                raise ValueError(
+                    f"speed {speed:g} is not one of {', '.join(f'{o:g}' for o in self.playback.options)}"
+                )
+            self.playback.set(speed)
+            return "real time" if speed == 1 else f"{speed:g}x real time"
         if action in ("halt", "resume"):
             if target and target not in t.instances:
                 raise ValueError(f"no instance {target!r}")

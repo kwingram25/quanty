@@ -138,3 +138,36 @@ def test_not_running_session_gets_no_command(ui: tuple[TestClient, Controller, P
         conn.exec_driver_sql("UPDATE sessions SET heartbeat_ts = 0")
     r = post(client, {"action": "kill", "confirm": "acct"})
     assert r.status_code == 409 and store.history("live/acct") == []  # type: ignore[attr-defined]
+
+
+def test_demo_speed_switches_and_real_sessions_refuse_it(tmp_path: Path) -> None:
+    from quanty.control import Playback
+
+    c, store, _ = make(tmp_path)
+    assert run_cmd(c, store, "speed", "1")["status"] == "failed"  # a real session has no playback
+    c.playback = Playback(10.0, (1.0, 10.0))
+    r = run_cmd(c, store, "speed", "1")
+    assert r["status"] == "done" and r["result"] == "real time" and c.playback.speed == 1.0
+    assert run_cmd(c, store, "speed", "3")["status"] == "failed" and c.playback.speed == 1.0
+    assert store.session("live/acct")["state"]["speed"] == {"value": 1.0, "options": [1.0, 10.0]}  # type: ignore[index]
+
+
+def test_playback_reanchors_without_jumping() -> None:
+    import asyncio
+
+    from quanty.control import Playback
+
+    async def go() -> list[float]:
+        pb = Playback(1000.0, (1.0, 1000.0))
+        t0 = time.monotonic()
+        await pb.wait_for(0)
+        await pb.wait_for(200_000)  # 200 s of events at 1000x: 0.2 s
+        fast = time.monotonic() - t0
+        pb.set(100.0)
+        t1 = time.monotonic()
+        await pb.wait_for(200_000)  # the switch happens here: no catch-up wait
+        await pb.wait_for(210_000)  # 10 s at 100x: 0.1 s
+        return [fast, time.monotonic() - t1]
+
+    fast, after = asyncio.run(go())
+    assert 0.15 < fast < 0.4 and 0.07 < after < 0.3

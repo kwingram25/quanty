@@ -5,6 +5,7 @@ import { useRunStream, type NewRows, type Snapshot } from "../api";
 import { AnimatedNumber } from "../components/AnimatedNumber";
 import { Markets } from "../components/Markets";
 import { PnlChart } from "../components/PnlChart";
+import { SpeedToggle } from "../components/SpeedToggle";
 import { Strategies } from "../components/Strategies";
 import { Tape } from "../components/Tape";
 import { useToast } from "../components/Toasts";
@@ -47,6 +48,7 @@ function Run({ snap, live }: { snap: Snapshot; live: boolean }) {
             <span className={`pill ${snap.run.mode}`}><span className="dot" />{snap.run.mode}</span>
             {snap.session && <span className="pill running" title={live ? "updates pushed live" : "reconnecting"}>
               <span className="dot" />running</span>}
+            <SpeedToggle run={snap.run.name} session={snap.session} />
           </h1>
           <p>{snap.run.file} · last activity {ago(snap.run.last_ts)}</p>
         </div>

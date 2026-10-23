@@ -17,7 +17,7 @@ import typer
 
 from quanty import config, experiment, plugins, synthetic
 from quanty.brokers.live import LiveBroker
-from quanty.control import Controller, ControlStore
+from quanty.control import Controller, ControlStore, Playback
 from quanty.core import Engine, Event, Ledger, Summary
 from quanty.feeds.cli import feeds_app, load_feeds, print_windows, record, recorded, recorded_range, replay
 from quanty.feeds.health import Status, Window
@@ -312,19 +312,18 @@ def _demo_live(
     book = Ledger(data / "paper" / f"{run}.sqlite", durable=True)
     trader = Engine(instances, ledger=book, limits=exp.limits, clock_ms=exp.clock_ms, strict=False)
     store = ControlStore(data / "control.sqlite")
-    controller = Controller(store, f"paper/{run}", trader, can_arm=False)
+    playback = Playback(speed, tuple(sorted({1.0, speed})))  # the dashboard toggles fast / real time
+    controller = Controller(store, f"paper/{run}", trader, can_arm=False, playback=playback)
     server = uvicorn.Server(
         uvicorn.Config(create_app(data, refresh_s=2), host="127.0.0.1", port=port, log_level="warning")
     )
 
     async def play() -> None:
         # the past (before now) at once, so the dashboard opens on a run with history; then live
-        live_from, wall0 = _now_window_ms(), time.monotonic()
+        live_from = _now_window_ms()
         for ev in synthetic.events_multi(spec, ladder=True):
             if ev.ts > live_from:
-                delay = (ev.ts - live_from) / 1000 / speed - (time.monotonic() - wall0)
-                if delay > 0:
-                    await asyncio.sleep(delay)
+                await playback.wait_for(ev.ts)
             trader.advance(ev.ts)
             trader.process(ev)
         server.should_exit = True

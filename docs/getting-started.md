@@ -19,7 +19,8 @@ markets, prints a summary, and opens the dashboard on the result. The synthetic 
 deterministic per `--seed`, so the same command gives the same numbers anywhere.
 
 `quanty demo --live` does the same as a running session instead: it opens on two hours of
-history, then plays the markets at 10x real time (`--speed`) while the strategies paper trade, so
+history, then plays the markets at 10x real time (`--speed`; a toggle on the page switches to real
+time and back) while the strategies paper trade, so
 the dashboard updates as you watch and its controls (halt, resume, kill switch) work. The markets
 are still synthetic.
 
