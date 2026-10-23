@@ -43,6 +43,10 @@ def _plain(v: Any) -> Any:
     return v
 
 
+# sessions started before they reported their actions could do these
+BEFORE_ACTIONS_LISTED = ("halt", "resume", "disarm", "arm", "kill", "speed", "new_day")
+
+
 class Command(BaseModel):
     action: str
     target: str = ""
@@ -125,6 +129,7 @@ class Api:
                 "pid": session["pid"],
                 "heartbeat_ts": session["heartbeat_ts"],
                 "can_arm": session["can_arm"],
+                "actions": state.get("actions", list(BEFORE_ACTIONS_LISTED)),
                 "instances": state.get("instances", {}),
                 "brokers": state.get("brokers", {}),
                 "now": state.get("now"),
@@ -258,8 +263,15 @@ class Api:
             raise HTTPException(400, f"type {name} to confirm actions on a live run")
         store = ControlStore(self.control_path)
         try:
-            if store.session(run) is None:
+            session = store.session(run)
+            if session is None:
                 raise HTTPException(409, "this run is not running")
+            known = session["state"].get("actions", BEFORE_ACTIONS_LISTED)
+            if cmd.action not in known:
+                raise HTTPException(
+                    409,
+                    f"this session's quanty is older than the dashboard and can't {cmd.action}: restart it",
+                )
             try:
                 cid = store.submit(run, cmd.action, cmd.target, cmd.value)
             except ValueError as exc:

@@ -157,6 +157,7 @@ function Details({ st, session, onEdit, onReset }: {
     m.held.filter((h) => h.instance === st.instance).map((h) => ({ m, h })));
   const set = new Set(info.params_set ?? []);
   const running = session?.instances[st.instance];
+  const canEdit = !!running && !!session?.actions?.includes("params");
   const current = obj(running?.params) ?? info.params ?? {}; // a running session's are the latest
   const editedList = running?.edited ?? (Array.isArray(raw.edited) ? raw.edited : []);
   const edited = new Set(editedList);
@@ -204,7 +205,7 @@ function Details({ st, session, onEdit, onReset }: {
           <h4 className="with-action">
             <span>Parameters <span className="muted small">
               {edited.size ? <><i className="edited-dot" /> changed here</> : "set by the experiment in bold"}</span></span>
-            {running && !editing && <button className="btn mini" onClick={() => setEditing(true)}>Edit</button>}
+            {canEdit && !editing && <button className="btn mini" onClick={() => setEditing(true)}>Edit</button>}
           </h4>
           {editing ? (
             <ParamEditor params={params} help={info.param_help ?? {}} edited={edited}

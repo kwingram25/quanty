@@ -64,6 +64,8 @@ export interface OpenMarket {
 export interface Broker { kind: "sim" | "shadow" | "live"; armed?: boolean; disabled?: string }
 
 export interface SessionState {
+  /** commands this session's quanty understands (missing: a session from before they were listed) */
+  actions?: string[];
   pid: number;
   heartbeat_ts: number;
   can_arm: boolean;

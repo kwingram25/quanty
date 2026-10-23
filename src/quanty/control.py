@@ -299,6 +299,7 @@ class Controller:
             for iid, inst in self.trader.instances.items()
         }
         return {
+            "actions": list(ACTIONS),  # what this session's quanty can do (the dashboard may be newer)
             "instances": instances,
             "brokers": brokers,
             "now": t.now,

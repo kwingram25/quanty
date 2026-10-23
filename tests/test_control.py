@@ -97,7 +97,7 @@ def token(client: TestClient) -> str:
 URL = "/api/runs/live/acct/control"
 
 
-def post(client: TestClient, body: dict[str, str], tok: str | None = None, **headers: str) -> object:
+def post(client: TestClient, body: dict[str, object], tok: str | None = None, **headers: str) -> object:
     return client.post(
         URL, json=body, headers={"x-quanty-token": tok if tok is not None else token(client), **headers}
     )
@@ -107,6 +107,7 @@ def test_session_state_is_in_the_snapshot(ui: tuple[TestClient, Controller, Path
     client, _, _ = ui
     s = client.get("/api/runs/live/acct").json()["session"]
     assert set(s["instances"]) == {"a", "b"} and s["brokers"]["real"]["kind"] == "live" and s["can_arm"]
+    assert "params" in s["actions"]  # the dashboard offers Edit only when the session can do it
 
 
 def test_ui_gates(ui: tuple[TestClient, Controller, Path]) -> None:
@@ -284,3 +285,16 @@ def test_edit_from_the_dashboard(tmp_path: Path) -> None:
         t.join()
     assert r.json() == {"ok": True, "result": "s: size 5.0 → 12.5"}
     assert engine.instances["s"].strategy.params.size == 12.5
+
+
+def test_a_session_older_than_the_dashboard_is_told_to_restart(
+    ui: tuple[TestClient, Controller, Path],
+) -> None:
+    client, c, tmp = ui
+    store = ControlStore(tmp / "control.sqlite")
+    state = c.state()
+    del state["actions"]  # what a session from before actions were listed publishes
+    store.heartbeat("live/acct", c.started_ts, True, state)
+    r = post(client, {"action": "params", "target": "a", "value": {"x": 1}, "confirm": "acct"})
+    assert r.status_code == 409 and "restart it" in r.json()["detail"]  # type: ignore[attr-defined]
+    assert store.history("live/acct") == []  # never queued
