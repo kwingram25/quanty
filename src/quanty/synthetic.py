@@ -146,7 +146,9 @@ def temperature_ladder(spec: Spec, bucket: float = 2.0) -> Iterator[Event]:
                     id=f"{VENUE}:TEMP-{close_s}-B{i}", venue=VENUE, series=f"{VENUE}:temp_1h", open_ts=t,
                     close_ts=close_s * 1000, group=f"{VENUE}:temp",
                     terms={"title": f"Synthville temperature at {close}?", "subtitle": label,
-                           "event": f"{VENUE}:TEMP-{close_s}", "reference": TEMP_KEY, "unit": "°F",
+                           "event": f"{VENUE}:TEMP-{close_s}",
+                        "exclusive": True,
+                        "exhaustive": True, "reference": TEMP_KEY, "unit": "°F",
                            "lo": lo, "hi": hi},
                 )  # fmt: skip
                 open_.append((market, lo, hi, 0.0))

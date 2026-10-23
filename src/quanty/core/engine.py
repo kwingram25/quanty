@@ -73,6 +73,14 @@ class Context:
     def market(self, market_id: str) -> Market:
         return self._e.markets[market_id]
 
+    def outcomes(self, market_id: str) -> list[Market]:
+        """The open markets of this market's question when at most one of them can win (the term
+        `exclusive`), e.g. every bucket of a temperature ladder; just this market otherwise."""
+        ev = self._e.risk.exclusive_event(market_id)
+        if ev is None:
+            return [self.market(market_id)]
+        return [m for m in self._e.open_markets.values() if self._e.risk.exclusive_event(m.id) == ev]
+
     def seconds_left(self, market_id: str) -> float:
         return (self._e.markets[market_id].close_ts - self._e.now) / 1000
 

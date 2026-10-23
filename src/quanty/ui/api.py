@@ -117,6 +117,7 @@ class Api:
                 "brokers": state.get("brokers", {}),
                 "now": state.get("now"),
                 "markets": state.get("markets", []),
+                "exposure": state.get("exposure", {}),
             },
             "commands": history,
         }

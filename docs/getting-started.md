@@ -58,8 +58,9 @@ max_order_qty = 10
 ```
 
 Configs are validated strictly: a misspelled parameter or limit is an error that names the
-field, never a silent default. Risk limits: `max_order_qty`, `max_position`, `max_open_risk`,
-`max_group_risk` (per correlation group, e.g. all markets on one index) and `max_daily_loss`.
+field, never a silent default. Risk limits: `max_order_qty`, `max_position`, `max_open_risk`
+(worst-case loss, netted across the outcomes of one question), `max_group_risk` (per correlation
+group, e.g. all markets on one index) and `max_daily_loss`.
 
 ## 3. Write your own strategy
 

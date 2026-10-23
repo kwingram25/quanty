@@ -67,6 +67,7 @@ order, with receive timestamps.
 | `ctx.latest(key)` | latest data event for a key, e.g. `"cfbenchmarks:BRTI"` |
 | `ctx.signal(name)` | a derived value declared in the experiment (`last`, `ewma`, `realized_vol`) |
 | `ctx.position(id, side)` | contracts held |
+| `ctx.outcomes(id)` | the open markets of the same question, when at most one can win |
 | `ctx.orders(id=None)` | your open orders |
 | `ctx.buy(id, side, price, qty, tif=, post_only=, tag=)` | place a buy; returns the `Order` |
 | `ctx.sell(...)` | sell contracts you hold (no shorting: to bet against YES, buy NO) |
@@ -99,6 +100,16 @@ against:
 | `strike` | the threshold, where there is one |
 | `reference` | the data key the market settles against (e.g. `cfbenchmarks:BRTI`) |
 | `unit` | the reference's unit ("°F") |
+| `exclusive` | at most one market of the event can win (a ladder, a list of candidates) |
+| `exhaustive` | with `exclusive`: exactly one wins (the outcomes cover everything) |
+
+For exclusive events, risk limits measure what could really be lost: the worst case across the
+possible winners, not the sum of what each outcome cost. Holding every bucket of a ladder risks only
+what was overpaid in total. `ctx.outcomes(market_id)` lists the open markets of the same question,
+for strategies that price outcomes together, and the dashboard shows each strategy's worst and best
+case per question. The synthetic ladder sets both terms; venue adapters set them where the venue says
+so (not yet for Kalshi, whose events carry the flag but aren't fetched; until then its markets are
+risk-checked one by one, which overstates rather than understates risk).
 
 `quanty demo --live` includes an hourly temperature ladder traded by
 `src/quanty/strategies/example_bucket.py`, next to the up/down example.

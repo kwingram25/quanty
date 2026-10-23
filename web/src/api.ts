@@ -54,6 +54,8 @@ export interface SessionState {
   brokers: Record<string, Broker>;
   now: number | null;
   markets: OpenMarket[];
+  /** exclusive event -> instance -> worst-case loss and best-case gain */
+  exposure?: Record<string, Record<string, { loss: number; gain: number }>>;
 }
 
 export interface ActivityRow {

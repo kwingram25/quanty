@@ -316,3 +316,4 @@ tbody tr:hover td { background: var(--raised); }
 .market .outcome .held { grid-column: 1 / -1; margin-top: 2px; }
 
 .right-col .market .name { white-space: normal; }
+.market .exposure { margin-top: 8px; display: flex; flex-wrap: wrap; gap: 6px; }

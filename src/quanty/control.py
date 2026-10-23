@@ -35,6 +35,8 @@ from sqlalchemy import (
 from quanty.brokers.live import LiveBroker
 from quanty.brokers.shadow import ShadowBroker
 from quanty.core.engine import Engine as Trader
+from quanty.core.portfolio import Position
+from quanty.core.risk import event_exposure
 from quanty.core.types import Side
 
 ACTIONS = ("halt", "resume", "disarm", "arm", "kill")
@@ -42,7 +44,8 @@ ALIVE_S = 10  # a session whose heartbeat is older than this is not running
 
 meta = MetaData()
 commands = Table(
-    "commands", meta,
+    "commands",
+    meta,
     Column("id", Integer, primary_key=True),
     Column("run", String, index=True, nullable=False),
     Column("action", String, nullable=False),
@@ -51,16 +54,17 @@ commands = Table(
     Column("status", String, nullable=False, default="pending"),  # pending / done / failed
     Column("result", Text, nullable=False, default=""),
     Column("done_ts", Integer),
-)  # fmt: skip
+)
 sessions = Table(
-    "sessions", meta,
+    "sessions",
+    meta,
     Column("run", String, primary_key=True),
     Column("pid", Integer, nullable=False),
     Column("started_ts", Integer, nullable=False),
     Column("heartbeat_ts", Integer, nullable=False),
     Column("can_arm", Boolean, nullable=False),
     Column("state", JSON, nullable=False),
-)  # fmt: skip
+)
 
 
 def now_ms() -> int:
@@ -126,8 +130,13 @@ class ControlStore:
             conn.execute(update(commands).where(commands.c.id == command_id).values(**done))
 
     def heartbeat(self, run: str, started_ts: int, can_arm: bool, state: dict[str, Any]) -> None:
-        row = {"pid": os.getpid(), "started_ts": started_ts, "heartbeat_ts": now_ms(), "can_arm": can_arm,
-               "state": state}  # fmt: skip
+        row = {
+            "pid": os.getpid(),
+            "started_ts": started_ts,
+            "heartbeat_ts": now_ms(),
+            "can_arm": can_arm,
+            "state": state,
+        }
         with self.engine.begin() as conn:
             if conn.execute(update(sessions).where(sessions.c.run == run).values(**row)).rowcount == 0:
                 conn.execute(insert(sessions).values(run=run, **row))
@@ -157,10 +166,37 @@ class Controller:
             if isinstance(b, LiveBroker):
                 info.update(armed=b.armed, disabled=b.disabled)
             brokers[name] = info
-        instances = {iid: {"halted": iid in self.trader.halted, "broker": inst.broker.name,
-                           "blocked": self.trader.blocked.get(iid, 0)}
-                     for iid, inst in self.trader.instances.items()}  # fmt: skip
-        return {"instances": instances, "brokers": brokers, "now": t.now, "markets": self.markets()}
+        instances = {
+            iid: {
+                "halted": iid in self.trader.halted,
+                "broker": inst.broker.name,
+                "blocked": self.trader.blocked.get(iid, 0),
+            }
+            for iid, inst in self.trader.instances.items()
+        }
+        return {
+            "instances": instances,
+            "brokers": brokers,
+            "now": t.now,
+            "markets": self.markets(),
+            "exposure": self.exposure(),
+        }
+
+    def exposure(self) -> dict[str, dict[str, dict[str, float]]]:
+        """Per exclusive event with positions: each instance's worst-case loss and best-case gain."""
+        t = self.trader
+        held: dict[tuple[str, str], list[tuple[str, Side, Position]]] = {}
+        for iid, mid, side, pos in t.portfolio.open_positions():
+            ev = t.risk.exclusive_event(mid)
+            if ev is not None and pos.qty > 1e-9:
+                held.setdefault((ev, iid), []).append((mid, side, pos))
+        out: dict[str, dict[str, dict[str, float]]] = {}
+        for (ev, iid), holdings in held.items():
+            outcomes = [m for m in t.markets if t.risk.exclusive_event(m) == ev]
+            exhaustive = all(t.markets[m].terms.get("exhaustive") is True for m in outcomes)
+            loss, gain = event_exposure(holdings, outcomes, exhaustive)
+            out.setdefault(ev, {})[iid] = {"loss": round(loss, 4), "gain": round(gain, 4)}
+        return out
 
     def markets(self, limit: int = 24) -> list[dict[str, Any]]:
         """Open markets some instance trades, soonest close first: what they are, prices, the value
@@ -201,9 +237,13 @@ class Controller:
                 ok, result = True, self.apply(cmd["action"], cmd["target"])
             except ValueError as exc:
                 ok, result = False, str(exc)
-            self.trader.ledger.log(self.trader.now, "control", f"control: {cmd['action']}",
-                                   {"target": cmd["target"], "ok": ok, "result": result},
-                                   level="warning" if ok else "error")  # fmt: skip
+            self.trader.ledger.log(
+                self.trader.now,
+                "control",
+                f"control: {cmd['action']}",
+                {"target": cmd["target"], "ok": ok, "result": result},
+                level="warning" if ok else "error",
+            )
             self.store.finish(cmd["id"], ok, result)
         self.store.heartbeat(self.run, self.started_ts, self.can_arm, self.state())
 

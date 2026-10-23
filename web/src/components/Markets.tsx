@@ -1,7 +1,7 @@
 import { AnimatePresence, motion } from "motion/react";
 import { useEffect, useRef, useState } from "react";
 import type { OpenMarket, SessionState } from "../api";
-import { cents, closesAt, duration, seriesName } from "../format";
+import { cents, closesAt, duration, money, seriesName } from "../format";
 
 /** The session's event clock, extrapolated between heartbeats at the rate it has been advancing
  *  (1x live, faster in a sped-up demo). */
@@ -42,7 +42,9 @@ export function Markets({ session, slots }: { session: SessionState | null; slot
         {events.size === 0 ? <p className="empty">No markets open right now.</p> : (
           <div className="board">
             <AnimatePresence initial={false}>
-              {[...events.entries()].map(([ev, ms]) => <Event key={ev} ms={ms} now={now} slots={slots} />)}
+              {[...events.entries()].map(([ev, ms]) => (
+                <Event key={ev} ms={ms} now={now} slots={slots} exposure={session.exposure?.[ev]} />
+              ))}
             </AnimatePresence>
           </div>
         )}
@@ -51,7 +53,10 @@ export function Markets({ session, slots }: { session: SessionState | null; slot
   );
 }
 
-function Event({ ms, now, slots }: { ms: OpenMarket[]; now: number | null; slots: Record<string, number> }) {
+function Event({ ms, now, slots, exposure }: {
+  ms: OpenMarket[]; now: number | null; slots: Record<string, number>;
+  exposure?: Record<string, { loss: number; gain: number }>;
+}) {
   const m0 = ms[0];
   const left = now == null ? (m0.close_ts - m0.open_ts) / 1000 : (m0.close_ts - now) / 1000;
   const frac = Math.min(1, Math.max(0, left / ((m0.close_ts - m0.open_ts) / 1000)));
@@ -84,6 +89,16 @@ function Event({ ms, now, slots }: { ms: OpenMarket[]; now: number | null; slots
         </div>
       ) : (
         <Held m={m0} slots={slots} />
+      )}
+      {exposure && (
+        <div className="exposure" title="Across this question's outcomes: what could still be lost, and the most it could pay">
+          {Object.entries(exposure).map(([iid, x]) => (
+            <span key={iid} className="chip">
+              <i className="swatch" style={{ ["--c" as string]: `var(--series-${slots[iid] ?? 1})` }} />
+              {iid} worst <span className="down">{money(-x.loss)}</span> · best <span className="up">{money(x.gain, true)}</span>
+            </span>
+          ))}
+        </div>
       )}
       <div className="drain" style={{ width: `${frac * 100}%` }} />
     </motion.div>
