@@ -58,8 +58,8 @@ def test_paper_session_trades_on_a_live_feed(tmp_path: Path, monkeypatch: pytest
             await session.run(duration_s=3.0)
 
     asyncio.run(go())
-    ((qty, price),) = ledger.execute(select(FillRow.qty, FillRow.price)).all()
-    assert (qty, price) == (10.0, 0.45)
+    fills = [(r.qty, r.price) for r in ledger.execute(select(FillRow.qty, FillRow.price))]
+    assert fills == [(10.0, 0.45)]
     assert ledger.execute(select(OrderRow.status)).scalar_one() == "filled"
     assert sum(1 for n, a in strategy.seen if n == "clock" and isinstance(a, Clock)) >= 5  # wall-clock ticks
     assert (tmp_path / "rec" / "polymarket_us").is_dir()  # and everything was recorded
