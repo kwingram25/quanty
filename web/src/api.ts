@@ -110,13 +110,16 @@ export interface ActivityRow {
 }
 
 /** Per strategy, over every order: how many there were and how they turned out. */
-export type OrderStats = Record<string, Record<"orders" | ActivityRow["result"], number>>;
+export type OrderStats = Record<string, Record<"orders" | ActivityRow["result"], number> & {
+  /** what the Orders view shows by default; stop-loss sells that filled */
+  needs_look?: number; stops?: number;
+}>;
 
 export interface Position { instance: string; market_id: string; side: string; qty: number; avg_price: number }
 
 export type TapeItem =
   | { key: string; kind: "fill"; ts: number; instance: string; market_id: string; side: string; action: string;
-      price: number; qty: number; fee: number; realized: number; liquidity: string }
+      price: number; qty: number; fee: number; realized: number; liquidity: string; tag?: string }
   | { key: string; kind: "settlement"; ts: number; instance: string; market_id: string; side: string; qty: number;
       payout: number; pnl: number }
   | { key: string; kind: "log"; ts: number; instance: string; level: string; msg: string;
@@ -156,7 +159,9 @@ export interface Trade {
   sold: number;
   avg_sell: number | null;
   fees: number;
-  outcome: "won" | "lost" | "sold" | "open";
+  /** stopped: sold by a stop loss (an exit the strategy tagged "stop") */
+  outcome: "won" | "lost" | "sold" | "stopped" | "open";
+  stopped?: boolean;
   pnl: number | null;
 }
 

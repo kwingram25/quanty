@@ -218,7 +218,7 @@ function Center({ snap, slots, halted }: { snap: Snapshot; slots: Record<string,
 
 /** Orders that didn't simply fill, over every order (null before the ledger reported counts). */
 const needsLook = (stats: OrderStats | undefined): number | null =>
-  stats ? Object.values(stats).reduce((n, s) => n + s.orders - s.filled, 0) : null;
+  stats ? Object.values(stats).reduce((n, s) => n + (s.needs_look ?? s.orders - s.filled), 0) : null;
 
 const RESULT: Record<ActivityRow["result"], string> = {
   filled: "Filled", partial: "Partly filled", missed: "Missed", unfilled: "Not filled", rejected: "Rejected", resting: "Resting",
@@ -246,7 +246,7 @@ function Orders({ snap, slots }: { snap: Snapshot; slots: Record<string, number>
   const pickView = (v: "look" | "all") => { setView(v); try { localStorage.setItem("orders:view", v); } catch { /* private mode */ } };
   const stats = snap.order_stats ?? {};
   const total = Object.values(stats).reduce(
-    (t, s) => { for (const k of Object.keys(s) as (keyof typeof s)[]) t[k] = (t[k] ?? 0) + s[k]; return t; },
+    (t, s) => { for (const k of Object.keys(s) as (keyof typeof s)[]) t[k] = (t[k] ?? 0) + (s[k] ?? 0); return t; },
     {} as Record<string, number>);
   const look = needsLook(snap.order_stats) ?? 0;
   const rows = view === "look" ? snap.order_issues ?? [] : snap.activity;
@@ -255,6 +255,7 @@ function Orders({ snap, slots }: { snap: Snapshot; slots: Record<string, number>
     `${k}: ${s.orders} orders, ${s.filled} filled, ${s.missed} missed, ${s.partial} partly filled, ${s.rejected} rejected`).join("\n");
   const parts = (["missed", "partial", "unfilled", "rejected", "resting"] as const)
     .filter((k) => total[k]).map((k) => `${total[k]} ${RESULT[k].toLowerCase()}`);
+  if (total.stops) parts.push(`${total.stops} stop loss${total.stops > 1 ? "es" : ""}`);
   return (
     <>
       <div className="orders-head">
@@ -265,7 +266,7 @@ function Orders({ snap, slots }: { snap: Snapshot; slots: Record<string, number>
         <div className="segmented" role="radiogroup" aria-label="Which orders">
           {(["look", "all"] as const).map((v) => (
             <button key={v} role="radio" aria-checked={view === v} onClick={() => pickView(v)}
-              title={v === "look" ? "Orders that didn't simply fill: missed, partly filled, rejected, resting" : "Every recent order"}>
+              title={v === "look" ? "Orders that didn't simply fill (missed, partly filled, rejected, resting) and every stop loss" : "Every recent order"}>
               {view === v && <motion.span className="thumb" layoutId="orders-thumb" transition={{ type: "spring", stiffness: 500, damping: 38 }} />}
               <span>{v === "look" ? `Needs a look${look ? ` ${look}` : ""}` : "All"}</span>
             </button>
@@ -290,7 +291,8 @@ function Orders({ snap, slots }: { snap: Snapshot; slots: Record<string, number>
                   {a.action === "buy" ? "Buy" : "Sell"} <span className="num">{qty(a.qty)}</span>{" "}
                   <span className={`side ${a.side}`}>{a.side === "yes" ? "Yes" : "No"}</span>{" "}
                   <span className="num">at {cents(a.price)}</span>
-                  <span className="muted cost">{[a.tif.toUpperCase(), a.post_only && "post-only", a.tag].filter(Boolean).join(" · ")}</span>
+                  <span className="muted cost">{a.action === "sell" && a.tag === "stop" && <span className="stop-tag">Stop loss</span>}
+                    {[a.tif.toUpperCase(), a.post_only && "post-only", a.tag !== "stop" && a.tag].filter(Boolean).join(" · ")}</span>
                 </td>
                 <td title={a.fills ? `${a.liquidity || "?"} · fees ${money(a.fees)} · ${a.fills} fill${a.fills > 1 ? "s" : ""}` : a.status}>
                   <span className={`outcome ${a.result}`}>{RESULT[a.result]}</span>
@@ -323,7 +325,7 @@ function Commands({ snap }: { snap: Snapshot }) {
   );
 }
 
-const OUTCOME: Record<string, string> = { won: "Won", lost: "Lost", sold: "Sold", open: "Open" };
+const OUTCOME: Record<string, string> = { won: "Won", lost: "Lost", sold: "Sold", stopped: "Stopped", open: "Open" };
 
 /** What each strategy bought, what it cost, and how it ended. */
 function Trades({ snap, slots }: { snap: Snapshot; slots: Record<string, number> }) {
@@ -371,9 +373,9 @@ function Trades({ snap, slots }: { snap: Snapshot; slots: Record<string, number>
                 <span className={`side ${t.side}`}>{t.side === "yes" ? "Yes" : "No"}</span>{" "}
                 <span className="num">{+t.bought.toFixed(2)} at {cents(t.avg_price)}</span>
                 <span className="muted num cost" title={`includes ${money(t.fees)} in fees`}>{money(t.cost)} with fees
-                  {t.sold > 0 && <> · sold {+t.sold.toFixed(2)} at {cents(t.avg_sell)}</>}</span>
+                  {t.sold > 0 && <> · {t.stopped ? "stopped out" : "sold"} {+t.sold.toFixed(2)} at {cents(t.avg_sell)}</>}</span>
               </td>
-              <td><span className={`outcome ${t.outcome}`} title={t.closed ? `${t.outcome === "sold" ? "sold" : "settled"} ${clock(t.closed)}` : "the market hasn't settled yet"}>
+              <td><span className={`outcome ${t.outcome}`} title={t.closed ? `${t.outcome === "stopped" ? "sold by its stop loss" : t.outcome === "sold" ? "sold" : "settled"} ${clock(t.closed)}` : "the market hasn't settled yet"}>
                 {OUTCOME[t.outcome]}</span></td>
               <td className={`r num pnl ${tone(t.pnl)}`}>{t.pnl == null ? "–" : money(t.pnl, true)}</td>
             </tr>

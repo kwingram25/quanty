@@ -171,6 +171,10 @@ if held and paid is not None and bid is not None and bid <= paid - self.params.s
     ctx.sell(mid, side, bid, held, tif=Tif.IOC, tag="stop")
 ```
 
+Tag stop sells `tag="stop"`, as above: the dashboard then shows them as stop losses (a **Stopped**
+outcome in Trades, "stopped out of" in the tape, a count on the strategy, and every one under
+Orders' *Needs a look*).
+
 Things to know:
 
 - **No exit price is guaranteed.** An IOC sell takes the bids that are there and cancels the rest:

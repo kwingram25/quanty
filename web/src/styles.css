@@ -486,3 +486,9 @@ table.orders td:last-child { white-space: normal; max-width: 320px; }
 .splitter:hover::after, .splitter.active::after { background: var(--axis); }
 .splitter:focus-visible::after { background: var(--focus); }
 body.resizing, body.resizing * { user-select: none; }
+
+/* stop losses: one color wherever they show */
+table.trades .outcome.stopped { color: var(--serious); border-color: color-mix(in srgb, var(--serious) 45%, var(--border)); }
+.stop-tag { display: inline-block; margin-right: 6px; padding: 0 6px; border-radius: 5px; font-size: 10.5px; font-weight: 600;
+  color: var(--serious); background: color-mix(in srgb, var(--serious) 12%, transparent); }
+.strategy .stops { color: var(--serious); }

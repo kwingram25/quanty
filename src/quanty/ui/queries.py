@@ -193,6 +193,7 @@ class Activity:
 
 QTY_EPS = 1e-9
 RESTING = (OrderStatus.PENDING, OrderStatus.OPEN)
+STOP_TAG = "stop"  # an exit a strategy tags this way is shown as a stop loss
 
 
 def order_result(status: OrderStatus, filled: float, qty: float, tif: Tif) -> str:
@@ -210,12 +211,18 @@ def order_result(status: OrderStatus, filled: float, qty: float, tif: Tif) -> st
     return "missed" if tif == Tif.IOC else "unfilled"
 
 
-# orders worth a look: anything but filled in full
-_NEEDS_LOOK = (OrderRow.status != OrderStatus.FILLED) | (OrderRow.filled < OrderRow.qty - QTY_EPS)
+# orders worth a look: anything but filled in full, and every stop loss
+_NEEDS_LOOK = (
+    (OrderRow.status != OrderStatus.FILLED)
+    | (OrderRow.filled < OrderRow.qty - QTY_EPS)
+    | ((OrderRow.action == Action.SELL) & (OrderRow.tag == STOP_TAG))
+)
 
 
 def order_stats(run: Run) -> dict[str, dict[str, int]]:
-    """Per instance, over every order: how many there were and how each kind of result ended."""
+    """Per instance, over every order: how many there were and how each kind of result ended (these
+    add up to orders), plus needs_look (what the Orders view shows by default) and stops (stop-loss
+    sells that filled)."""
     rejected = OrderRow.status == OrderStatus.REJECTED
     resting = OrderRow.status.in_(RESTING)
     done = ~rejected & ~resting
@@ -238,6 +245,10 @@ def order_stats(run: Run) -> dict[str, dict[str, int]]:
                     count(done & ~some & (OrderRow.tif != Tif.IOC)).label("unfilled"),
                     count(rejected).label("rejected"),
                     count(resting).label("resting"),
+                    count(_NEEDS_LOOK).label("needs_look"),
+                    count((OrderRow.action == Action.SELL) & (OrderRow.tag == STOP_TAG) & some).label(
+                        "stops"
+                    ),
                 ).group_by(OrderRow.instance)
             ).all()
     finally:
@@ -286,7 +297,8 @@ def activity(run: Run, limit: int = 100, needs_look: bool = False) -> list[Activ
 
 def trades(run: Run, limit: int = 100) -> list[dict[str, Any]]:
     """One row per position a strategy took (instance, market, side): what it bought and sold, what
-    it cost, how it ended (won, lost, sold, still open) and its P&L, newest first."""
+    it cost, how it ended (won, lost, sold, stopped: sold by a stop loss, still open) and its P&L,
+    newest first."""
     engine = _open(run.path)
     try:
         with Session(engine) as conn:
@@ -306,7 +318,11 @@ def trades(run: Run, limit: int = 100) -> list[dict[str, Any]]:
                     ).label("proceeds"),
                     func.sum(FillRow.fee).label("fees"),
                     func.sum(FillRow.realized).label("realized"),
+                    func.max(
+                        case(((FillRow.action == Action.SELL) & (OrderRow.tag == STOP_TAG), 1), else_=0)
+                    ).label("stopped"),
                 )
+                .join(OrderRow, OrderRow.id == FillRow.order_id, isouter=True)
                 .group_by(*key)
                 .order_by(func.max(FillRow.ts).desc())
                 .limit(limit)
@@ -324,7 +340,7 @@ def trades(run: Run, limit: int = 100) -> list[dict[str, Any]]:
         if st is not None:
             outcome = "won" if st.payout > 0 else "lost"
         elif r.sold >= r.bought - 1e-9 and r.sold > 0:
-            outcome = "sold"
+            outcome = "stopped" if r.stopped else "sold"
         else:
             outcome, pnl = ("open", None) if not r.realized else ("open", r.realized)
         out.append(
@@ -341,6 +357,7 @@ def trades(run: Run, limit: int = 100) -> list[dict[str, Any]]:
                 "avg_sell": r.proceeds / r.sold if r.sold else None,
                 "fees": r.fees or 0.0,
                 "outcome": outcome,
+                "stopped": bool(r.stopped),  # some of it was sold by a stop loss
                 "pnl": pnl,
             }
         )
@@ -395,6 +412,11 @@ def tape(run: Run, limit: int = 60) -> list[dict[str, Any]]:
     try:
         with Session(engine) as conn:
             fills = conn.execute(select(FillRow).order_by(FillRow.id.desc()).limit(limit)).scalars().all()
+            tags = dict(
+                conn.execute(
+                    select(OrderRow.id, OrderRow.tag).where(OrderRow.id.in_({f.order_id for f in fills}))
+                ).all()
+            )
             settles = (
                 conn.execute(select(SettlementRow).order_by(SettlementRow.id.desc()).limit(limit))
                 .scalars()
@@ -433,6 +455,7 @@ def tape(run: Run, limit: int = 60) -> list[dict[str, Any]]:
                 "fee": f.fee,
                 "realized": f.realized,
                 "liquidity": str(f.liquidity),
+                "tag": tags.get(f.order_id, ""),
             }
         )
     for x in settles:

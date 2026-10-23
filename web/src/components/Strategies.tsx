@@ -45,7 +45,7 @@ export function Strategies({ snap, slots }: { snap: Snapshot; slots: Record<stri
         {snap.strategies.map((st) => {
           const halted = pending[st.instance] ?? s?.instances[st.instance]?.halted ?? false;
           return <Row key={st.instance} st={st} slot={slots[st.instance] ?? 1} session={s} halted={halted}
-            blocked={s?.instances[st.instance]?.blocked ?? 0}
+            blocked={s?.instances[st.instance]?.blocked ?? 0} stops={snap.order_stats?.[st.instance]?.stops ?? 0}
             onToggle={() => act(halted ? "resume" : "halt", st.instance, `${halted ? "Resumed" : "Halted"} ${st.instance}`)}
             onEdit={(value) => act("params", st.instance, `Changed ${st.instance}`, "", value)}
             onReset={() => act("reset_params", st.instance, `Reset ${st.instance} to the experiment file`)} />;
@@ -69,8 +69,9 @@ export function Strategies({ snap, slots }: { snap: Snapshot; slots: Record<stri
 
 type Edit = (value: Record<string, unknown>) => Promise<boolean | null>;
 
-function Row({ st, slot, session, halted, blocked, onToggle, onEdit, onReset }: {
-  st: Strategy; slot: number; session: SessionState | null; halted: boolean; blocked: number; onToggle: () => void;
+function Row({ st, slot, session, halted, blocked, stops, onToggle, onEdit, onReset }: {
+  st: Strategy; slot: number; session: SessionState | null; halted: boolean; blocked: number; stops: number;
+  onToggle: () => void;
   onEdit: Edit; onReset: () => Promise<boolean | null>;
 }) {
   const [open, setOpen] = useState(() => {
@@ -117,6 +118,7 @@ function Row({ st, slot, session, halted, blocked, onToggle, onEdit, onReset }: 
       <div className="sub">
         <span className="grow" title={`${st.wins} won, ${st.losses} lost${st.rejected ? `, ${st.rejected} orders rejected` : ""}`}>
           {st.fills} fills · {st.wins}–{st.losses}{st.rejected ? ` · ${st.rejected} rej` : ""}
+          {stops > 0 && <span className="stops" title="positions sold by its stop loss"> · {stops} stop{stops > 1 ? "s" : ""}</span>}
           {halted && blocked > 0 && <span className="blocked" title="buys refused while halted"> · {blocked} blocked</span>}</span>
         {session && session.instances[st.instance] && <>
           <span className={`pill ${halted ? "halted" : "trading"}`}><span className="dot" />{halted ? "halted" : "trading"}</span>

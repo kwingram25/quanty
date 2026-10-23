@@ -34,6 +34,7 @@ function cls(it: TapeItem): string {
 }
 
 function edge(it: TapeItem, slots: Record<string, number>): React.CSSProperties | undefined {
+  if (it.kind === "fill" && it.tag === "stop") return { ["--edge" as string]: "var(--serious)" };
   if (it.kind === "fill" && !it.realized) return { ["--edge" as string]: `var(--series-${slots[it.instance] ?? 1})` };
   return undefined;
 }
@@ -45,7 +46,7 @@ function Body({ it, names }: { it: TapeItem; names?: Record<string, MarketName> 
     return (
       <>
         <span className="what" title={what ? `${what.title} ${what.subtitle}`.trim() : undefined}>
-          <b>{it.instance}</b> {it.action === "buy" ? "bought" : "sold"} {it.qty} {it.side.toUpperCase()} at {cents(it.price)}
+          <b>{it.instance}</b> {it.action === "buy" ? "bought" : it.tag === "stop" ? "stopped out of" : "sold"} {it.qty} {it.side.toUpperCase()} at {cents(it.price)}
           <span className="detail">{about} · {it.liquidity} · fee {money(it.fee)}</span>
         </span>
         <span className={`amount ${tone(it.realized)}`}>{it.realized ? money(it.realized, true) : money(-it.qty * it.price - it.fee)}</span>

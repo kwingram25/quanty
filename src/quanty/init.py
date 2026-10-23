@@ -348,7 +348,8 @@ stop: when the model's probability for the side held drops below a threshold, re
 (so the entry logic doesn't buy back in) and `ctx.sell(mid, side, 0.01, ctx.position(mid, side),
 tif=Tif.IOC, tag="stop")`, which sells into whatever bids there are. A price stop: compare
 `book.bid(side)` with `ctx.entry_price(mid, side)`. IOC sells can fill partly or not at all in a
-thin book, and prices jump near the close. Selling works while a strategy is halted.
+thin book, and prices jump near the close. Selling works while a strategy is halted. Keep
+`tag="stop"` on stop sells: the dashboard shows those as stop losses.
 `example_favorite.py` has a model stop (`stop_conf`).
 
 Full reference: {REPO}/blob/main/docs/strategies.md (may be private). Working examples, in the

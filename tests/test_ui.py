@@ -241,7 +241,37 @@ def test_orders_are_classified_and_counted(tmp_path: Path) -> None:
     run = queries.run_by_name(tmp_path, "backtest/slow")
     assert run is not None
     stats = queries.order_stats(run)["x"]
-    assert stats["missed"] > 0 and stats["orders"] == sum(v for k, v in stats.items() if k != "orders")
+    results = ("filled", "partial", "missed", "unfilled", "rejected", "resting")
+    assert stats["missed"] > 0 and stats["orders"] == sum(stats[k] for k in results)
+    assert stats["needs_look"] == stats["orders"] - stats["filled"]  # no stop losses in this run
     issues = queries.activity(run, needs_look=True)
     assert issues and all(a.result != "filled" for a in issues)
     assert len(issues) == min(100, stats["orders"] - stats["filled"])
+
+
+def test_stop_losses_are_marked_everywhere(tmp_path: Path) -> None:
+    from quanty import experiment, plugins, synthetic
+    from quanty.core import Engine, Ledger
+    from quanty.ui import queries
+
+    (tmp_path / "paper").mkdir()
+    raw = {
+        "instances": [
+            {"id": "s", "strategy": "example_favorite", "params": {"min_conf": 0.9, "stop_conf": 0.7}}
+        ]
+    }
+    exp = experiment.parse(raw)
+    ledger = Ledger(tmp_path / "paper" / "stops.sqlite")
+    Engine(experiment.build(exp, plugins.discover([], local=None), synthetic.FEES), ledger=ledger).run(
+        synthetic.events(synthetic.Spec(hours=24, seed=0))
+    )
+    ledger.close()
+    run = queries.run_by_name(tmp_path, "paper/stops")
+    assert run is not None
+    stats = queries.order_stats(run)["s"]
+    stopped = [t for t in queries.trades(run, limit=1000) if t["outcome"] == "stopped"]
+    assert stats["stops"] > 0 and stopped and all(t["sold"] > 0 and t["stopped"] for t in stopped)
+    assert any(a.order.tag == "stop" for a in queries.activity(run, needs_look=True))  # filled, but shown
+    assert stats["needs_look"] >= stats["orders"] - stats["filled"] + 1
+    tape_stops = [i for i in queries.tape(run, limit=2000) if i["kind"] == "fill" and i["tag"] == "stop"]
+    assert tape_stops and all(i["action"] == "sell" for i in tape_stops)
