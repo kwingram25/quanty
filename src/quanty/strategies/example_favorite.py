@@ -13,6 +13,9 @@ from quanty.synthetic import INDEX_KEY, p_up
 class FavoriteParams(Params):
     min_conf: float = Field(0.9, gt=0.5, lt=1, description="Model probability the favorite wins")
     max_price: float = Field(0.95, gt=0, lt=1, description="Never pay more than this")
+    min_edge: float = Field(
+        0.0, ge=0, lt=1, description="Only buy when the model's probability beats the price by this much"
+    )
     enter_last_s: int = Field(60, gt=0, description="Only buy in the last N seconds of a window")
     size: int = Field(10, gt=0, description="Contracts per window")
     vol_per_s: float = Field(0.0005, gt=0, description="Model input: index log-return sd per second")
@@ -37,7 +40,8 @@ class FavoriteLate(Strategy[FavoriteParams]):
         side = Side.YES if fair_yes >= 0.5 else Side.NO
         conf = max(fair_yes, 1 - fair_yes)
         price = book.ask(side)
-        if conf >= p.min_conf and price is not None and price <= p.max_price:
+        # the edge check: never pay more than the model says the contract is worth
+        if conf >= p.min_conf and price is not None and price <= p.max_price and conf - price >= p.min_edge:
             ctx.buy(mid, side, price, p.size, tif=Tif.IOC, tag="favorite")
 
     def fair_yes(self, ctx: Context, market_id: str, seconds_left: float) -> float | None:

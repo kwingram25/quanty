@@ -151,7 +151,13 @@ def test_demo_speed_switches_and_real_sessions_refuse_it(tmp_path: Path) -> None
     assert run_cmd(c, store, "speed", "3")["status"] == "failed" and c.playback.speed == 1.0
     session = store.session("live/acct")
     assert session is not None
-    assert session["state"]["speed"] == {"value": 1.0, "options": [1.0, 10.0], "catching_up": False}
+    assert session["state"]["speed"] == {
+        "value": 1.0,
+        "options": [1.0, 10.0],
+        "catching_up": False,
+        "seed": None,
+        "new_day": False,
+    }
 
 
 def test_playback_reanchors_without_jumping() -> None:
@@ -173,3 +179,14 @@ def test_playback_reanchors_without_jumping() -> None:
 
     fast, after = asyncio.run(go())
     assert 0.15 < fast < 0.4 and 0.07 < after < 0.3
+
+
+def test_new_day_only_in_demos(tmp_path: Path) -> None:
+    from quanty.control import Playback
+
+    c, store, _ = make(tmp_path)
+    assert "only demos" in str(run_cmd(c, store, "new_day")["result"])
+    c.playback = Playback(10.0, (1.0, 10.0))
+    c.playback.on_new_day = lambda: 4242
+    r = run_cmd(c, store, "new_day")
+    assert r["status"] == "done" and r["result"] == "started a new day (seed 4242)"

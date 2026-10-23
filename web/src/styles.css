@@ -373,3 +373,4 @@ tbody tr:hover td { background: var(--raised); }
 @media (max-width: 760px) { .accounts .venue { display: none; } }
 
 .tabbar .ranges { margin-left: auto; align-self: center; }
+.new-day { display: inline-flex; align-items: center; gap: 8px; font-size: 12px; font-weight: 400; }

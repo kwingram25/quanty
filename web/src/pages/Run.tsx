@@ -5,7 +5,7 @@ import { useRunStream, type NewRows, type Snapshot } from "../api";
 import { AnimatedNumber } from "../components/AnimatedNumber";
 import { Markets } from "../components/Markets";
 import { PnlChart } from "../components/PnlChart";
-import { SpeedToggle } from "../components/SpeedToggle";
+import { NewDay, SpeedToggle } from "../components/SpeedToggle";
 import { Strategies } from "../components/Strategies";
 import { Tape } from "../components/Tape";
 import { useToast } from "../components/Toasts";
@@ -30,7 +30,8 @@ export function RunPage() {
 
   if (state === "missing") return <div className="page"><p className="empty">No run named {run}.</p></div>;
   if (!snap) return <div className="page"><p className="empty">Loading {run}…</p></div>;
-  return <Run snap={snap} live={state === "open"} />;
+  // a demo's new day is a new run: start the page afresh (no "changes" animated from the old day)
+  return <Run key={snap.session?.speed?.seed ?? "run"} snap={snap} live={state === "open"} />;
 }
 
 function Run({ snap, live }: { snap: Snapshot; live: boolean }) {
@@ -54,6 +55,7 @@ function Run({ snap, live }: { snap: Snapshot; live: boolean }) {
               </span>
             ))}
             <SpeedToggle run={snap.run.name} session={snap.session} />
+            <NewDay run={snap.run.name} session={snap.session} />
             {snap.session?.speed?.catching_up && <span className="pill warning"><span className="dot" />loading history…</span>}
           </h1>
           <p>{snap.run.file} · last activity {ago(snap.run.last_ts)}</p>

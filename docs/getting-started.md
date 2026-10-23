@@ -22,7 +22,8 @@ deterministic per `--seed`, so the same command gives the same numbers anywhere.
 (`--history`), then plays the markets at 10x real time (`--speed`; a toggle on the page switches to real
 time and back) while the strategies paper trade, so
 the dashboard updates as you watch and its controls (halt, resume, kill switch) work. The markets
-are still synthetic.
+are still synthetic. "New day" starts over on a freshly generated day; the header shows its seed, and
+`quanty demo --live --seed N` replays it.
 
 ```sh
 uv run quanty demo --hours 24 --seed 3 --param min_conf=0.97   # one variant, your parameters

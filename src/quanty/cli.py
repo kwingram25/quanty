@@ -1,6 +1,8 @@
 """quanty: record, backtest, paper and live trade repeated prediction markets."""
 
 import asyncio
+import dataclasses
+import random
 import sys
 import tempfile
 import threading
@@ -301,28 +303,42 @@ def _demo_live(
     exp: experiment.Experiment, data: Path, spec: synthetic.Spec, speed: float, port: int, browser: bool
 ) -> None:
     """Synthetic markets played against the wall clock (sped up), traded as a paper session, with
-    the dashboard and its controls open on it: what a running session looks like, without keys."""
+    the dashboard and its controls open on it: what a running session looks like, without keys.
+    The dashboard's "New day" starts over on a freshly generated day (a new seed)."""
     import uvicorn
 
     from quanty.ui.app import create_app
 
-    instances = experiment.build(exp, _strategies(), synthetic.FEES)
     run = "demo-live"
     (data / "paper").mkdir(parents=True)
-    book = Ledger(data / "paper" / f"{run}.sqlite", durable=True)
-    trader = Engine(instances, ledger=book, limits=exp.limits, clock_ms=exp.clock_ms, strict=False)
+    ledger_path = data / "paper" / f"{run}.sqlite"
     store = ControlStore(data / "control.sqlite")
     playback = Playback(speed, tuple(sorted({1.0, speed})))  # the dashboard toggles fast / real time
-    controller = Controller(store, f"paper/{run}", trader, can_arm=False, playback=playback)
     server = uvicorn.Server(
         uvicorn.Config(create_app(data, refresh_s=2), host="127.0.0.1", port=port, log_level="warning")
     )
 
-    async def play() -> None:
+    def build(seed: int) -> tuple[Engine, Ledger, synthetic.Spec]:
+        book = Ledger(ledger_path, durable=True)
+        trader = Engine(
+            experiment.build(exp, _strategies(), synthetic.FEES),
+            ledger=book,
+            limits=exp.limits,
+            clock_ms=exp.clock_ms,
+            strict=False,
+        )
+        return trader, book, dataclasses.replace(spec, seed=seed)
+
+    trader, book, day = build(spec.seed)
+    playback.seed = spec.seed
+    controller = Controller(store, f"paper/{run}", trader, can_arm=False, playback=playback)
+
+    async def play(trader: Engine, day: synthetic.Spec) -> None:
         # the past (before now) at once, so the dashboard opens on a run with history; then live
         live_from = _now_window_ms()
         playback.catching_up = True
-        for n, ev in enumerate(synthetic.events_multi(spec, ladder=True)):
+        playback.set(playback.speed)  # re-anchor for this day
+        for n, ev in enumerate(synthetic.events_multi(day, ladder=True)):
             if ev.ts > live_from:
                 playback.catching_up = False
                 await playback.wait_for(ev.ts)
@@ -332,14 +348,38 @@ def _demo_live(
             trader.process(ev)
         server.should_exit = True
 
+    state: dict[str, Any] = {"task": None, "book": book}
+
+    async def new_day(seed: int) -> None:
+        old = state["task"]
+        old.cancel()
+        await asyncio.gather(old, return_exceptions=True)
+        state["book"].close()
+        for suffix in ("", "-wal", "-shm"):  # the demo's own ledger, recreated for the new day
+            Path(f"{ledger_path}{suffix}").unlink(missing_ok=True)
+        trader, book, day = build(seed)
+        state["book"] = book
+        controller.trader = trader
+        controller.brokers = {i.broker.name: i.broker for i in trader.instances.values()}
+        state["task"] = asyncio.create_task(play(trader, day))
+
+    def restart() -> int:
+        seed = random.randrange(1, 1_000_000)
+        playback.seed = seed
+        asyncio.get_running_loop().create_task(new_day(seed))
+        return seed
+
+    playback.on_new_day = restart
+
     async def main() -> None:
-        tasks = [asyncio.create_task(play()), asyncio.create_task(controller.run_forever())]
+        state["task"] = asyncio.create_task(play(trader, day))
+        tasks = [asyncio.create_task(controller.run_forever())]
         try:
             await server.serve()
         finally:
-            for t in tasks:
+            for t in [*tasks, state["task"]]:
                 t.cancel()
-            await asyncio.gather(*tasks, return_exceptions=True)
+            await asyncio.gather(*tasks, state["task"], return_exceptions=True)
 
     url = f"http://127.0.0.1:{port}/runs/paper/{run}"
     typer.echo(f"live demo: synthetic up/down markets and a temperature ladder at {speed:g}x real time")
@@ -351,7 +391,7 @@ def _demo_live(
     except KeyboardInterrupt:
         pass
     finally:
-        book.close()
+        state["book"].close()
         store.close()
 
 

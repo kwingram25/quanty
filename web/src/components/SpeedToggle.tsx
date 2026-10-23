@@ -41,3 +41,26 @@ export function SpeedToggle({ run, session }: { run: string; session: SessionSta
     </div>
   );
 }
+
+/** A demo's "start over": a freshly generated day of history, then live again. */
+export function NewDay({ run, session }: { run: string; session: SessionState | null }) {
+  const toast = useToast();
+  const [busy, setBusy] = useState(false);
+  const sp = session?.speed;
+  if (!sp?.new_day) return null;
+  const go = async () => {
+    setBusy(true);
+    const r = await sendCommand(run, "new_day");
+    toast({ kind: r.ok ? "ok" : "error", title: r.ok ? "New day" : "Couldn't start a new day", body: r.result });
+    setBusy(false);
+  };
+  return (
+    <span className="new-day">
+      <button className="btn" onClick={go} disabled={busy || !!sp.catching_up}
+        title="Start over on a freshly generated day: new markets, a new day of history, then live">
+        ↻ New day
+      </button>
+      {sp.seed != null && <span className="muted" title={`quanty demo --live --seed ${sp.seed} replays this day`}>seed {sp.seed}</span>}
+    </span>
+  );
+}

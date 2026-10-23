@@ -40,7 +40,7 @@ from quanty.core.portfolio import Position
 from quanty.core.risk import event_exposure
 from quanty.core.types import Side
 
-ACTIONS = ("halt", "resume", "disarm", "arm", "kill", "speed")
+ACTIONS = ("halt", "resume", "disarm", "arm", "kill", "speed", "new_day")
 ALIVE_S = 10  # a session whose heartbeat is older than this is not running
 
 meta = MetaData()
@@ -150,6 +150,8 @@ class Playback:
     def __init__(self, speed: float, options: tuple[float, ...]) -> None:
         self.speed, self.options = speed, options
         self.catching_up = False  # playing the history before now, as fast as it can
+        self.seed: int | None = None  # the synthetic day being played (a demo)
+        self.on_new_day: Callable[[], int] | None = None  # starts over on a new day; returns its seed
         self._anchor: tuple[float, int] | None = None  # (monotonic s, event ms) at the last change
 
     def set(self, speed: float) -> None:
@@ -220,6 +222,8 @@ class Controller:
                 "value": self.playback.speed,
                 "options": list(self.playback.options),
                 "catching_up": self.playback.catching_up,
+                "seed": self.playback.seed,
+                "new_day": self.playback.on_new_day is not None,
             },
         }
 
@@ -298,6 +302,10 @@ class Controller:
 
     def apply(self, action: str, target: str) -> str:
         t = self.trader
+        if action == "new_day":
+            if self.playback is None or self.playback.on_new_day is None:
+                raise ValueError("only demos can start a new day")
+            return f"started a new day (seed {self.playback.on_new_day()})"
         if action == "speed":
             if self.playback is None:
                 raise ValueError("this session runs in real time; only demos change speed")
