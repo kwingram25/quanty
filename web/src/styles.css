@@ -419,3 +419,4 @@ table.trades .market-cell { white-space: normal; min-width: 180px; max-width: 28
 table.trades .market-cell span { display: block; }
 table.trades .market-cell .muted, table.trades .cost { font-size: 11px; }
 table.trades .cost { display: block; }
+.icon-btn.signout { width: auto; padding: 0 10px; font-size: 12px; }

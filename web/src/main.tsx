@@ -59,6 +59,9 @@ function App() {
         </nav>
         <Accounts />
         <ThemeToggle />
+        {document.querySelector('meta[name="quanty-auth"]') && (
+          <form method="post" action="/logout"><button className="icon-btn signout" title="Sign out">Sign out</button></form>
+        )}
       </div>
       <Routes>
         <Route path="/" element={<RunsPage />} />

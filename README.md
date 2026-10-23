@@ -61,7 +61,7 @@ paper trading, shadow trading and live trading; [Deploying](docs/deploying.md) c
   without touching anything else on the account. A fake exchange with fault injection for tests.
 - **A dashboard.** P&L over time per strategy, positions, fills, orders, notable events and feed
   health, each platform's connection and your account balances, with controls for running sessions:
-  halt, resume, disarm, kill switch.
+  halt, resume, disarm, kill switch. Optional password login for reaching it over HTTPS.
 - **Private strategies.** Strategies load from folders in your own config, so your edge never has
   to live in this repo.
 

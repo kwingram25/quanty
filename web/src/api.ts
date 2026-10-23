@@ -166,8 +166,12 @@ export interface FeedRow {
 
 const token = () => document.querySelector<HTMLMetaElement>('meta[name="quanty-token"]')?.content ?? "";
 
+/** The session ended (the dashboard has a login): back to the sign-in page, then here again. */
+export const toLogin = () => location.assign(`/login?next=${encodeURIComponent(location.pathname)}`);
+
 export async function getJSON<T>(url: string): Promise<T> {
   const r = await fetch(url);
+  if (r.status === 401) toLogin();
   if (!r.ok) throw new Error(`${r.status} ${await r.text()}`);
   return r.json() as Promise<T>;
 }
@@ -179,6 +183,7 @@ export async function sendCommand(run: string, action: string, target = "", conf
     headers: { "content-type": "application/json", "x-quanty-token": token() },
     body: JSON.stringify({ action, target, confirm }),
   });
+  if (r.status === 401) toLogin();
   const body = await r.json().catch(() => ({}));
   if (!r.ok) return { ok: false, result: body.detail ?? `HTTP ${r.status}` };
   return body;
@@ -225,8 +230,9 @@ export function useRunStream(run: string, onNew?: (n: NewRows) => void) {
           if (msg.new) onNewRef.current?.(msg.new);
         }
       };
-      ws.onclose = () => {
+      ws.onclose = (e) => {
         if (!alive) return;
+        if (e.code === 1008) { toLogin(); return; } // not signed in
         setState("closed");
         retry = setTimeout(connect, 2000);
       };

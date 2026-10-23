@@ -40,6 +40,23 @@ The Dockerfile installs quanty from a wheel in `vendor/` if there is one (`quant
 run from a quanty source checkout), otherwise from GitHub. To update the wheel after pulling a newer
 quanty: `uv build --wheel -o vendor /path/to/quanty`, then rebuild.
 
+## Reaching the dashboard from anywhere
+
+The dashboard has an optional login. Set a password (only a salted hash is stored, in `.env`):
+
+```sh
+uv run quanty password --write
+```
+
+With a password set, every page, API call and live update needs signing in first; sessions last 7
+days, and repeated wrong passwords lock the address out for a minute. A password alone is not
+enough over plain HTTP, though: it would cross the network in the clear. Put the dashboard behind
+HTTPS. In `compose.yaml`, point a domain at the server and uncomment the `https` service and the
+`caddy` volume: Caddy fetches and renews a certificate for the domain and forwards to the dashboard,
+which stays unpublished beyond the server itself. Then `docker compose up -d`.
+
+`quanty ui` warns if it listens beyond localhost without a password.
+
 ## Without Docker
 
 Install quanty on the server (`uv tool install /path/to/quanty`, or from the wheel) and run the two

@@ -25,6 +25,7 @@ class Keys(BaseSettings):
     kalshi_key_id: SecretStr | None = None
     kalshi_secret_key: SecretStr | None = None  # PEM (Ed25519 or RSA); may be on one line
     kalshi_private_key_path: Path | None = None  # or a PEM file
+    quanty_ui_password: SecretStr | None = None  # dashboard login: a hash from `quanty password`
 
 
 @lru_cache(maxsize=1)

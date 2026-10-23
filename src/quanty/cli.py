@@ -244,21 +244,61 @@ def live(
 
 
 @app.command()
+def password(
+    write: Annotated[bool, typer.Option("--write", help="Save it in ./.env instead of printing it")] = False,
+) -> None:
+    """Set the dashboard password: prints a QUANTY_UI_PASSWORD line for .env (only a salted hash)."""
+    from quanty.ui.auth import hash_password
+
+    pw = typer.prompt("Dashboard password", hide_input=True, confirmation_prompt=True)
+    if len(pw) < 8:
+        raise _fail(ValueError("use at least 8 characters"))
+    line = f"QUANTY_UI_PASSWORD={hash_password(pw)}"
+    if not write:
+        typer.echo(line)
+        return
+    env = Path(".env")
+    lines = [
+        x
+        for x in (env.read_text().splitlines() if env.exists() else [])
+        if not x.startswith("QUANTY_UI_PASSWORD=")
+    ]
+    env.write_text("\n".join([*lines, line]) + "\n")
+    env.chmod(0o600)
+    typer.echo("saved to .env; restart `quanty ui` to use it")
+
+
+@app.command()
 def ui(
     data: DataOpt = Path("data"),
     host: Annotated[
-        str, typer.Option(help="Interface to listen on (keep it local: there is no login)")
+        str, typer.Option(help="Interface to listen on (beyond localhost, set a password and use HTTPS)")
     ] = "127.0.0.1",
     port: Annotated[int, typer.Option(help="Port")] = 8765,
     refresh: Annotated[int, typer.Option(help="Seconds between page refreshes")] = 5,
 ) -> None:
-    """Dashboard of runs (ledgers under <data>/{live,paper,backtest}) and feed health. Read-only."""
+    """Dashboard of runs (ledgers under <data>/{live,paper,backtest}) and feed health.
+
+    With QUANTY_UI_PASSWORD set (`quanty password`), it asks for a password first."""
     import uvicorn
 
     from quanty.ui.app import create_app
+    from quanty.venues.auth import keys
 
-    typer.echo(f"quanty ui on http://{host}:{port} (data {data}; Ctrl-C to stop)")
-    uvicorn.run(create_app(data, refresh_s=refresh), host=host, port=port, log_level="warning")
+    login = keys().quanty_ui_password is not None
+    if host not in ("127.0.0.1", "localhost", "::1") and not login:
+        typer.echo(
+            f"warning: listening on {host} with no login: anyone who can reach it sees the dashboard "
+            "and its controls. Set one with `quanty password --write`.",
+            err=True,
+        )
+    try:
+        app_ = create_app(data, refresh_s=refresh)
+    except ValueError as exc:
+        raise _fail(exc) from None
+    access = "login on" if login else "no login"
+    typer.echo(f"quanty ui on http://{host}:{port} (data {data}; {access}; Ctrl-C to stop)")
+    uvicorn.run(app_, host=host, port=port, log_level="warning")
 
 
 def _session(

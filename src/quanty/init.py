@@ -125,7 +125,13 @@ quanty = {source}
 
 
 def _env(a: Answers) -> str:
-    lines = ["# API keys for the venues this project trades. Never commit this file.", ""]
+    lines = [
+        "# API keys for the venues this project trades. Never commit this file.",
+        "",
+        "# Dashboard login (off when unset): `uv run quanty password --write` sets it",
+        "# QUANTY_UI_PASSWORD=",
+        "",
+    ]
     if "kalshi" in a.venues:
         lines += [
             "# Kalshi: key id and PEM private key file (Ed25519 or RSA)",
@@ -272,8 +278,20 @@ services:
     env_file: .env
     volumes: [./data:/app/data]
     command: ["ui", "--data", "data", "--host", "0.0.0.0", "--port", "8765"]
-    ports: ["127.0.0.1:8765:8765"]   # the server's localhost only: there is no login (use an SSH tunnel)
+    ports: ["127.0.0.1:8765:8765"]   # the server's localhost only: reach it with an SSH tunnel, or...
     restart: unless-stopped
+
+  # ...from anywhere over HTTPS: set a password (`uv run quanty password --write`), point a domain at
+  # this server, put it below, and uncomment. Caddy gets and renews the certificate itself.
+  # https:
+  #   image: caddy:2
+  #   command: caddy reverse-proxy --from dashboard.example.com --to dashboard:8765
+  #   ports: ["80:80", "443:443"]
+  #   volumes: [caddy:/data]
+  #   restart: unless-stopped
+
+# volumes:
+#   caddy: {}
 """
 
 FALLBACK_TEMPLATE = '''"""Strategy template: copy to strategies/<name>.py and fill in the TODOs."""

@@ -18,6 +18,7 @@ from quanty.control import ControlStore
 from quanty.core.ledger import Summary
 from quanty.db.models import FillRow, LogRow, OrderRow, SettlementRow
 from quanty.ui import queries
+from quanty.ui.auth import Auth
 from quanty.venues.orders import OrderAPI, VenueError, default_apis
 
 STREAM_POLL_S = 0.5
@@ -49,8 +50,9 @@ class Command(BaseModel):
 
 
 class Api:
-    def __init__(self, data: Path) -> None:
+    def __init__(self, data: Path, auth: "Auth | None" = None) -> None:
         self.data = data
+        self.auth = auth  # the dashboard login, when one is set
         self.token = secrets.token_urlsafe(24)
         self.control_path = data / "control.sqlite"
         self.apis: dict[str, OrderAPI] = default_apis()
@@ -275,6 +277,9 @@ class Api:
     async def stream(self, ws: WebSocket, mode: str, name: str) -> None:
         """Pushes a snapshot whenever anything changes, plus the new fills, settlements and log
         rows since the last push (the dashboard's callouts)."""
+        if self.auth is not None and not self.auth.valid(ws):
+            await ws.close(code=1008)  # policy violation: not signed in
+            return
         await ws.accept()
         last: dict[str, float] = {}
         beat = None
