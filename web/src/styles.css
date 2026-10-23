@@ -492,3 +492,15 @@ table.trades .outcome.stopped { color: var(--serious); border-color: color-mix(i
 .stop-tag { display: inline-block; margin-right: 6px; padding: 0 6px; border-radius: 5px; font-size: 10.5px; font-weight: 600;
   color: var(--serious); background: color-mix(in srgb, var(--serious) 12%, transparent); }
 .strategy .stops { color: var(--serious); }
+
+/* history: filters above Trades and Orders, load more below */
+.history-bar { display: flex; align-items: center; justify-content: space-between; gap: 8px 12px; flex-wrap: wrap; padding: 8px 12px 4px; }
+.history-bar .trades-summary { padding: 0; }
+.history-bar .filters { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+.history-bar select { height: 26px; padding: 0 6px; border-radius: 7px; border: 1px solid var(--border); background: var(--surface);
+  color: var(--ink); font: inherit; font-size: 12px; }
+.history-bar select:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
+.history-bar a.btn { display: inline-flex; align-items: center; text-decoration: none; }
+.trades-summary .stopped { color: var(--serious); }
+.load-more { display: flex; align-items: center; justify-content: center; gap: 12px; padding: 12px; font-size: 12px; }
+td.nowrap { white-space: nowrap; }

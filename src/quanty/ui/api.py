@@ -2,14 +2,17 @@
 commands (data/control.sqlite), behind a per-server token and a same-origin check."""
 
 import asyncio
+import csv
 import dataclasses
+import io
 import secrets
 import time
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
 import httpx
-from fastapi import APIRouter, HTTPException, Request, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, HTTPException, Query, Request, Response, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
@@ -52,6 +55,29 @@ class Command(BaseModel):
     target: str = ""
     value: dict[str, Any] | None = None  # params: {name: new value}
     confirm: str = ""
+
+
+def _csv(filename: str, rows: list[dict[str, Any]], names: dict[str, dict[str, str]]) -> Response:
+    """Rows as a CSV download, with each market's title and subtitle next to its id; times as UTC."""
+    out = io.StringIO()
+    if rows:
+        cols = list(rows[0])
+        w = csv.writer(out)
+        w.writerow([*cols, "market_title", "market_subtitle"])
+        for row in rows:
+            n = names.get(row["market_id"], {})
+            w.writerow([_cell(k, row[k]) for k in cols] + [n.get("title", ""), n.get("subtitle", "")])
+    return Response(
+        out.getvalue(),
+        media_type="text/csv",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+def _cell(key: str, v: Any) -> Any:
+    if v is not None and (key.endswith("_ts") or key in ("opened", "closed")):
+        return datetime.fromtimestamp(v / 1000, UTC).isoformat(timespec="milliseconds")
+    return v
 
 
 def _activity(a: queries.Activity) -> dict[str, Any]:
@@ -106,10 +132,14 @@ class Api:
             )
         return out
 
-    def snapshot(self, mode: str, name: str) -> dict[str, Any]:
+    def run_or_404(self, mode: str, name: str) -> queries.Run:
         r = queries.run_by_name(self.data, f"{mode}/{name}")
         if r is None:
             raise HTTPException(404, f"no run {mode}/{name}")
+        return r
+
+    def snapshot(self, mode: str, name: str) -> dict[str, Any]:
+        r = self.run_or_404(mode, name)
         v = queries.view(r)
         session, history = self.control(r.name)
         summaries = {s.instance: s for s in v.summaries}
@@ -148,6 +178,7 @@ class Api:
         shown |= {p["market_id"] for p in snap["positions"]}
         shown |= {i["market_id"] for i in snap["tape"] if "market_id" in i}
         snap["trades"] = queries.trades(r)
+        snap["trade_total"] = queries.trade_summary(r)["trades"]
         shown |= {t["market_id"] for t in snap["trades"]}
         snap["names"] = queries.names(r, shown)
         return snap
@@ -326,6 +357,65 @@ def router(api: Api) -> APIRouter:
     @r.get("/runs/{mode}/{name}")
     def run(mode: str, name: str) -> dict[str, Any]:
         return api.snapshot(mode, name)
+
+    @r.get("/runs/{mode}/{name}/trades")
+    def trades(
+        mode: str,
+        name: str,
+        offset: int = 0,
+        limit: int = Query(100, le=5000),
+        instance: str | None = None,
+        outcome: str | None = None,
+        since: int | None = None,
+        until: int | None = None,
+        format: str = "json",
+    ) -> Any:
+        """The run's whole trade history, filtered and paged; format=csv downloads every match."""
+        run = api.run_or_404(mode, name)
+        f: dict[str, Any] = {"instance": instance, "outcome": outcome or None, "since": since, "until": until}
+        try:
+            if format == "csv":
+                rows = queries.trades(run, limit=10**9, **f)
+                return _csv(f"{name}-trades.csv", rows, queries.names(run, {t["market_id"] for t in rows}))
+            rows = queries.trades(run, limit=limit, offset=offset, **f)
+            return {
+                "rows": rows,
+                "summary": queries.trade_summary(run, **f),
+                "names": queries.names(run, {t["market_id"] for t in rows}),
+            }
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from None
+
+    @r.get("/runs/{mode}/{name}/orders")
+    def orders(
+        mode: str,
+        name: str,
+        offset: int = 0,
+        limit: int = Query(100, le=5000),
+        instance: str | None = None,
+        view: str | None = None,
+        since: int | None = None,
+        until: int | None = None,
+        format: str = "json",
+    ) -> Any:
+        """The run's whole order history, filtered (view: look, stops, or one result) and paged."""
+        run = api.run_or_404(mode, name)
+        f: dict[str, Any] = {"instance": instance, "since": since, "until": until}
+        try:
+            if format == "csv":
+                rows = [_activity(a) for a in queries.activity(run, limit=10**9, view=view or None, **f)]
+                return _csv(f"{name}-orders.csv", rows, queries.names(run, {a["market_id"] for a in rows}))
+            rows = [
+                _activity(a)
+                for a in queries.activity(run, limit=limit, offset=offset, view=view or None, **f)
+            ]
+            return {
+                "rows": rows,
+                "stats": queries.order_stats(run, **f),
+                "names": queries.names(run, {a["market_id"] for a in rows}),
+            }
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from None
 
     @r.post("/runs/{mode}/{name}/control")
     async def control(request: Request, mode: str, name: str, cmd: Command) -> dict[str, Any]:

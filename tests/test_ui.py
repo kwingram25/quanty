@@ -275,3 +275,61 @@ def test_stop_losses_are_marked_everywhere(tmp_path: Path) -> None:
     assert stats["needs_look"] >= stats["orders"] - stats["filled"] + 1
     tape_stops = [i for i in queries.tape(run, limit=2000) if i["kind"] == "fill" and i["tag"] == "stop"]
     assert tape_stops and all(i["action"] == "sell" for i in tape_stops)
+
+
+def test_whole_history_pages_filters_and_downloads(tmp_path: Path) -> None:
+    import csv
+    import io
+
+    from quanty import experiment, plugins, synthetic
+    from quanty.core import Engine, Ledger
+
+    (tmp_path / "backtest").mkdir()
+    raw = {
+        "instances": [
+            {"id": "a", "strategy": "example_favorite", "params": {"stop_conf": 0.7}},
+            {"id": "b", "strategy": "example_favorite", "params": {"min_conf": 0.97}},
+        ]
+    }
+    exp = experiment.parse(raw)
+    ledger = Ledger(tmp_path / "backtest" / "day.sqlite")
+    Engine(experiment.build(exp, plugins.discover([], local=None), synthetic.FEES), ledger=ledger).run(
+        synthetic.events(synthetic.Spec(hours=24, seed=0))
+    )
+    ledger.close()
+    c = TestClient(create_app(tmp_path))
+    url = "/api/runs/backtest/day"
+    first = c.get(f"{url}/trades?limit=50").json()
+    total = first["summary"]["trades"]
+    assert total > 100 and len(first["rows"]) == 50  # more than the dashboard's first page
+    seen = []
+    for off in range(0, total, 50):
+        seen += [
+            (t["instance"], t["market_id"], t["side"])
+            for t in c.get(f"{url}/trades?limit=50&offset={off}").json()["rows"]
+        ]
+    assert len(seen) == total == len(set(seen))  # every position once
+    assert sum(first["summary"][o] for o in ("won", "lost", "stopped", "sold", "open")) == total
+
+    stopped = c.get(f"{url}/trades?outcome=stopped&instance=a&limit=1000").json()
+    assert stopped["rows"] and all(
+        t["outcome"] == "stopped" and t["instance"] == "a" for t in stopped["rows"]
+    )
+    assert stopped["summary"]["trades"] == len(stopped["rows"])
+    later = c.get(f"{url}/trades?since={first['rows'][-1]['opened']}&limit=5000").json()
+    assert 0 < later["summary"]["trades"] < total
+
+    dl = c.get(f"{url}/trades?format=csv&instance=b")
+    assert (
+        dl.headers["content-type"].startswith("text/csv")
+        and "attachment" in dl.headers["content-disposition"]
+    )
+    rows = list(csv.DictReader(io.StringIO(dl.text)))
+    assert len(rows) == c.get(f"{url}/trades?instance=b").json()["summary"]["trades"]
+    assert rows[0]["market_title"] and rows[0]["opened"].endswith("+00:00")
+
+    looks = c.get(f"{url}/orders?view=look&limit=5000").json()
+    assert len(looks["rows"]) == sum(s["needs_look"] for s in looks["stats"].values())
+    assert c.get(f"{url}/orders?view=stops&instance=a").json()["rows"]
+    assert c.get(f"{url}/trades?outcome=lucky").status_code == 400
+    assert c.get(f"{url}/orders?view=lucky").status_code == 400

@@ -144,6 +144,8 @@ export interface Snapshot {
   commands: CommandRow[];
   names: Record<string, MarketName>;
   trades: Trade[];
+  /** positions over the whole run */
+  trade_total?: number;
 }
 
 /** One position a strategy took: what it bought, what it cost and how it ended. */
@@ -210,6 +212,36 @@ export async function sendCommand(run: string, action: string, target = "", conf
   if (!r.ok) return { ok: false, result: body.detail ?? `HTTP ${r.status}` };
   return body;
 }
+
+/** One page of a run's history (trades or orders), filtered on the server. Refetched when the
+ *  filters or the page size change, and when `tick` changes (new data), at most every 2 s. */
+export function useHistory<T>(run: string, what: "trades" | "orders", params: Record<string, string | number | undefined>,
+    limit: number, tick: unknown): { data: T | null; loading: boolean; error: string | null } {
+  const [data, setData] = useState<T | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const last = useRef(0);
+  const qs = historyQuery(params);
+  useEffect(() => { last.current = 0; setLoading(true); }, [run, what, qs]); // new filters: fetch at once
+  useEffect(() => {
+    let alive = true;
+    const wait = Math.max(0, last.current + 2000 - Date.now());
+    const t = setTimeout(() => {
+      last.current = Date.now();
+      getJSON<T>(`/api/runs/${run}/${what}?${qs}&limit=${limit}`)
+        .then((d) => { if (alive) { setData(d); setError(null); setLoading(false); } })
+        .catch((e) => { if (alive) { setError(String(e)); setLoading(false); } });
+    }, wait);
+    return () => { alive = false; clearTimeout(t); };
+  }, [run, what, qs, limit, tick]);
+  return { data, loading, error };
+}
+
+export const historyQuery = (params: Record<string, string | number | undefined>): string =>
+  new URLSearchParams(Object.entries(params).filter(([, v]) => v !== undefined && v !== "")
+    .map(([k, v]) => [k, String(v)])).toString();
+
+export interface TradeSummary { trades: number; won: number; lost: number; stopped: number; sold: number; open: number; pnl: number; cost: number }
 
 /** Polls a JSON endpoint. */
 export function usePoll<T>(url: string, everyMs = 3000): { data: T | null; error: string | null } {

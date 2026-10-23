@@ -56,6 +56,15 @@ export const clock = (ms: number, seconds = true): string =>
 /** "Thu" in the shown zone. */
 export const weekday = (ms: number): string => fmt("wd", { weekday: "short" }).format(ms);
 
+/** A time in a long history: "3:29:27 PM" on the reference day (the run's now), "Thu 3:29 PM" within
+ *  the week before it, "Oct 14, 3:29 PM" further back. */
+export const when = (ms: number, ref: number): string => {
+  const day = fmt("ymd", { year: "numeric", month: "2-digit", day: "2-digit" });
+  if (day.format(ms) === day.format(ref)) return clock(ms);
+  if (ref - ms < 6.5 * 86_400_000) return `${weekday(ms)} ${clock(ms, false)}`;
+  return `${fmt("md", { month: "short", day: "numeric" }).format(ms)}, ${clock(ms, false)}`;
+};
+
 export const ago = (ms: number | null): string => {
   if (!ms) return "never";
   const s = Math.max(0, Date.now() / 1000 - ms / 1000);

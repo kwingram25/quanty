@@ -1,7 +1,7 @@
 import { motion } from "motion/react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useParams } from "react-router-dom";
-import { useRunStream, type ActivityRow, type NewRows, type OrderStats, type Snapshot } from "../api";
+import { historyQuery, useHistory, useRunStream, type ActivityRow, type NewRows, type OrderStats, type Snapshot, type Trade, type TradeSummary } from "../api";
 import { AnimatedNumber } from "../components/AnimatedNumber";
 import { Markets } from "../components/Markets";
 import { PnlChart } from "../components/PnlChart";
@@ -10,7 +10,7 @@ import { Splitter, useLayout } from "../components/Splitter";
 import { Strategies } from "../components/Strategies";
 import { Tape } from "../components/Tape";
 import { useToast } from "../components/Toasts";
-import { ago, cents, clock, money, nameOf, slots as slotsOf, tone } from "../format";
+import { ago, cents, clock, money, nameOf, slots as slotsOf, tone, when } from "../format";
 
 const ALERTS = /disabled|outcome unknown|kill switch|leftover|never reported/i;
 
@@ -177,7 +177,7 @@ function Center({ snap, slots, halted }: { snap: Snapshot; slots: Record<string,
     return () => removeEventListener("keydown", onKey);
   }, []);
   const counts: Record<Tab, number | null> = {
-    chart: null, trades: snap.trades?.length ?? 0, orders: needsLook(snap.order_stats) ?? snap.activity.length,
+    chart: null, trades: snap.trade_total ?? snap.trades?.length ?? 0, orders: needsLook(snap.order_stats) ?? snap.activity.length,
     commands: snap.commands.length,
   };
   const label = (t: Tab) => (t === "chart" ? "P&L" : t[0].toUpperCase() + t.slice(1));
@@ -237,55 +237,105 @@ function resultDetail(a: ActivityRow): string {
   }
 }
 
-/** Execution: what each order asked for and how it turned out. By default only the orders worth a
- * look (missed, partly filled, rejected, still resting); what filled shows up in Trades. */
-function Orders({ snap, slots }: { snap: Snapshot; slots: Record<string, number> }) {
-  const [view, setView] = useState<"look" | "all">(() => {
-    try { return localStorage.getItem("orders:view") === "all" ? "all" : "look"; } catch { return "look"; }
+const RANGE_MS: Record<string, number | undefined> = { "All time": undefined, "Last hour": 3_600_000, "Last 6 hours": 21_600_000, "Last day": 86_400_000 };
+const PAGE = 200;
+
+/** Strategy, a view, a time range and a CSV download: the controls above Trades and Orders. */
+function HistoryBar({ snap, instance, setInstance, view, setView, views, range, setRange, csv, children }: {
+  snap: Snapshot; instance: string; setInstance: (v: string) => void; view: string; setView: (v: string) => void;
+  views: [string, string][]; range: string; setRange: (v: string) => void; csv: string; children: React.ReactNode;
+}) {
+  return (
+    <div className="history-bar">
+      <p className="trades-summary">{children}</p>
+      <div className="filters">
+        <select value={instance} onChange={(e) => setInstance(e.target.value)} aria-label="Strategy">
+          <option value="">All strategies</option>
+          {snap.strategies.map((st) => <option key={st.instance} value={st.instance}>{st.instance}</option>)}
+        </select>
+        <select value={view} onChange={(e) => setView(e.target.value)} aria-label="Show">
+          {views.map(([v, label]) => <option key={v} value={v}>{label}</option>)}
+        </select>
+        <select value={range} onChange={(e) => setRange(e.target.value)} aria-label="Time range">
+          {Object.keys(RANGE_MS).map((r) => <option key={r}>{r}</option>)}
+        </select>
+        <a className="btn" href={csv} download title="Everything these filters select, as a spreadsheet (times in UTC)">Download CSV</a>
+      </div>
+    </div>
+  );
+}
+
+/** Filters kept per browser, and the time they start from (the run's own clock, so a demo's too). */
+function useFilters(key: string, snap: Snapshot, defaultView: string) {
+  const load = () => { try { return JSON.parse(localStorage.getItem(key) ?? "{}"); } catch { return {}; } };
+  const [f, setF] = useState<{ instance: string; view: string; range: string }>(() => ({ instance: "", view: defaultView, range: "All time", ...load() }));
+  const set = (patch: Partial<typeof f>) => setF((cur) => {
+    const next = { ...cur, ...patch };
+    try { localStorage.setItem(key, JSON.stringify(next)); } catch { /* private mode */ }
+    return next;
   });
-  const pickView = (v: "look" | "all") => { setView(v); try { localStorage.setItem("orders:view", v); } catch { /* private mode */ } };
-  const stats = snap.order_stats ?? {};
-  const total = Object.values(stats).reduce(
-    (t, s) => { for (const k of Object.keys(s) as (keyof typeof s)[]) t[k] = (t[k] ?? 0) + (s[k] ?? 0); return t; },
-    {} as Record<string, number>);
-  const look = needsLook(snap.order_stats) ?? 0;
-  const rows = view === "look" ? snap.order_issues ?? [] : snap.activity;
-  if (!snap.activity.length) return <p className="empty" style={{ padding: 16 }}>No orders yet.</p>;
-  const perStrategy = Object.entries(stats).map(([k, s]) =>
-    `${k}: ${s.orders} orders, ${s.filled} filled, ${s.missed} missed, ${s.partial} partly filled, ${s.rejected} rejected`).join("\n");
+  const now = snap.session?.now ?? snap.run.last_ts ?? Date.now();
+  const span = RANGE_MS[f.range];
+  const since = span ? Math.floor((now - span) / 60_000) * 60_000 : undefined; // to the minute: fewer refetches
+  return { f, set, since };
+}
+
+function LoadMore({ shown, total, onMore, loading }: { shown: number; total: number; onMore: () => void; loading: boolean }) {
+  if (!total) return null;
+  return (
+    <div className="load-more">
+      <span className="muted">Showing {shown.toLocaleString()} of {total.toLocaleString()}</span>
+      {shown < total && <button className="btn" onClick={onMore} disabled={loading}>
+        {loading ? "Loading…" : `Load ${Math.min(PAGE, total - shown)} more`}</button>}
+    </div>
+  );
+}
+
+const ORDER_VIEWS: [string, string][] = [
+  ["look", "Needs a look"], ["", "All orders"], ["stops", "Stop losses"], ["missed", "Missed"], ["partial", "Partly filled"],
+  ["rejected", "Rejected"], ["resting", "Resting"], ["unfilled", "Not filled"], ["filled", "Filled"],
+];
+
+/** Execution: what each order asked for and how it turned out, over the run's whole history. By
+ * default only the orders worth a look (missed, partly filled, rejected, resting, stop losses). */
+function Orders({ snap, slots }: { snap: Snapshot; slots: Record<string, number> }) {
+  const { f, set, since } = useFilters("history:orders", snap, "look");
+  const [limit, setLimit] = useState(PAGE);
+  useEffect(() => setLimit(PAGE), [f.instance, f.view, f.range]);
+  const params = { instance: f.instance, view: f.view, since };
+  const { data, loading } = useHistory<{ rows: ActivityRow[]; stats: OrderStats; names: Snapshot["names"] }>(
+    snap.run.name, "orders", params, limit, `${snap.stats.fills}:${snap.run.last_ts}:${snap.order_stats ? needsLook(snap.order_stats) : ""}`);
+  const rows = data?.rows ?? [];
+  const names = { ...snap.names, ...data?.names };
+  const total: Record<string, number> = {};
+  for (const st of Object.values(data?.stats ?? {})) for (const [k, v] of Object.entries(st)) total[k] = (total[k] ?? 0) + (v ?? 0);
+  const matching = f.view === "" ? total.orders ?? 0 : f.view === "look" ? total.needs_look ?? 0 : total[f.view] ?? 0;
   const parts = (["missed", "partial", "unfilled", "rejected", "resting"] as const)
     .filter((k) => total[k]).map((k) => `${total[k]} ${RESULT[k].toLowerCase()}`);
   if (total.stops) parts.push(`${total.stops} stop loss${total.stops > 1 ? "es" : ""}`);
+  const ref = snap.session?.now ?? snap.run.last_ts ?? Date.now();
+  const csv = `/api/runs/${snap.run.name}/orders?${historyQuery({ ...params, format: "csv" })}`;
   return (
     <>
-      <div className="orders-head">
-        <p className="trades-summary" title={perStrategy || undefined}>
-          {total.orders} orders · <b>{total.orders ? Math.round((100 * (total.filled ?? 0)) / total.orders) : 0}%</b> filled in full
-          {parts.length > 0 && <> · {parts.join(" · ")}</>}
-        </p>
-        <div className="segmented" role="radiogroup" aria-label="Which orders">
-          {(["look", "all"] as const).map((v) => (
-            <button key={v} role="radio" aria-checked={view === v} onClick={() => pickView(v)}
-              title={v === "look" ? "Orders that didn't simply fill (missed, partly filled, rejected, resting) and every stop loss" : "Every recent order"}>
-              {view === v && <motion.span className="thumb" layoutId="orders-thumb" transition={{ type: "spring", stiffness: 500, damping: 38 }} />}
-              <span>{v === "look" ? `Needs a look${look ? ` ${look}` : ""}` : "All"}</span>
-            </button>
-          ))}
-        </div>
-      </div>
-      {rows.length === 0 ? (
-        <p className="empty" style={{ padding: 16 }}>Every order filled in full. What they bought is in Trades.</p>
+      <HistoryBar snap={snap} instance={f.instance} setInstance={(v) => set({ instance: v })} view={f.view}
+        setView={(v) => set({ view: v })} views={ORDER_VIEWS} range={f.range} setRange={(v) => set({ range: v })} csv={csv}>
+        {(total.orders ?? 0).toLocaleString()} orders · <b>{total.orders ? Math.round((100 * (total.filled ?? 0)) / total.orders) : 0}%</b> filled in full
+        {parts.length > 0 && <> · {parts.join(" · ")}</>}
+      </HistoryBar>
+      {!loading && rows.length === 0 ? (
+        <p className="empty" style={{ padding: 16 }}>
+          {f.view === "look" && total.orders ? "Every order filled in full. What they bought is in Trades." : "No orders match."}</p>
       ) : (
         <table className="trades orders">
           <thead><tr><th>Sent</th><th>Strategy</th><th>Market</th><th>Order</th><th>Result</th></tr></thead>
           <tbody>
             {rows.map((a) => (
               <tr key={a.id} className={`r-${a.result}`}>
-                <td className="muted">{clock(a.created_ts)}</td>
+                <td className="muted nowrap">{when(a.created_ts, ref)}</td>
                 <td><span className="who"><i className="swatch" style={{ ["--c" as string]: `var(--series-${slots[a.instance] ?? 1})` }} />{a.instance}</span></td>
                 <td className="market-cell" title={a.market_id}>
-                  <span className="q">{nameOf(snap.names, a.market_id).title}</span>
-                  <span className="muted">{nameOf(snap.names, a.market_id).subtitle}</span>
+                  <span className="q">{nameOf(names, a.market_id).title}</span>
+                  <span className="muted">{nameOf(names, a.market_id).subtitle}</span>
                 </td>
                 <td>
                   {a.action === "buy" ? "Buy" : "Sell"} <span className="num">{qty(a.qty)}</span>{" "}
@@ -303,6 +353,7 @@ function Orders({ snap, slots }: { snap: Snapshot; slots: Record<string, number>
           </tbody>
         </table>
       )}
+      <LoadMore shown={rows.length} total={matching} loading={loading} onMore={() => setLimit((l) => l + PAGE)} />
     </>
   );
 }
@@ -327,61 +378,65 @@ function Commands({ snap }: { snap: Snapshot }) {
 
 const OUTCOME: Record<string, string> = { won: "Won", lost: "Lost", sold: "Sold", stopped: "Stopped", open: "Open" };
 
-/** What each strategy bought, what it cost, and how it ended. */
+const TRADE_VIEWS: [string, string][] = [
+  ["", "All trades"], ["open", "Open"], ["won", "Won"], ["lost", "Lost"], ["stopped", "Stopped"], ["sold", "Sold"],
+];
+
+/** What each strategy bought, what it cost, and how it ended, over the run's whole history. */
 function Trades({ snap, slots }: { snap: Snapshot; slots: Record<string, number> }) {
-  const [onlyOpen, setOnlyOpen] = useState(false);
-  const all = snap.trades ?? [];
-  const open = all.filter((t) => t.outcome === "open");
-  const trades = onlyOpen ? open : all;
-  if (!all.length) return <p className="empty" style={{ padding: 16 }}>No trades yet.</p>;
-  const won = trades.filter((t) => t.outcome === "won").length;
-  const lost = trades.filter((t) => t.outcome === "lost").length;
-  const net = trades.reduce((a, t) => a + (t.pnl ?? 0), 0);
+  const { f, set, since } = useFilters("history:trades", snap, "");
+  const [limit, setLimit] = useState(PAGE);
+  useEffect(() => setLimit(PAGE), [f.instance, f.view, f.range]);
+  const params = { instance: f.instance, outcome: f.view, since };
+  const { data, loading } = useHistory<{ rows: Trade[]; summary: TradeSummary; names: Snapshot["names"] }>(
+    snap.run.name, "trades", params, limit, `${snap.stats.fills}:${snap.run.last_ts}`);
+  const rows = data?.rows ?? [];
+  const names = { ...snap.names, ...data?.names };
+  const sum = data?.summary;
+  const ref = snap.session?.now ?? snap.run.last_ts ?? Date.now();
+  const csv = `/api/runs/${snap.run.name}/trades?${historyQuery({ ...params, format: "csv" })}`;
   return (
     <>
-      <div className="orders-head">
-        <p className="trades-summary">
-          {onlyOpen
-            ? <>{open.length} open · <b className="num">{money(open.reduce((a, t) => a + t.cost, 0))}</b> at cost, settling or sold later</>
-            : <>{trades.length} most recent trades · <span className="up">{won} won</span> · <span className="down">{lost} lost</span>
-              {" "}· net <b className={`num ${tone(net)}`}>{money(net, true)}</b></>}
-        </p>
-        <div className="segmented" role="radiogroup" aria-label="Which trades">
-          {[false, true].map((o) => (
-            <button key={String(o)} role="radio" aria-checked={onlyOpen === o} onClick={() => setOnlyOpen(o)}
-              title={o ? "Positions still held: the market hasn't settled and they weren't sold" : "Every recent trade"}>
-              {onlyOpen === o && <motion.span className="thumb" layoutId="trades-thumb" transition={{ type: "spring", stiffness: 500, damping: 38 }} />}
-              <span>{o ? `Open ${open.length}` : "All"}</span>
-            </button>
-          ))}
-        </div>
-      </div>
-      {trades.length === 0 && <p className="empty" style={{ padding: 16 }}>Nothing open right now.</p>}
-      <table className="trades">
-        <thead><tr><th>Opened</th><th>Strategy</th><th>Market</th><th>Bought</th>
-          <th>Outcome</th><th className="r">P&L</th></tr></thead>
-        <tbody>
-          {trades.map((t) => (
-            <tr key={`${t.instance}-${t.market_id}-${t.side}`} className={`o-${t.outcome}`}>
-              <td className="muted">{clock(t.opened)}</td>
-              <td><span className="who"><i className="swatch" style={{ ["--c" as string]: `var(--series-${slots[t.instance] ?? 1})` }} />{t.instance}</span></td>
-              <td className="market-cell" title={t.market_id}>
-                <span className="q">{nameOf(snap.names, t.market_id).title}</span>
-                <span className="muted">{nameOf(snap.names, t.market_id).subtitle}</span>
-              </td>
-              <td>
-                <span className={`side ${t.side}`}>{t.side === "yes" ? "Yes" : "No"}</span>{" "}
-                <span className="num">{+t.bought.toFixed(2)} at {cents(t.avg_price)}</span>
-                <span className="muted num cost" title={`includes ${money(t.fees)} in fees`}>{money(t.cost)} with fees
-                  {t.sold > 0 && <> · {t.stopped ? "stopped out" : "sold"} {+t.sold.toFixed(2)} at {cents(t.avg_sell)}</>}</span>
-              </td>
-              <td><span className={`outcome ${t.outcome}`} title={t.closed ? `${t.outcome === "stopped" ? "sold by its stop loss" : t.outcome === "sold" ? "sold" : "settled"} ${clock(t.closed)}` : "the market hasn't settled yet"}>
-                {OUTCOME[t.outcome]}</span></td>
-              <td className={`r num pnl ${tone(t.pnl)}`}>{t.pnl == null ? "–" : money(t.pnl, true)}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
+      <HistoryBar snap={snap} instance={f.instance} setInstance={(v) => set({ instance: v })} view={f.view}
+        setView={(v) => set({ view: v })} views={TRADE_VIEWS} range={f.range} setRange={(v) => set({ range: v })} csv={csv}>
+        {sum ? <>
+          {sum.trades.toLocaleString()} trades · <span className="up">{sum.won} won</span> · <span className="down">{sum.lost} lost</span>
+          {sum.stopped > 0 && <> · <span className="stopped">{sum.stopped} stopped</span></>}
+          {sum.open > 0 && <> · {sum.open} open</>}
+          {" "}· net <b className={`num ${tone(sum.pnl)}`}>{money(sum.pnl, true)}</b>
+        </> : "Loading…"}
+      </HistoryBar>
+      {!loading && rows.length === 0 ? (
+        <p className="empty" style={{ padding: 16 }}>{f.view === "open" ? "Nothing open right now." : "No trades match."}</p>
+      ) : (
+        <table className="trades">
+          <thead><tr><th>Opened</th><th>Strategy</th><th>Market</th><th>Bought</th>
+            <th>Outcome</th><th className="r">P&L</th></tr></thead>
+          <tbody>
+            {rows.map((t) => (
+              <tr key={`${t.instance}-${t.market_id}-${t.side}`} className={`o-${t.outcome}`}>
+                <td className="muted nowrap">{when(t.opened, ref)}</td>
+                <td><span className="who"><i className="swatch" style={{ ["--c" as string]: `var(--series-${slots[t.instance] ?? 1})` }} />{t.instance}</span></td>
+                <td className="market-cell" title={t.market_id}>
+                  <span className="q">{nameOf(names, t.market_id).title}</span>
+                  <span className="muted">{nameOf(names, t.market_id).subtitle}</span>
+                </td>
+                <td>
+                  <span className={`side ${t.side}`}>{t.side === "yes" ? "Yes" : "No"}</span>{" "}
+                  <span className="num">{+t.bought.toFixed(2)} at {cents(t.avg_price)}</span>
+                  <span className="muted num cost" title={`includes ${money(t.fees)} in fees`}>{money(t.cost)} with fees
+                    {t.sold > 0 && <> · {t.stopped ? "stopped out" : "sold"} {+t.sold.toFixed(2)} at {cents(t.avg_sell)}</>}</span>
+                </td>
+                <td><span className={`outcome ${t.outcome}`} title={t.closed ? `${t.outcome === "stopped" ? "sold by its stop loss" : t.outcome === "sold" ? "sold" : "settled"} ${clock(t.closed)}` : "the market hasn't settled yet"}>
+                  {OUTCOME[t.outcome]}</span></td>
+                <td className={`r num pnl ${tone(t.pnl)}`}>{t.pnl == null ? "–" : money(t.pnl, true)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+      <LoadMore shown={rows.length} total={sum ? (f.view ? sum[f.view as keyof TradeSummary] as number : sum.trades) : 0}
+        loading={loading} onMore={() => setLimit((l) => l + PAGE)} />
     </>
   );
 }

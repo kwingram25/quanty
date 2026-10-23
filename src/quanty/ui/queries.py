@@ -212,22 +212,43 @@ def order_result(status: OrderStatus, filled: float, qty: float, tif: Tif) -> st
 
 
 # orders worth a look: anything but filled in full, and every stop loss
-_NEEDS_LOOK = (
-    (OrderRow.status != OrderStatus.FILLED)
-    | (OrderRow.filled < OrderRow.qty - QTY_EPS)
-    | ((OrderRow.action == Action.SELL) & (OrderRow.tag == STOP_TAG))
-)
+_STOP = (OrderRow.action == Action.SELL) & (OrderRow.tag == STOP_TAG)
+_NEEDS_LOOK = (OrderRow.status != OrderStatus.FILLED) | (OrderRow.filled < OrderRow.qty - QTY_EPS) | _STOP
+_REJECTED = OrderRow.status == OrderStatus.REJECTED
+_RESTING = OrderRow.status.in_(RESTING)
+_DONE = ~_REJECTED & ~_RESTING
+_FULL = OrderRow.filled >= OrderRow.qty - QTY_EPS
+_SOME = OrderRow.filled > QTY_EPS
+# what each order view selects: one result (order_result's words), or look / stops
+ORDER_VIEWS: dict[str, ColumnElement[bool]] = {
+    "filled": _DONE & _FULL,
+    "partial": _DONE & _SOME & ~_FULL,
+    "missed": _DONE & ~_SOME & (OrderRow.tif == Tif.IOC),
+    "unfilled": _DONE & ~_SOME & (OrderRow.tif != Tif.IOC),
+    "rejected": _REJECTED,
+    "resting": _RESTING,
+    "look": _NEEDS_LOOK,
+    "stops": _STOP & _SOME,
+}
 
 
-def order_stats(run: Run) -> dict[str, dict[str, int]]:
-    """Per instance, over every order: how many there were and how each kind of result ended (these
-    add up to orders), plus needs_look (what the Orders view shows by default) and stops (stop-loss
-    sells that filled)."""
-    rejected = OrderRow.status == OrderStatus.REJECTED
-    resting = OrderRow.status.in_(RESTING)
-    done = ~rejected & ~resting
-    full = OrderRow.filled >= OrderRow.qty - QTY_EPS
-    some = OrderRow.filled > QTY_EPS
+def _order_filter(instance: str | None, since: int | None, until: int | None) -> list[ColumnElement[bool]]:
+    out = []
+    if instance:
+        out.append(OrderRow.instance == instance)
+    if since is not None:
+        out.append(OrderRow.created_ts >= since)
+    if until is not None:
+        out.append(OrderRow.created_ts <= until)
+    return out
+
+
+def order_stats(
+    run: Run, instance: str | None = None, since: int | None = None, until: int | None = None
+) -> dict[str, dict[str, int]]:
+    """Per instance, over every order (or those filtered): how many there were and how each kind of
+    result ended (filled ... resting add up to orders), plus look (what the Orders view shows by
+    default; also as needs_look) and stops (stop-loss sells that filled)."""
 
     def count(cond: ColumnElement[bool]) -> ColumnElement[int]:
         return func.sum(case((cond, 1), else_=0))
@@ -239,31 +260,46 @@ def order_stats(run: Run) -> dict[str, dict[str, int]]:
                 select(
                     OrderRow.instance,
                     func.count().label("orders"),
-                    count(done & full).label("filled"),
-                    count(done & some & ~full).label("partial"),
-                    count(done & ~some & (OrderRow.tif == Tif.IOC)).label("missed"),
-                    count(done & ~some & (OrderRow.tif != Tif.IOC)).label("unfilled"),
-                    count(rejected).label("rejected"),
-                    count(resting).label("resting"),
-                    count(_NEEDS_LOOK).label("needs_look"),
-                    count((OrderRow.action == Action.SELL) & (OrderRow.tag == STOP_TAG) & some).label(
-                        "stops"
-                    ),
-                ).group_by(OrderRow.instance)
+                    *(count(cond).label(name) for name, cond in ORDER_VIEWS.items()),
+                )
+                .where(*_order_filter(instance, since, until))
+                .group_by(OrderRow.instance)
             ).all()
     finally:
         engine.dispose()
-    return {r.instance: {k: int(v or 0) for k, v in r._mapping.items() if k != "instance"} for r in rows}
+    out = {}
+    for r in rows:
+        stats = {k: int(v or 0) for k, v in r._mapping.items() if k != "instance"}
+        stats["needs_look"] = stats.pop("look")
+        out[r.instance] = stats
+    return out
 
 
-def activity(run: Run, limit: int = 100, needs_look: bool = False) -> list[Activity]:
-    """The latest orders, newest first, each with what filled, at what price and cost.
-    needs_look: only those that didn't simply fill in full (missed, partial, rejected, resting...)."""
+def activity(
+    run: Run,
+    limit: int = 100,
+    needs_look: bool = False,
+    *,
+    offset: int = 0,
+    view: str | None = None,
+    instance: str | None = None,
+    since: int | None = None,
+    until: int | None = None,
+) -> list[Activity]:
+    """Orders, newest first, each with what filled, at what price and cost. needs_look (or
+    view="look"): only those that didn't simply fill in full, and stop losses; view can also be one
+    result ("missed", ...) or "stops". offset/limit page through the history."""
+    view = "look" if needs_look else view
+    if view is not None and view not in ORDER_VIEWS:
+        raise ValueError(f"unknown order view {view!r}")
     engine = _open(run.path)
     try:
         with Session(engine) as conn:
-            q = select(OrderRow).order_by(OrderRow.created_ts.desc()).limit(limit)
-            orders = list(conn.execute(q.where(_NEEDS_LOOK) if needs_look else q).scalars())
+            q = select(OrderRow).where(*_order_filter(instance, since, until))
+            if view is not None:
+                q = q.where(ORDER_VIEWS[view])
+            q = q.order_by(OrderRow.created_ts.desc(), OrderRow.id.desc()).offset(offset).limit(limit)
+            orders = list(conn.execute(q).scalars())
             ids = [o.id for o in orders]
             agg = {
                 r.order_id: r
@@ -295,73 +331,136 @@ def activity(run: Run, limit: int = 100, needs_look: bool = False) -> list[Activ
     return out
 
 
-def trades(run: Run, limit: int = 100) -> list[dict[str, Any]]:
+TRADE_OUTCOMES = ("won", "lost", "stopped", "sold", "open")
+
+
+def _positions(instance: str | None, since: int | None, until: int | None) -> Any:
+    """Every position (instance, market, side) with what it bought and sold, its settlement and how
+    it ended, as a subquery to filter, page and total."""
+    key = (FillRow.instance, FillRow.market_id, FillRow.side)
+    buy, sell = FillRow.action == Action.BUY, FillRow.action == Action.SELL
+    q = (
+        select(
+            *key,
+            func.min(FillRow.ts).label("opened"),
+            func.max(FillRow.ts).label("last"),
+            func.sum(case((buy, FillRow.qty), else_=0)).label("bought"),
+            func.sum(case((buy, FillRow.qty * FillRow.price), else_=0)).label("cost"),
+            func.sum(case((sell, FillRow.qty), else_=0)).label("sold"),
+            func.sum(case((sell, FillRow.qty * FillRow.price), else_=0)).label("proceeds"),
+            func.sum(FillRow.fee).label("fees"),
+            func.sum(FillRow.realized).label("realized"),
+            func.max(case((sell & (OrderRow.tag == STOP_TAG), 1), else_=0)).label("stopped"),
+        )
+        .join(OrderRow, OrderRow.id == FillRow.order_id, isouter=True)
+        .group_by(*key)
+    )
+    if instance:
+        q = q.where(FillRow.instance == instance)
+    pos = q.subquery()
+    st = SettlementRow
+    closed_out = (pos.c.sold > QTY_EPS) & (pos.c.sold >= pos.c.bought - QTY_EPS)
+    outcome = case(
+        (st.id.is_not(None), case((st.payout > 0, "won"), else_="lost")),
+        (closed_out, case((pos.c.stopped == 1, "stopped"), else_="sold")),
+        else_="open",
+    )
+    q2 = select(
+        pos,
+        st.ts.label("settled_ts"),
+        st.pnl.label("settle_pnl"),
+        outcome.label("outcome"),
+    ).join(
+        st,
+        (st.instance == pos.c.instance) & (st.market_id == pos.c.market_id) & (st.side == pos.c.side),
+        isouter=True,
+    )
+    if since is not None:
+        q2 = q2.where(pos.c.opened >= since)
+    if until is not None:
+        q2 = q2.where(pos.c.opened <= until)
+    return q2.subquery()
+
+
+def trades(
+    run: Run,
+    limit: int = 100,
+    *,
+    offset: int = 0,
+    instance: str | None = None,
+    outcome: str | None = None,
+    since: int | None = None,
+    until: int | None = None,
+) -> list[dict[str, Any]]:
     """One row per position a strategy took (instance, market, side): what it bought and sold, what
-    it cost, how it ended (won, lost, sold, stopped: sold by a stop loss, still open) and its P&L,
-    newest first."""
+    it cost, how it ended (won, lost, stopped: sold by a stop loss, sold, still open) and its P&L,
+    most recently active first. Filters: instance, outcome, and when it was opened (ms)."""
+    if outcome is not None and outcome not in TRADE_OUTCOMES:
+        raise ValueError(f"unknown outcome {outcome!r}")
+    t = _positions(instance, since, until)
+    q = select(t)
+    if outcome is not None:
+        q = q.where(t.c.outcome == outcome)
+    q = q.order_by(t.c.last.desc(), t.c.instance, t.c.market_id).offset(offset).limit(limit)
     engine = _open(run.path)
     try:
         with Session(engine) as conn:
-            key = (FillRow.instance, FillRow.market_id, FillRow.side)
-            rows = conn.execute(
-                select(
-                    *key,
-                    func.min(FillRow.ts).label("opened"),
-                    func.max(FillRow.ts).label("last"),
-                    func.sum(case((FillRow.action == Action.BUY, FillRow.qty), else_=0)).label("bought"),
-                    func.sum(
-                        case((FillRow.action == Action.BUY, FillRow.qty * FillRow.price), else_=0)
-                    ).label("cost"),
-                    func.sum(case((FillRow.action == Action.SELL, FillRow.qty), else_=0)).label("sold"),
-                    func.sum(
-                        case((FillRow.action == Action.SELL, FillRow.qty * FillRow.price), else_=0)
-                    ).label("proceeds"),
-                    func.sum(FillRow.fee).label("fees"),
-                    func.sum(FillRow.realized).label("realized"),
-                    func.max(
-                        case(((FillRow.action == Action.SELL) & (OrderRow.tag == STOP_TAG), 1), else_=0)
-                    ).label("stopped"),
-                )
-                .join(OrderRow, OrderRow.id == FillRow.order_id, isouter=True)
-                .group_by(*key)
-                .order_by(func.max(FillRow.ts).desc())
-                .limit(limit)
-            ).all()
-            settled = {
-                (r.instance, r.market_id, str(r.side)): r
-                for r in conn.execute(select(SettlementRow)).scalars()
-            }
+            rows = conn.execute(q).all()
     finally:
         engine.dispose()
     out = []
     for r in rows:
-        st = settled.get((r.instance, r.market_id, str(r.side)))
-        pnl: float | None = (r.realized or 0.0) + (st.pnl if st else 0.0)
-        if st is not None:
-            outcome = "won" if st.payout > 0 else "lost"
-        elif r.sold >= r.bought - 1e-9 and r.sold > 0:
-            outcome = "stopped" if r.stopped else "sold"
+        settled = r.settled_ts is not None
+        if r.outcome == "open":
+            pnl: float | None = r.realized or None  # open: only what's realized on part-sales so far
         else:
-            outcome, pnl = ("open", None) if not r.realized else ("open", r.realized)
+            pnl = (r.realized or 0.0) + (r.settle_pnl or 0.0)
         out.append(
             {
                 "instance": r.instance,
                 "market_id": r.market_id,
                 "side": str(r.side),
                 "opened": r.opened,
-                "closed": st.ts if st else (r.last if outcome == "sold" else None),
+                "closed": r.settled_ts if settled else (r.last if r.outcome in ("sold", "stopped") else None),
                 "bought": r.bought,
                 "avg_price": r.cost / r.bought if r.bought else None,
                 "cost": r.cost + (r.fees or 0.0),
                 "sold": r.sold,
                 "avg_sell": r.proceeds / r.sold if r.sold else None,
                 "fees": r.fees or 0.0,
-                "outcome": outcome,
+                "outcome": r.outcome,
                 "stopped": bool(r.stopped),  # some of it was sold by a stop loss
                 "pnl": pnl,
             }
         )
     return out
+
+
+def trade_summary(
+    run: Run,
+    *,
+    instance: str | None = None,
+    outcome: str | None = None,
+    since: int | None = None,
+    until: int | None = None,
+) -> dict[str, Any]:
+    """Totals over every position the filters select: how many, by outcome, and net P&L."""
+    t = _positions(instance, since, until)
+    q = select(
+        func.count().label("trades"),
+        *(func.sum(case((t.c.outcome == o, 1), else_=0)).label(o) for o in TRADE_OUTCOMES),
+        func.sum(func.coalesce(t.c.realized, 0) + func.coalesce(t.c.settle_pnl, 0)).label("pnl"),
+        func.sum(t.c.cost + func.coalesce(t.c.fees, 0)).label("cost"),
+    )
+    if outcome is not None:
+        q = q.where(t.c.outcome == outcome)
+    engine = _open(run.path)
+    try:
+        with Session(engine) as conn:
+            r = conn.execute(q).one()
+    finally:
+        engine.dispose()
+    return {k: (v or 0) for k, v in r._mapping.items()}
 
 
 def strategy_info(run: Run) -> dict[str, dict[str, Any]]:
