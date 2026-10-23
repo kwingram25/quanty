@@ -80,6 +80,29 @@ An order that fails a check (risk limit, tick size, quantity step, market closed
 back already `REJECTED` with a reason; it never reaches the venue. A strategy that raises is
 halted and logged; in backtests the error is raised so you see it.
 
+## Any binary market
+
+quanty trades binary contracts: each market pays $1 if YES wins. That covers up/down windows,
+weather and economic ranges, sports, anything a venue lists as yes/no. A question with several
+outcomes (a temperature ladder, CPI ranges) is a set of binary markets sharing an event, as Kalshi
+models it.
+
+`market.describe()` says what a market is, from its `terms`. Venues fill in what they know, and
+the dashboard uses it to title cards, group outcomes into events and show the value a market settles
+against:
+
+| term | meaning |
+|---|---|
+| `title` | the question ("Highest temperature in NYC on Oct 24?") |
+| `subtitle` | this contract's outcome or range ("72° to 73°") |
+| `event` | markets sharing it are outcomes of one question |
+| `strike` | the threshold, where there is one |
+| `reference` | the data key the market settles against (e.g. `cfbenchmarks:BRTI`) |
+| `unit` | the reference's unit ("°F") |
+
+`quanty demo --live` includes an hourly temperature ladder traded by
+`src/quanty/strategies/example_bucket.py`, next to the up/down example.
+
 ## Orders
 
 - `Tif.IOC`: take what is there now, cancel the rest. The usual choice for taking liquidity.

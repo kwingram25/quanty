@@ -5,12 +5,23 @@ value at the open when the window closes?". The market's quotes track the true p
 slowly drifting noise, so a strategy with a good model has something to find.
 """
 
+import heapq
 import math
 import random
+import time
 from collections.abc import Iterator
 from dataclasses import dataclass
 
-from quanty.core.events import Book, Event, IndexValue, MarketClose, MarketOpen, MarketTrade, Settled
+from quanty.core.events import (
+    Book,
+    Event,
+    IndexValue,
+    MarketClose,
+    MarketOpen,
+    MarketTrade,
+    Observation,
+    Settled,
+)
 from quanty.core.fees import QuadraticFee
 from quanty.core.types import Action, Market, Side
 
@@ -59,7 +70,7 @@ def events(spec: Spec | None = None) -> Iterator[Event]:
             open_ts=open_ts,
             close_ts=close_ts,
             group=spec.series,
-            terms={"strike": index},
+            terms=_updown_terms(index, close_ts),
         )
         strike = index
         yield MarketOpen(ts=open_ts, market=market)
@@ -86,11 +97,85 @@ def events(spec: Spec | None = None) -> Iterator[Event]:
         yield Settled(ts=close_ts, market_id=market.id, outcome=outcome)
 
 
-def events_multi(spec: Spec | None = None, windows: tuple[int, ...] = (300, 900, 3600)) -> Iterator[Event]:
+def events_multi(
+    spec: Spec | None = None, windows: tuple[int, ...] = (300, 900, 3600), ladder: bool = False
+) -> Iterator[Event]:
     """Several up/down series on one index at once (5 min, 15 min and 1 h by default): windows open
     on their own clock boundaries, so markets of different lengths are open and closing at different
-    times. Deterministic per seed; `events` is unchanged by this."""
+    times. ladder adds hourly temperature range markets (`temperature_ladder`). Deterministic per
+    seed; `events` is unchanged by this."""
     spec = spec or Spec()
+    updown = _updown_multi(spec, windows)
+    if not ladder:
+        return updown
+    return heapq.merge(updown, temperature_ladder(spec), key=lambda e: e.ts)
+
+
+TEMP_KEY = f"{VENUE}:temp"
+TEMP_SIGMA_PER_S = 0.02  # °F per √second
+
+
+def temperature_ladder(spec: Spec, bucket: float = 2.0) -> Iterator[Event]:
+    """Hourly "what will the temperature be at the top of the hour?" events, each five range markets
+    (two degrees wide around the reading at the open, open-ended at both ends), settled on the reading
+    at the close. Not an up/down market: a question with several outcomes, one of which wins. The
+    temperature drifts around a daily cycle and is published as Observation events on TEMP_KEY."""
+    rng = random.Random(spec.seed + 1)  # its own stream: the up/down markets are unchanged
+    start_s = spec.start_ms // 1000
+    temp = 68.0
+    open_: list[tuple[Market, float | None, float | None, float]] = []  # market, lo, hi, drift
+    for k in range(int(spec.hours * 3600) + 1):
+        now_s = start_s + k
+        t = now_s * 1000
+        if open_ and now_s >= open_[0][0].close_ts // 1000:
+            for market, lo, hi, _ in open_:
+                won = (lo is None or temp >= lo) and (hi is None or temp < hi)
+                yield MarketClose(ts=t, market_id=market.id)
+                yield Settled(ts=t, market_id=market.id, outcome=Side.YES if won else Side.NO)
+            open_ = []
+        if now_s % 3600 == 0 and not open_:
+            close_s = now_s + 3600
+            mid = round(temp / bucket) * bucket
+            edges = [mid - 1.5 * bucket, mid - 0.5 * bucket, mid + 0.5 * bucket, mid + 1.5 * bucket]
+            bounds = list(zip([None, *edges], [*edges, None], strict=True))
+            close = time.strftime("%H:%M", time.gmtime(close_s))
+            for i, (lo, hi) in enumerate(bounds):
+                label = (f"below {hi:g}°F" if lo is None else f"{lo:g}°F or above" if hi is None
+                         else f"{lo:g}–{hi:g}°F")  # fmt: skip
+                market = Market(
+                    id=f"{VENUE}:TEMP-{close_s}-B{i}", venue=VENUE, series=f"{VENUE}:temp_1h", open_ts=t,
+                    close_ts=close_s * 1000, group=f"{VENUE}:temp",
+                    terms={"title": f"Synthville temperature at {close}?", "subtitle": label,
+                           "event": f"{VENUE}:TEMP-{close_s}", "reference": TEMP_KEY, "unit": "°F",
+                           "lo": lo, "hi": hi},
+                )  # fmt: skip
+                open_.append((market, lo, hi, 0.0))
+                yield MarketOpen(ts=t, market=market)
+        hour = (now_s % 86400) / 3600
+        mean = 66 + 6 * math.sin(2 * math.pi * (hour - 9) / 24)
+        temp += 0.0005 * (mean - temp) + rng.gauss(0, TEMP_SIGMA_PER_S)
+        yield Observation(ts=t, src_ts=t, key=TEMP_KEY, value=round(temp, 3), unit="°F")
+        for i, (market, lo, hi, drift) in enumerate(open_):
+            drift = 0.95 * drift + rng.gauss(0, spec.noise * math.sqrt(1 - 0.95**2))
+            open_[i] = (market, lo, hi, drift)
+            left = (market.close_ts - t) / 1000
+            fair = p_range(temp, lo, hi, left, TEMP_SIGMA_PER_S)
+            yield _book(market.id, t + 100, min(0.98, max(0.02, fair + drift)), spec.spread, rng)
+
+
+def p_range(
+    value: float, lo: float | None, hi: float | None, seconds_left: float, sigma_per_s: float
+) -> float:
+    """P(lo <= value at close < hi) for a driftless random walk (None = open-ended)."""
+    sd = sigma_per_s * math.sqrt(max(seconds_left, 1e-9))
+
+    def cdf(x: float) -> float:
+        return 0.5 * (1 + math.erf((x - value) / (sd * math.sqrt(2))))
+
+    return (1.0 if hi is None else cdf(hi)) - (0.0 if lo is None else cdf(lo))
+
+
+def _updown_multi(spec: Spec, windows: tuple[int, ...]) -> Iterator[Event]:
     rng = random.Random(spec.seed)
     index = spec.index0
     open_: dict[int, tuple[Market, float, float]] = {}  # window -> (market, strike, drift)
@@ -114,7 +199,7 @@ def events_multi(spec: Spec | None = None, windows: tuple[int, ...] = (300, 900,
                     open_ts=t,
                     close_ts=t + w * 1000,
                     group=f"{VENUE}:index",
-                    terms={"strike": index},
+                    terms=_updown_terms(index, t + w * 1000),
                 )
                 open_[w] = (market, index, 0.0)
                 yield MarketOpen(ts=t, market=market)
@@ -141,6 +226,16 @@ def events_multi(spec: Spec | None = None, windows: tuple[int, ...] = (300, 900,
                     )
                 )
         yield from trades
+
+
+def _updown_terms(strike: float, close_ts: int) -> dict[str, object]:
+    close = time.strftime("%H:%M", time.gmtime(close_ts / 1000))
+    return {
+        "strike": strike,
+        "title": f"Index up at {close}?",
+        "subtitle": f"at or above {strike:.2f}",
+        "reference": INDEX_KEY,
+    }
 
 
 def _length(window_s: int) -> str:

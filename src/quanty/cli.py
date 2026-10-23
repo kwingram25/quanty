@@ -99,6 +99,8 @@ def demo(
                 {"id": f"fav_{round(c * 100)}", "strategy": strategy, "params": {"min_conf": c}}
                 for c in (0.90, 0.95, 0.97)
             ]
+        if live and not param and strategy == "example_favorite":  # the live demo also has range markets
+            instances.append({"id": "temp_buckets", "strategy": "example_bucket", "params": {}})
         raw = {"brokers": {"sim": {"kind": "sim", "latency_ms": latency_ms}}, "instances": instances}
         if ui and ledger is not None:
             raise ValueError("--ui keeps its ledger in a temporary demo folder; leave out --ledger")
@@ -318,7 +320,7 @@ def _demo_live(
     async def play() -> None:
         # the past (before now) at once, so the dashboard opens on a run with history; then live
         live_from, wall0 = _now_window_ms(), time.monotonic()
-        for ev in synthetic.events_multi(spec):
+        for ev in synthetic.events_multi(spec, ladder=True):
             if ev.ts > live_from:
                 delay = (ev.ts - live_from) / 1000 / speed - (time.monotonic() - wall0)
                 if delay > 0:
@@ -337,9 +339,7 @@ def _demo_live(
             await asyncio.gather(*tasks, return_exceptions=True)
 
     url = f"http://127.0.0.1:{port}/runs/paper/{run}"
-    typer.echo(
-        f"live demo: synthetic 5 min, 15 min and 1 h up/down markets at {speed:g}x real time, paper trading"
-    )
+    typer.echo(f"live demo: synthetic up/down markets and a temperature ladder at {speed:g}x real time")
     typer.echo(f"dashboard: {url} (Ctrl-C to stop)")
     if browser:
         threading.Timer(1.5, webbrowser.open, args=[url]).start()

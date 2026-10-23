@@ -162,26 +162,37 @@ class Controller:
                      for iid, inst in self.trader.instances.items()}  # fmt: skip
         return {"instances": instances, "brokers": brokers, "now": t.now, "markets": self.markets()}
 
-    def markets(self, limit: int = 12) -> list[dict[str, Any]]:
-        """Open markets some instance trades, soonest close first: prices and our positions."""
+    def markets(self, limit: int = 24) -> list[dict[str, Any]]:
+        """Open markets some instance trades, soonest close first: what they are, prices, the value
+        they settle against, and our positions."""
         t = self.trader
         out = []
-        wanted = [m for m in t.open_markets.values()
-                  if any(i.strategy.wants(m) for i in t.instances.values())]  # fmt: skip
-        for m in sorted(wanted, key=lambda m: m.close_ts)[:limit]:
+        wanted = [
+            m for m in t.open_markets.values() if any(i.strategy.wants(m) for i in t.instances.values())
+        ]
+        for m in sorted(wanted, key=lambda m: (m.close_ts, m.id))[:limit]:
             book = t.books.get(m.id)
+            d = m.describe()
+            ref = t.latest.get(str(d["reference"])) if d["reference"] else None
             held = [
                 {"instance": iid, "side": str(side), "qty": pos.qty, "avg": pos.avg_cost}
                 for iid in t.instances
                 for side in Side
                 if (pos := t.portfolio.position(iid, m.id, side)).qty > 1e-9
             ]
-            out.append({
-                "id": m.id, "series": m.series, "open_ts": m.open_ts, "close_ts": m.close_ts,
-                "bid": book.bids[0][0] if book and book.bids else None,
-                "ask": book.asks[0][0] if book and book.asks else None,
-                "held": held,
-            })  # fmt: skip
+            out.append(
+                {
+                    "id": m.id,
+                    "series": m.series,
+                    "open_ts": m.open_ts,
+                    "close_ts": m.close_ts,
+                    **d,
+                    "reference_value": getattr(ref, "value", None),
+                    "bid": book.bids[0][0] if book and book.bids else None,
+                    "ask": book.asks[0][0] if book and book.asks else None,
+                    "held": held,
+                }
+            )
         return out
 
     def tick(self) -> None:

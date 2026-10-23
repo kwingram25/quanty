@@ -9,11 +9,12 @@ from pathlib import Path
 from typing import Any
 
 from sqlalchemy import Engine, case, func, select
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session
 
 from quanty import db
 from quanty.core.ledger import Summary, summarize
-from quanty.db.models import FeedMetricRow, FillRow, LogRow, OrderRow, SettlementRow
+from quanty.db.models import FeedMetricRow, FillRow, LogRow, MarketRow, OrderRow, SettlementRow
 from quanty.enums import Action
 
 MODES = ("live", "paper", "backtest")
@@ -223,6 +224,23 @@ def activity(run: Run, limit: int = 100) -> list[Activity]:
         liq = str(a.liq_lo) if a.liq_lo == a.liq_hi else "mixed"
         out.append(Activity(o, a.n, a.cost / a.qty if a.qty else None, a.fees or 0.0, a.realized or 0.0, liq))
     return out
+
+
+def names(run: Run, ids: set[str]) -> dict[str, dict[str, str]]:
+    """What each market is (title, subtitle, event, series), for the ids the dashboard shows."""
+    if not ids:
+        return {}
+    engine = _open(run.path)
+    try:
+        with Session(engine) as conn:
+            rows = conn.execute(select(MarketRow).where(MarketRow.id.in_(ids))).scalars().all()
+    except OperationalError:  # a ledger from before markets were recorded
+        return {}
+    finally:
+        engine.dispose()
+    return {
+        r.id: {"title": r.title, "subtitle": r.subtitle, "event": r.event, "series": r.series} for r in rows
+    }
 
 
 def tape(run: Run, limit: int = 60) -> list[dict[str, Any]]:

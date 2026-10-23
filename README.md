@@ -4,6 +4,9 @@ A self-hosted framework for recording, backtesting, paper trading and live tradi
 prediction markets** on Kalshi and Polymarket US: crypto up/down windows, daily weather highs,
 economic releases, any market that recurs on a schedule and settles against a known source.
 
+Any binary contract works: up/down windows, ranges and ladders (a question with several outcomes
+is a set of binaries sharing an event), thresholds. See [Writing strategies](docs/strategies.md#any-binary-market).
+
 One strategy file runs unchanged in four modes. Only the broker behind it changes:
 
 | Mode | Data | Orders |

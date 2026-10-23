@@ -8,7 +8,7 @@ import { PnlChart } from "../components/PnlChart";
 import { Strategies } from "../components/Strategies";
 import { Tape } from "../components/Tape";
 import { useToast } from "../components/Toasts";
-import { ago, cents, clock, marketName, money, slots as slotsOf, tone } from "../format";
+import { ago, cents, clock, money, nameOf, slots as slotsOf, tone } from "../format";
 
 const ALERTS = /disabled|outcome unknown|kill switch|leftover|never reported/i;
 
@@ -67,7 +67,7 @@ function Run({ snap, live }: { snap: Snapshot; live: boolean }) {
           <Markets session={snap.session} slots={slots} />
           <section className="panel fill">
             <header><h2>Tape</h2><span className="hint">fills, settlements and alerts</span></header>
-            <div className="panel-body scroll"><Tape items={snap.tape} slots={slots} /></div>
+            <div className="panel-body scroll"><Tape items={snap.tape} slots={slots} names={snap.names} /></div>
           </section>
         </div>
       </div>
@@ -130,7 +130,7 @@ function Activity({ snap }: { snap: Snapshot }) {
       <tbody>
         {snap.activity.map((a) => (
           <tr key={a.id}>
-            <td className="muted">{clock(a.created_ts)}</td><td>{a.instance}</td><td>{marketName(a.market_id)}</td>
+            <td className="muted">{clock(a.created_ts)}</td><td>{a.instance}</td><td><Name snap={snap} id={a.market_id} /></td>
             <td>{a.action} {a.side.toUpperCase()} {a.tif.toUpperCase()}{a.post_only ? " post-only" : ""}</td>
             <td className="r">{cents(a.price)}</td><td className="r">{a.filled} / {a.qty}</td>
             <td className="r">{a.avg_price == null ? "" : cents(a.avg_price)}</td>
@@ -151,7 +151,7 @@ function Positions({ snap }: { snap: Snapshot }) {
       <thead><tr><th>Strategy</th><th>Market</th><th>Side</th><th className="r">Contracts</th><th className="r">Avg price</th></tr></thead>
       <tbody>
         {snap.positions.map((p) => (
-          <tr key={`${p.instance}-${p.market_id}-${p.side}`}><td>{p.instance}</td><td>{marketName(p.market_id)}</td>
+          <tr key={`${p.instance}-${p.market_id}-${p.side}`}><td>{p.instance}</td><td><Name snap={snap} id={p.market_id} /></td>
             <td>{p.side.toUpperCase()}</td><td className="r">{p.qty}</td><td className="r">{cents(p.avg_price)}</td></tr>
         ))}
       </tbody>
@@ -175,4 +175,9 @@ function Commands({ snap }: { snap: Snapshot }) {
       </tbody>
     </table>
   );
+}
+
+function Name({ snap, id }: { snap: Snapshot; id: string }) {
+  const n = nameOf(snap.names, id);
+  return <span title={id}>{n.title}{n.subtitle && <span className="muted"> · {n.subtitle}</span>}</span>;
 }

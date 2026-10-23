@@ -60,7 +60,9 @@ def market_of(m: dict[str, Any], series: str, cfg: KalshiConfig) -> Market:
     ranges = tuple(
         (float(r["start"]), float(r["end"]), float(r["step"])) for r in m.get("price_ranges") or ()
     )
-    terms = {k: m[k] for k in TERM_FIELDS if m.get(k) not in (None, "")}
+    terms: dict[str, object] = {k: m[k] for k in TERM_FIELDS if m.get(k) not in (None, "")}
+    if series.startswith("KXBTC"):  # Kalshi's BTC markets settle on CF Benchmarks' BRTI
+        terms["reference"] = "cfbenchmarks:BRTI"
     return Market(
         id=f"{VENUE}:{m['ticker']}", venue=VENUE, series=f"{VENUE}:{series}",
         open_ts=_ts(m["open_time"]), close_ts=_ts(m["close_time"]), tick=0.01, tick_ranges=ranges,

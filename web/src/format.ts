@@ -39,7 +39,22 @@ export const duration = (s: number): string => {
   if (s <= 0) return "closed";
   if (s < 60) return `${Math.ceil(s)}s`;
   const m = Math.floor(s / 60);
-  return m < 60 ? `${m}:${pad(Math.floor(s % 60))}` : `${Math.floor(m / 60)}h ${pad(m % 60)}m`;
+  if (m < 60) return `${m}:${pad(Math.floor(s % 60))}`;
+  const h = Math.floor(m / 60);
+  return h < 24 ? `${h}h ${pad(m % 60)}m` : `${Math.floor(h / 24)}d ${pad(h % 24)}h`;
+};
+
+/** "Thu 14:00" for closes more than a day away, "14:00" otherwise (UTC). */
+export const closesAt = (ms: number, now: number | null): string => {
+  const d = new Date(ms);
+  const hm = clock(ms, false);
+  return now != null && ms - now > 86_400_000 ? `${d.toUTCString().slice(0, 3)} ${hm}` : hm;
+};
+
+/** A market's display name, from the snapshot's names (falls back to the id). */
+export const nameOf = (names: Record<string, { title: string; subtitle: string }> | undefined, id: string) => {
+  const n = names?.[id];
+  return n ? { title: n.title, subtitle: n.subtitle } : { title: marketName(id), subtitle: "" };
 };
 
 /** Stable color slot per strategy name: sorted order, max 8 (the palette's validated slots). */

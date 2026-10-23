@@ -1,10 +1,13 @@
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import type { TapeItem } from "../api";
-import { cents, clock, money, tone } from "../format";
+import type { MarketName } from "../api";
+import { cents, clock, money, nameOf, tone } from "../format";
 
 /** The event tape: fills, settlements and notable events, newest first. New items slide in;
  *  wins and losses are washed green and red, warnings and errors edged amber and red. */
-export function Tape({ items, slots }: { items: TapeItem[]; slots: Record<string, number> }) {
+export function Tape({ items, slots, names }: {
+  items: TapeItem[]; slots: Record<string, number>; names?: Record<string, MarketName>;
+}) {
   const reduce = useReducedMotion();
   if (!items.length) return <p className="empty">Fills, settlements and alerts will appear here as they happen.</p>;
   return (
@@ -16,7 +19,7 @@ export function Tape({ items, slots }: { items: TapeItem[]; slots: Record<string
             animate={{ opacity: 1, y: 0, height: "auto", marginBottom: 6 }}
             exit={{ opacity: 0 }} transition={{ type: "spring", stiffness: 420, damping: 36 }}>
             <span className="when">{clock(it.ts)}</span>
-            <Body it={it} />
+            <Body it={it} names={names} />
           </motion.li>
         ))}
       </AnimatePresence>
@@ -35,13 +38,15 @@ function edge(it: TapeItem, slots: Record<string, number>): React.CSSProperties 
   return undefined;
 }
 
-function Body({ it }: { it: TapeItem }) {
+function Body({ it, names }: { it: TapeItem; names?: Record<string, MarketName> }) {
+  const what = "market_id" in it ? nameOf(names, it.market_id) : null;
+  const about = what ? (what.subtitle || what.title) : "";
   if (it.kind === "fill") {
     return (
       <>
-        <span className="what" title={it.market_id}>
+        <span className="what" title={what ? `${what.title} ${what.subtitle}`.trim() : undefined}>
           <b>{it.instance}</b> {it.action === "buy" ? "bought" : "sold"} {it.qty} {it.side.toUpperCase()} at {cents(it.price)}
-          <span className="detail">{it.liquidity} · fee {money(it.fee)}</span>
+          <span className="detail">{about} · {it.liquidity} · fee {money(it.fee)}</span>
         </span>
         <span className={`amount ${tone(it.realized)}`}>{it.realized ? money(it.realized, true) : money(-it.qty * it.price - it.fee)}</span>
       </>
@@ -51,9 +56,9 @@ function Body({ it }: { it: TapeItem }) {
     const won = it.payout > 0;
     return (
       <>
-        <span className="what" title={it.market_id}>
+        <span className="what" title={what ? `${what.title} ${what.subtitle}`.trim() : undefined}>
           <b>{it.instance}</b> {won ? "won" : "lost"} {it.qty} {it.side.toUpperCase()}
-          <span className="detail">{won ? `paid ${money(it.payout)}` : "expired worthless"}</span>
+          <span className="detail">{about} · {won ? `paid ${money(it.payout)}` : "expired worthless"}</span>
         </span>
         <span className={`amount ${tone(it.pnl)}`}>{money(it.pnl, true)}</span>
       </>

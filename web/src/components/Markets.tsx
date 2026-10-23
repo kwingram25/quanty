@@ -1,7 +1,7 @@
 import { AnimatePresence, motion } from "motion/react";
 import { useEffect, useRef, useState } from "react";
 import type { OpenMarket, SessionState } from "../api";
-import { cents, clock, duration, marketName, seriesName } from "../format";
+import { cents, closesAt, duration, seriesName } from "../format";
 
 /** The session's event clock, extrapolated between heartbeats at the rate it has been advancing
  *  (1x live, faster in a sped-up demo). */
@@ -26,18 +26,23 @@ function useEventClock(s: SessionState | null): number | null {
   return s.now + (Date.now() - s.heartbeat_ts) * rate.current;
 }
 
+const fmtNum = (v: number) => (Math.abs(v) >= 1000 ? v.toLocaleString("en-US", { maximumFractionDigits: 0 }) : v.toFixed(2));
+
+/** Open markets grouped into events: an up/down window is an event of one market; a range ladder
+ *  (or any multi-outcome question) is one event with a row per outcome. */
 export function Markets({ session, slots }: { session: SessionState | null; slots: Record<string, number> }) {
   const now = useEventClock(session);
-  const markets = session?.markets ?? [];
   if (!session) return null;
+  const events = new Map<string, OpenMarket[]>();
+  for (const m of session.markets) events.set(m.event, [...(events.get(m.event) ?? []), m]);
   return (
     <section className="panel" aria-label="Open markets">
       <header><h2>Open markets</h2><span className="hint">soonest close first</span></header>
       <div className="panel-body">
-        {markets.length === 0 ? <p className="empty">No markets open right now.</p> : (
+        {events.size === 0 ? <p className="empty">No markets open right now.</p> : (
           <div className="board">
             <AnimatePresence initial={false}>
-              {markets.map((m) => <Market key={m.id} m={m} now={now} slots={slots} />)}
+              {[...events.entries()].map(([ev, ms]) => <Event key={ev} ms={ms} now={now} slots={slots} />)}
             </AnimatePresence>
           </div>
         )}
@@ -46,31 +51,55 @@ export function Markets({ session, slots }: { session: SessionState | null; slot
   );
 }
 
-function Market({ m, now, slots }: { m: OpenMarket; now: number | null; slots: Record<string, number> }) {
-  const left = now == null ? (m.close_ts - m.open_ts) / 1000 : (m.close_ts - now) / 1000;
-  const span = (m.close_ts - m.open_ts) / 1000;
-  const frac = Math.min(1, Math.max(0, left / span));
+function Event({ ms, now, slots }: { ms: OpenMarket[]; now: number | null; slots: Record<string, number> }) {
+  const m0 = ms[0];
+  const left = now == null ? (m0.close_ts - m0.open_ts) / 1000 : (m0.close_ts - now) / 1000;
+  const frac = Math.min(1, Math.max(0, left / ((m0.close_ts - m0.open_ts) / 1000)));
   const closing = frac < 0.15;
+  const ladder = ms.length > 1;
+  const ref = m0.reference_value;
   return (
     <motion.div className={`market ${closing ? "closing" : ""}`} layout
       initial={{ opacity: 0, x: 24 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -24, transition: { duration: 0.2 } }}
       transition={{ type: "spring", stiffness: 380, damping: 32 }}>
       <div className="top">
         <span className="clock">{duration(left)}</span>
-        <span className="quote"><span>bid {cents(m.bid)}</span><span>ask {cents(m.ask)}</span></span>
+        {!ladder && <span className="quote"><span>bid {cents(m0.bid)}</span><span>ask {cents(m0.ask)}</span></span>}
       </div>
-      <div className="name" title={marketName(m.id)}>{seriesName(m.series)} · closes {clock(m.close_ts, false)}</div>
-      {m.held.length > 0 && (
-        <div className="held">
-          {m.held.map((h) => (
-            <span key={`${h.instance}-${h.side}`} className="chip">
-              <i className="swatch" style={{ ["--c" as string]: `var(--series-${slots[h.instance] ?? 1})` }} />
-              {h.instance} {h.qty} {h.side.toUpperCase()} @ {cents(h.avg)}
-            </span>
+      <div className="title" title={m0.id}>{m0.title}</div>
+      <div className="name">
+        {seriesName(m0.series)} · closes {closesAt(m0.close_ts, now)}
+        {ref != null && <> · now <b className="num">{fmtNum(ref)}{m0.unit}</b></>}
+        {!ladder && m0.strike != null && <> · strike <span className="num">{fmtNum(m0.strike)}</span></>}
+      </div>
+      {ladder ? (
+        <div className="outcomes">
+          {ms.map((m) => (
+            <div key={m.id} className="outcome">
+              <span className="label">{m.subtitle || m.id}</span>
+              <span className="quote"><span>{cents(m.bid)}</span><span>{cents(m.ask)}</span></span>
+              <Held m={m} slots={slots} />
+            </div>
           ))}
         </div>
+      ) : (
+        <Held m={m0} slots={slots} />
       )}
       <div className="drain" style={{ width: `${frac * 100}%` }} />
     </motion.div>
+  );
+}
+
+function Held({ m, slots }: { m: OpenMarket; slots: Record<string, number> }) {
+  if (!m.held.length) return null;
+  return (
+    <div className="held">
+      {m.held.map((h) => (
+        <span key={`${h.instance}-${h.side}`} className="chip">
+          <i className="swatch" style={{ ["--c" as string]: `var(--series-${slots[h.instance] ?? 1})` }} />
+          {h.instance} {h.qty} {h.side.toUpperCase()} @ {cents(h.avg)}
+        </span>
+      ))}
+    </div>
   );
 }

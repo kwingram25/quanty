@@ -39,6 +39,24 @@ class Market:
     def risk_group(self) -> str:
         return self.group or self.id
 
+    def describe(self) -> dict[str, object]:
+        """How to show this market, from its terms. Venues set what they know; the conventional keys:
+        title (the question), subtitle (this contract's outcome or range), event (markets sharing it
+        are outcomes of one question), strike, reference (the data key it settles against), unit.
+        """
+        t = self.terms
+        strike = t.get("strike", t.get("floor_strike", t.get("price_to_beat")))
+        series = self.series.split(":", 1)[-1]
+        subtitle = t.get("subtitle") or t.get("yes_sub_title") or ""
+        return {
+            "title": t.get("title") or series,
+            "subtitle": subtitle,
+            "event": t.get("event") or t.get("event_ticker") or self.id,
+            "strike": strike if isinstance(strike, int | float) else None,
+            "reference": t.get("reference") if isinstance(t.get("reference"), str) else None,
+            "unit": t.get("unit") if isinstance(t.get("unit"), str) else "",
+        }
+
     def tick_at(self, price: float) -> float:
         for start, end, step in self.tick_ranges:
             if start - EPS <= price < end - EPS:

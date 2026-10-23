@@ -21,6 +21,21 @@ class Base(DeclarativeBase):
     type_annotation_map = {cls: _enum(cls) for cls in (Side, Action, Tif, OrderStatus, Liquidity)}  # noqa: RUF012
 
 
+class MarketRow(Base):
+    """Markets the run's strategies trade, so a ledger can name what it traded."""
+
+    __tablename__ = "markets"
+
+    id: Mapped[str] = mapped_column(primary_key=True)
+    venue: Mapped[str]
+    series: Mapped[str]
+    open_ts: Mapped[int]
+    close_ts: Mapped[int]
+    title: Mapped[str]
+    subtitle: Mapped[str]
+    event: Mapped[str] = mapped_column(index=True)
+
+
 class OrderRow(Base):
     __tablename__ = "orders"
 

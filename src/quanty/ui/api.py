@@ -89,7 +89,7 @@ class Api:
         state = (session or {}).get("state", {})
         for iid in state.get("instances", {}):
             summaries.setdefault(iid, Summary(iid, 0, 0, 0, 0.0, 0.0, 0.0, 0, 0))
-        return {
+        snap: dict[str, Any] = {
             "run": {"name": r.name, "mode": r.mode, "file": f"{r.mode}/{r.path.name}", "last_ts": v.last_ts},
             "stats": {"pnl": v.pnl, "fills": v.fills, "errors": v.errors},
             "strategies": [_row(summaries[k]) for k in sorted(summaries)],
@@ -120,6 +120,10 @@ class Api:
             },
             "commands": history,
         }
+        shown = {a["market_id"] for a in snap["activity"]} | {p["market_id"] for p in snap["positions"]}
+        shown |= {i["market_id"] for i in snap["tape"] if "market_id" in i}
+        snap["names"] = queries.names(r, shown)
+        return snap
 
     def cursor(self, mode: str, name: str) -> dict[str, float]:
         """The latest row ids, to find what is new since the last push."""

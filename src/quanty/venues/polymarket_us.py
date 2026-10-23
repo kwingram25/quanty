@@ -183,6 +183,8 @@ class PolymarketUS(VenueFeed):
             "price_to_beat": _price(terms_in.get("priceToBeat")), "index": terms_in.get("indexSymbol"),
             "horizon": terms_in.get("horizon"), "settlement_price": _price(terms_in.get("settlementPrice")),
             "status": m.get("status"), "slug": slug,
+            "title": m.get("title") or m.get("question"), "subtitle": m.get("subtitle"),
+            "reference": f"cfbenchmarks:{terms_in['indexSymbol']}" if terms_in.get("indexSymbol") else None,
         }  # fmt: skip
         market = Market(
             id=f"{VENUE}:{slug}", venue=VENUE, series=self._series_of(slug), open_ts=start, close_ts=end,

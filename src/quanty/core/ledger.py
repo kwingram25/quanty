@@ -17,8 +17,8 @@ from quanty import db
 from quanty.core.events import Fill
 from quanty.core.orders import Order
 from quanty.core.portfolio import Settlement
-from quanty.core.types import Action, OrderStatus
-from quanty.db.models import FillRow, LogRow, OrderRow, SettlementRow
+from quanty.core.types import Action, Market, OrderStatus
+from quanty.db.models import FillRow, LogRow, MarketRow, OrderRow, SettlementRow
 
 FLUSH_EVERY = 5000
 
@@ -41,6 +41,7 @@ class Ledger:
         self.engine = db.connect(path)
         self.durable = durable
         self._orders: dict[str, dict[str, Any]] = {}  # latest state per order id
+        self._markets: dict[str, dict[str, Any]] = {}  # latest description per market id
         self._rows: dict[type[Any], list[dict[str, Any]]] = {FillRow: [], SettlementRow: [], LogRow: []}
         self._pending = 0
 
@@ -48,24 +49,64 @@ class Ledger:
 
     def order(self, o: Order) -> None:
         self._orders[o.id] = {
-            "id": o.id, "instance": o.instance, "market_id": o.market_id, "side": o.side,
-            "action": o.action, "price": o.price, "qty": o.qty, "tif": o.tif, "post_only": o.post_only,
-            "tag": o.tag, "created_ts": o.created_ts, "status": o.status, "filled": o.filled,
+            "id": o.id,
+            "instance": o.instance,
+            "market_id": o.market_id,
+            "side": o.side,
+            "action": o.action,
+            "price": o.price,
+            "qty": o.qty,
+            "tif": o.tif,
+            "post_only": o.post_only,
+            "tag": o.tag,
+            "created_ts": o.created_ts,
+            "status": o.status,
+            "filled": o.filled,
             "reason": o.reason,
-        }  # fmt: skip
+        }
+        self._wrote()
+
+    def market(self, m: Market) -> None:
+        d = m.describe()
+        self._markets[m.id] = {
+            "id": m.id,
+            "venue": m.venue,
+            "series": m.series,
+            "open_ts": m.open_ts,
+            "close_ts": m.close_ts,
+            "title": str(d["title"]),
+            "subtitle": str(d["subtitle"]),
+            "event": str(d["event"]),
+        }
         self._wrote()
 
     def fill(self, instance: str, f: Fill, realized: float) -> None:
         self._add(
-            FillRow, ts=f.ts, instance=instance, order_id=f.order_id, market_id=f.market_id, side=f.side,
-            action=f.action, price=f.price, qty=f.qty, fee=f.fee, liquidity=f.liquidity, realized=realized,
-        )  # fmt: skip
+            FillRow,
+            ts=f.ts,
+            instance=instance,
+            order_id=f.order_id,
+            market_id=f.market_id,
+            side=f.side,
+            action=f.action,
+            price=f.price,
+            qty=f.qty,
+            fee=f.fee,
+            liquidity=f.liquidity,
+            realized=realized,
+        )
 
     def settlement(self, s: Settlement) -> None:
         self._add(
-            SettlementRow, ts=s.ts, instance=s.instance, market_id=s.market_id, side=s.side, qty=s.qty,
-            payout=s.payout, pnl=s.pnl,
-        )  # fmt: skip
+            SettlementRow,
+            ts=s.ts,
+            instance=s.instance,
+            market_id=s.market_id,
+            side=s.side,
+            qty=s.qty,
+            payout=s.payout,
+            pnl=s.pnl,
+        )
 
     def log(
         self,
@@ -82,6 +123,12 @@ class Ledger:
         if not self._pending:
             return
         with self.engine.begin() as conn:
+            if self._markets:
+                ins = sqlite_insert(MarketRow)
+                cols = {c.name: ins.excluded[c.name] for c in MarketRow.__table__.columns if c.name != "id"}
+                conn.execute(
+                    ins.on_conflict_do_update(index_elements=["id"], set_=cols), list(self._markets.values())
+                )
             if self._orders:
                 stmt = sqlite_insert(OrderRow)
                 updates = {
@@ -95,6 +142,7 @@ class Ledger:
                 if rows:
                     conn.execute(insert(model), rows)
         self._orders.clear()
+        self._markets.clear()
         for rows in self._rows.values():
             rows.clear()
         self._pending = 0

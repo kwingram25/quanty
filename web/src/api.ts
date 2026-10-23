@@ -30,6 +30,13 @@ export interface Held { instance: string; side: string; qty: number; avg: number
 export interface OpenMarket {
   id: string;
   series: string;
+  title: string;
+  subtitle: string;
+  event: string;
+  strike: number | null;
+  reference: string | null;
+  reference_value: number | null;
+  unit: string;
   open_ts: number;
   close_ts: number;
   bid: number | null;
@@ -94,7 +101,10 @@ export interface Snapshot {
   tape: TapeItem[];
   session: SessionState | null;
   commands: CommandRow[];
+  names: Record<string, MarketName>;
 }
+
+export interface MarketName { title: string; subtitle: string; event: string; series: string }
 
 export interface FeedRow {
   feed: string;

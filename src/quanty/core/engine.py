@@ -344,6 +344,8 @@ class Engine:
         m = ev.market
         known = m.id in self.markets
         self.markets[m.id] = m
+        if any(i.strategy.wants(m) for i in self.instances.values()):
+            self.ledger.market(m)  # named in the ledger (and the dashboard)
         if m.id in self.open_markets:
             self.open_markets[m.id] = m
         if known:
