@@ -63,6 +63,7 @@ jobs:
           docker compose ps
           docker compose down
 
+  secrets:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
