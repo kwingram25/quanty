@@ -28,6 +28,19 @@ TICK_S = 0.01
 OnWindow = Callable[[list[Window], dict[str, Status]], None]
 
 
+class TaskCrashed(RuntimeError):
+    """A feed or the engine clock stopped with an error; the session stops too."""
+
+    def __init__(self, task: str, cause: BaseException) -> None:
+        super().__init__(f"{task.removeprefix('feed:')}: {cause}")
+        self.cause = cause
+
+    @property
+    def expected(self) -> bool:
+        """A setup problem with a message for the user (missing keys and the like), not a bug."""
+        return type(self.cause) is RuntimeError
+
+
 class RecordSession:
     """Runs feeds, records everything they receive, and tracks their health.
 
@@ -117,8 +130,8 @@ class RecordSession:
                     self._close_window(next_window, on_window)
                     next_window += self.window_ms
                 for t in tasks:
-                    if t.done() and not t.cancelled() and t.exception():
-                        raise RuntimeError(f"{t.get_name()} crashed") from t.exception()
+                    if t.done() and not t.cancelled() and (exc := t.exception()):
+                        raise TaskCrashed(t.get_name(), exc) from exc
         finally:
             self._close_window(now_ms(), on_window)  # before shutdown, which can take seconds
             for t in tasks:

@@ -119,3 +119,35 @@ def test_a_key_file_path_is_reported_not_raised(tmp_path: Path, monkeypatch: pyt
     monkeypatch.setenv("KALSHI_PRIVATE_KEY_PATH", str(tmp_path / "gone.pem"))
     got = checks(proj)["Kalshi"]
     assert got.status == "fail" and "KALSHI_SECRET_KEY" in got.fix
+
+
+def test_polymarket_only_projects_are_told_where_the_index_comes_from(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    proj = project(tmp_path, monkeypatch)
+    (proj / "feeds.toml").write_text(
+        '[feeds.polymarket_us]\nseries = [{ name = "btc_updown_15m", slug_prefix = "cpc-btc-updown-15m", '
+        "period_s = 900 }]\n"
+    )
+    got = checks(proj)["index data"]
+    assert got.status == "warn" and 'index_ids = ["BRTI"]' in got.fix
+    (proj / "feeds.toml").write_text(
+        (proj / "feeds.toml").read_text() + '[feeds.kalshi]\nseries = ["KXBTC15M"]\nindex_ids = ["BRTI"]\n'
+    )
+    assert "index data" not in checks(proj)
+
+
+def test_recording_without_keys_stops_with_the_reason(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from quanty.venues.auth import keys
+
+    project(tmp_path, monkeypatch)  # a Kalshi project, no keys anywhere
+    keys.cache_clear()
+    try:
+        res = CliRunner().invoke(
+            cli.app, ["record", "--config", "feeds.toml", "--data", "data", "--duration", "5"]
+        )
+    finally:
+        keys.cache_clear()
+    assert res.exit_code == 2 and "kalshi: KALSHI_KEY_ID is not set" in res.output, res.output

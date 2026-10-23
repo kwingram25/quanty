@@ -16,7 +16,7 @@ from quanty.feeds.base import Feed
 from quanty.feeds.health import Status, Window
 from quanty.feeds.recording import recorded_feeds, span
 from quanty.feeds.replay import Replay
-from quanty.feeds.session import RecordSession
+from quanty.feeds.session import RecordSession, TaskCrashed
 
 feeds_app = typer.Typer(help="Feed kinds and recorded feed health.", no_args_is_help=True)
 
@@ -103,6 +103,10 @@ def record(
     typer.echo(f"recording {', '.join(feeds)} to {data}/ (Ctrl-C to stop)")
     try:
         asyncio.run(session.run(duration, on_window=print_windows))
+    except TaskCrashed as exc:
+        if not exc.expected:
+            raise
+        raise _fail(exc) from None
     except KeyboardInterrupt:
         typer.echo("stopped")
 

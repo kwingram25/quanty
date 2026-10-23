@@ -9,7 +9,7 @@ behind the context decides what an order means.
 ```python
 from pydantic import Field
 
-from quanty.core import Book, Context, Params, Side, Strategy, Tif
+from quanty.core import Book, Context, Market, Params, Side, Strategy, Tif
 
 
 class EdgeParams(Params):
@@ -22,16 +22,29 @@ class Edge(Strategy[EdgeParams]):
     series = ("kalshi:KXHIGHNY",)  # markets to trade; empty = everything
     description = "Buy whichever side the model prices above the ask"
 
+    def __init__(self, params: EdgeParams) -> None:
+        super().__init__(params)
+        self.tried: set[str] = set()  # markets already bought in, filled or not
+
     def on_book(self, ctx: Context, book: Book) -> None:
-        if ctx.orders(book.market_id):  # one order at a time per market
+        mid = book.market_id
+        if mid in self.tried:  # once per market
             return
-        fair = self.model(ctx, book.market_id)  # P(YES), your code
+        fair = self.model(ctx, mid)  # P(YES), your code
         for side, prob in ((Side.YES, fair), (Side.NO, 1 - fair)):
             ask = book.ask(side)
             if ask is not None and prob - ask >= self.params.min_edge:
-                ctx.buy(book.market_id, side, ask, self.params.size, tif=Tif.IOC)
+                self.tried.add(mid)
+                ctx.buy(mid, side, ask, self.params.size, tif=Tif.IOC)
                 return
+
+    def on_market_close(self, ctx: Context, market: Market) -> None:
+        self.tried.discard(market.id)
 ```
+
+State on `self` is fine: each run builds a fresh instance, and nothing on `self` survives a restart.
+Track "already tried" yourself, as above, when it matters: `ctx.orders()` lists open orders only,
+so an IOC that missed or an order that was rejected leaves nothing there.
 
 `Params` are Pydantic models: typed, with defaults and descriptions, validated strictly when an
 experiment overrides them. `quanty params <strategy>` lists them.
@@ -68,13 +81,13 @@ order, with receive timestamps.
 | `ctx.now` | current event time, ms |
 | `ctx.markets()`, `ctx.market(id)` | open markets in your series |
 | `ctx.seconds_left(id)` | until the market closes |
-| `ctx.book(id)` | latest book: `bids`, `asks`, `book.bid(side)`, `book.ask(side)` in that side's terms |
+| `ctx.book(id)` | latest book: `bids`, `asks` as `(yes_price, size)` levels; `book.ask(side)` is the price to buy that side now (NO: 1 − the best YES bid), `book.bid(side)` to sell it; top of book, None when empty |
 | `ctx.latest(key)` | latest data event for a key, e.g. `"cfbenchmarks:BRTI"` |
 | `ctx.signal(name)` | a derived value declared in the experiment (`last`, `ewma`, `realized_vol`) |
 | `ctx.position(id, side)` | contracts held |
 | `ctx.outcomes(id)` | the open markets of the same question, when at most one can win |
-| `ctx.orders(id=None)` | your open orders |
-| `ctx.buy(id, side, price, qty, tif=, post_only=, tag=)` | place a buy; returns the `Order` |
+| `ctx.orders(id=None)` | your open orders (filled, canceled and rejected ones are gone) |
+| `ctx.buy(id, side, price, qty, tif=, post_only=, tag=)` | place a buy; returns the `Order` (`.status`, `.reason`) |
 | `ctx.sell(...)` | sell contracts you hold (no shorting: to bet against YES, buy NO) |
 | `ctx.cancel(order)`, `ctx.cancel_all(id=None)` | |
 | `ctx.log(msg, **fields)` | into the ledger, shown in the dashboard |
@@ -141,8 +154,11 @@ and read them with `ctx.signal("btc_vol")` (None until there is enough data).
 
 ## Testing a strategy
 
-- `quanty demo --strategy my_idea` runs it on synthetic markets (it must trade the
-  `synthetic:updown_5m` series, or have an empty `series`).
+- `quanty demo --strategy my_idea` runs it on synthetic markets, in seconds and without keys. A
+  strategy written for a venue's series is pointed at the synthetic up/down series for the run.
+  In an experiment, `series = ["synthetic:updown_5m"]` in an `[[instances]]` entry does the same.
+- `--ledger data/backtest/<name>.sqlite` keeps the run; `quanty ui --data data` then shows every
+  trade with its outcome, or query its `orders`, `fills`, `settlements` and `markets` tables.
 - `quanty backtest experiment.toml --data data` runs it on your recordings.
 - The simulated broker models latency, taker fills against the book, queue position for resting
   orders and post-only rejects. `QueueModel` options make it more or less conservative.

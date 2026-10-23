@@ -72,3 +72,15 @@ def test_strategy_class_needs_exactly_one(tmp_path: Path) -> None:
     for name in ("none", "two"):
         with pytest.raises(ValueError, match="exactly one"):
             experiment.strategy_class(found[name])
+
+
+def test_an_instance_can_trade_other_series(strategies: dict[str, ModuleType]) -> None:
+    raw = {
+        "instances": [
+            {"id": "a", "strategy": "example_favorite", "series": ["synthetic:updown_5m"]},
+            {"id": "b", "strategy": "example_favorite"},
+        ]
+    }
+    a, b = experiment.build(experiment.parse(raw), strategies)
+    assert a.strategy.series == ("synthetic:updown_5m",)
+    assert b.strategy.series == type(b.strategy).series and len(b.strategy.series) == 3  # the file's own

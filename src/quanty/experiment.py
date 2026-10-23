@@ -83,6 +83,8 @@ class InstanceSpec(ConfigModel):
     broker: str | None = None
     params: dict[str, Any] = Field(default_factory=dict)
     limits: Limits = Limits()
+    # markets to trade in place of the strategy's own series (e.g. synthetic ones, to try it out)
+    series: list[str] | None = None
 
 
 def _default_brokers() -> dict[str, BrokerConfig]:
@@ -160,7 +162,10 @@ def build(
             raise ValueError(f"instance {spec.id}: no strategy named {spec.strategy!r}")
         cls = strategy_class(strategies[spec.strategy])
         params = cls.params_type.from_config(spec.params, where=f"{spec.id}.params")
-        out.append(Instance(spec.id, cls(params), brokers[exp.broker_of(spec)], spec.limits))
+        strategy = cls(params)
+        if spec.series is not None:
+            strategy.series = tuple(spec.series)
+        out.append(Instance(spec.id, strategy, brokers[exp.broker_of(spec)], spec.limits))
     return out
 
 

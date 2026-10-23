@@ -23,7 +23,9 @@ class Strategy[P: Params]:
     """
 
     params_type: ClassVar[type[Params]] = Params
-    series: ClassVar[tuple[str, ...]] = ()  # series to trade ("<venue>:<series>"); empty = all
+    series: tuple[
+        str, ...
+    ] = ()  # series to trade ("<venue>:<series>"); empty = all. An experiment may override it
     description: ClassVar[str] = ""
 
     def __init__(self, params: P) -> None:

@@ -255,4 +255,5 @@ def _book(market_id: str, ts: int, mid: float, spread: float, rng: random.Random
     asks = tuple(
         (round(ask + i * 0.01, 2), rng.randint(20, 300)) for i in range(3) if ask + i * 0.01 <= 0.99 + 1e-9
     )
+    asks = tuple(lv for lv in asks if lv[0] >= 0.01 - 1e-9)  # nor fall to $0 (a mid below zero), same way
     return Book(ts=ts, market_id=market_id, bids=bids, asks=asks)

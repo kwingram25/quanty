@@ -130,3 +130,39 @@ def test_multi_series_markets_overlap_in_time_order() -> None:
     assert opened == {"synthetic:updown_5m": 25, "synthetic:updown_15m": 9, "synthetic:updown_1h": 3}
     assert sum(isinstance(e, Settled) for e in ev) == 34  # the last of each series is still open
     assert ev == list(synthetic.events_multi(synthetic.Spec(hours=2, seed=1)))  # deterministic
+
+
+def test_backtest_says_why_a_venue_strategy_cannot_trade_synthetic_markets(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from quanty.init import Answers, create
+
+    create(tmp_path / "p", Answers(strategy="kx"), vendor=False)  # trades kalshi:KXBTC15M
+    monkeypatch.chdir(tmp_path / "p")  # its strategies/ folder is found from here
+    res = runner.invoke(cli.app, ["backtest", "experiments/main.toml", "--hours", "0.5"])
+    assert res.exit_code == 0, res.output
+    assert "kx trades kalshi:KXBTC15M" in res.stderr and "--data data" in res.stderr
+
+
+def test_demo_tries_a_venue_strategy_on_synthetic_markets(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from quanty.init import Answers, create
+
+    create(tmp_path / "p", Answers(strategy="kx"), vendor=False)  # the skeleton trades kalshi:KXBTC15M
+    src = tmp_path / "p" / "strategies" / "kx.py"
+    src.write_text(src.read_text().replace("return None\n", "return 0.5\n", 1))  # a model: always 50%
+    monkeypatch.chdir(tmp_path / "p")
+    res = runner.invoke(cli.app, ["demo", "--strategy", "kx", "--hours", "1"])
+    assert res.exit_code == 0, res.output
+    assert "trying it on synthetic:updown_5m" in res.stderr
+    row = next(line for line in res.stdout.splitlines() if line.startswith("kx "))
+    assert int(row.split()[1]) > 0  # it placed orders
+
+
+def test_synthetic_books_stay_between_one_and_99_cents() -> None:
+    from quanty.core import Book
+
+    for ev in synthetic.events(synthetic.Spec(hours=24, seed=1)):
+        if isinstance(ev, Book):
+            assert all(0.01 - 1e-9 <= p <= 0.99 + 1e-9 for p, _ in ev.bids + ev.asks), ev

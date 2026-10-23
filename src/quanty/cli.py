@@ -27,7 +27,7 @@ from quanty.core import Engine, Event, Ledger, Summary
 from quanty.feeds.cli import feeds_app, load_feeds, print_windows, record, recorded, recorded_range, replay
 from quanty.feeds.health import Status, Window
 from quanty.feeds.replay import Replay
-from quanty.feeds.session import RecordSession
+from quanty.feeds.session import RecordSession, TaskCrashed
 
 app = typer.Typer(help=__doc__, no_args_is_help=True, add_completion=False)
 app.command()(record)
@@ -150,6 +150,8 @@ def demo(
             ]
         if live and not param and strategy == "example_favorite":  # the live demo also has range markets
             instances.append({"id": "temp_buckets", "strategy": "example_bucket", "params": {}})
+        if (own := _synthetic_series(strategy, live)) is not None:
+            instances[0]["series"] = own
         raw = {"brokers": {"sim": {"kind": "sim", "latency_ms": latency_ms}}, "instances": instances}
         if ui and ledger is not None:
             raise ValueError("--ui keeps its ledger in a temporary demo folder; leave out --ledger")
@@ -181,6 +183,20 @@ def demo(
         if browser:
             threading.Timer(1.0, webbrowser.open, args=[url]).start()
         uvicorn.run(create_app(data), host="127.0.0.1", port=port, log_level="warning")
+
+
+def _synthetic_series(strategy: str, live: bool) -> list[str] | None:
+    """For a strategy written for a venue's series: the synthetic up/down series to try it on
+    instead (None when it already trades them, or trades everything)."""
+    module = _strategies().get(strategy)
+    if module is None:
+        return None  # reported by the experiment
+    series = experiment.strategy_class(module).series
+    synth = [f"{synthetic.VENUE}:updown_{w}" for w in (("5m", "15m", "1h") if live else ("5m",))]
+    if not series or any(s in series for s in synth):
+        return None
+    typer.echo(f"note: {strategy} trades {', '.join(series)}; trying it on {', '.join(synth)}", err=True)
+    return synth
 
 
 @app.command()
@@ -456,6 +472,10 @@ def _session(
     typer.echo(f"{verb} {', '.join(ids)} on {', '.join(feed_objs)}; ledger {ledger_path} (Ctrl-C to stop)")
     try:
         asyncio.run(session.run(duration, on_window=report))
+    except TaskCrashed as exc:
+        if not exc.expected:
+            raise
+        raise _fail(exc) from None
     except KeyboardInterrupt:
         typer.echo("stopped")
     finally:
@@ -605,6 +625,17 @@ def _backtest(
         spec = synthetic.Spec(hours=hours, seed=seed)
         events = synthetic.events(spec)
         typer.echo(f"synthetic {spec.series}: {hours:g} h, seed {seed}")
+        for inst in instances:  # a strategy for a venue's series never sees a synthetic market
+            series = inst.strategy.series
+            if series and spec.series not in series:
+                name = type(inst.strategy).__module__.rsplit(".", 1)[-1]
+                typer.echo(
+                    f"note: {inst.id} trades {', '.join(series)}; synthetic markets are only {spec.series}, "
+                    f"so it can't trade here. Try it on them with `quanty demo --strategy {name}` (or "
+                    f'series = ["{spec.series}"] in its [[instances]] entry), or record its venue '
+                    "(quanty record --config feeds.toml --duration 3600) and backtest with --data data.",
+                    err=True,
+                )
     engine.run(events)
     _print_summary(ledger.summary(), [i.id for i in instances])
     for sig in signals:

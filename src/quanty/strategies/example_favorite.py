@@ -7,7 +7,7 @@ This shows the shape of a strategy, not a tuned edge. It trades the synthetic up
 from pydantic import Field
 
 from quanty.core import Book, Context, IndexValue, Params, Side, Strategy, Tif
-from quanty.synthetic import INDEX_KEY, p_up
+from quanty.synthetic import p_up
 
 
 class FavoriteParams(Params):
@@ -45,8 +45,10 @@ class FavoriteLate(Strategy[FavoriteParams]):
             ctx.buy(mid, side, price, p.size, tif=Tif.IOC, tag="favorite")
 
     def fair_yes(self, ctx: Context, market_id: str, seconds_left: float) -> float | None:
-        index = ctx.latest(INDEX_KEY)
-        strike = ctx.market(market_id).terms.get("strike")
+        # what the market settles on: the value it references, against its strike
+        m = ctx.market(market_id).describe()
+        index = ctx.latest(str(m["reference"])) if m["reference"] else None
+        strike = m["strike"]
         if not isinstance(index, IndexValue) or not isinstance(strike, float):
             return None
         return p_up(index.value, strike, seconds_left, self.params.vol_per_s)

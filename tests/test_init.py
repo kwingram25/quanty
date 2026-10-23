@@ -87,3 +87,18 @@ def test_deploy_files(tmp_path: Path) -> None:
     )
     cloud = (tmp_path / "My Bot" / "deploy" / "cloud-init.yaml").read_text()
     assert cloud.startswith("#cloud-config\n") and "get.docker.com" in cloud and "ufw --force enable" in cloud
+
+
+def test_project_guides_for_assistants(tmp_path: Path) -> None:
+    create(tmp_path / "p", Answers(strategy="edge_finder", venues=["polymarket_us"]), vendor=False)
+    guide = (tmp_path / "p" / "AGENTS.md").read_text()
+    assert "strategies/edge_finder.py" in guide and 'series = ("polymarket_us:btc_updown_15m",)' in guide
+    assert "Never run `quanty live`" in guide and "Never read, print or edit `.env`" in guide
+    assert (tmp_path / "p" / "CLAUDE.md").read_text() == "@AGENTS.md\n"  # Claude Code reads the same
+
+
+def test_polymarket_projects_say_where_the_index_comes_from(tmp_path: Path) -> None:
+    create(tmp_path / "pm", Answers(venues=["polymarket_us"]), vendor=False)
+    assert '# index_ids = ["BRTI"]' in (tmp_path / "pm" / "feeds.toml").read_text()
+    create(tmp_path / "both", Answers(venues=["kalshi", "polymarket_us"]), vendor=False)
+    assert "# index_ids" not in (tmp_path / "both" / "feeds.toml").read_text()  # Kalshi's feed has it

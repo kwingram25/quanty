@@ -81,6 +81,7 @@ class VenueFeed(WebSocketFeed):
         return frozenset(w.id for w in self.windows.values() if w.open_ts - ahead <= now < w.close_ts + after)
 
     async def run(self, sink: Sink) -> None:
+        self.headers()  # missing or bad keys fail here, before anything is recorded
         async with httpx.AsyncClient(timeout=10, transport=self.transport) as client:
             disc = asyncio.create_task(self._discover_forever(client, sink))
             conn: asyncio.Task[None] | None = None
@@ -106,8 +107,9 @@ class VenueFeed(WebSocketFeed):
                             if old is not None:
                                 await asyncio.sleep(self.overlap_s if conn else 0)
                                 old.cancel()
-                    if disc.done():
-                        disc.result()  # surface a crash
+                    for task in (disc, conn):
+                        if task is not None and task.done() and not task.cancelled():
+                            task.result()  # surface a crash (the connection's too: keys, signing)
                     await asyncio.sleep(1)
             finally:
                 for task in (disc, conn):

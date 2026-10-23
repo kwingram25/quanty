@@ -12,6 +12,7 @@ my-quanty/
   vendor/                  a quanty wheel, when init runs from a source checkout
   pyproject.toml           so `uv run quanty ...` works here with nothing installed first
   README.md                next steps
+  AGENTS.md, CLAUDE.md     how to work here, for AI coding assistants (Claude Code reads CLAUDE.md)
 """
 
 import os
@@ -68,6 +69,8 @@ def files(a: Answers, name: str = "my-quanty") -> dict[str, str]:
         "deploy/cloud-init.yaml": CLOUD_INIT,
         "fly.toml": FLY.format(app=name),
         "README.md": _readme(a, name),
+        "AGENTS.md": _agents(a, first),
+        "CLAUDE.md": "@AGENTS.md\n",
     }
 
 
@@ -186,6 +189,16 @@ def _feeds(a: Answers) -> str:
             prefix, period = PM_SERIES.get(name, (name.replace("_", "-"), 900))
             out.append(f'  {{ name = "{name}", slug_prefix = "{prefix}", period_s = {period} }},')
         out += ["]", ""]
+        if "kalshi" not in a.venues:
+            out += [
+                "# These markets settle on CF Benchmarks' BRTI index (cfbenchmarks:BRTI), which only",
+                "# Kalshi's feed streams. For strategies that compare the index with the strike, add",
+                "# Kalshi keys to .env and uncomment:",
+                "# [feeds.kalshi]",
+                '# series = ["KXBTC15M"]',
+                '# index_ids = ["BRTI"]',
+                "",
+            ]
     if not a.venues:
         out += ["[feeds.coinbase]   # public data, no keys", 'products = ["BTC-USD"]', ""]
     return "\n".join(out)
@@ -228,6 +241,141 @@ def _strategy(name: str, series: str) -> str:
     return text.replace("Strategy[MyParams]", f"Strategy[{cls}Params]").replace(
         "= MyParams", f"= {cls}Params"
     )
+
+
+def _agents(a: Answers, series: str) -> str:
+    return f"""# Working in this project
+
+A quanty project: trading strategies for repeated binary prediction markets (Kalshi, Polymarket US),
+run the same way in backtest, paper (simulated fills), shadow (orders checked by the venue, not
+placed) and live. Run everything through `uv run quanty …`; the first run sets up `.venv/`.
+
+## Files
+
+- `strategies/{a.strategy}.py`: the strategy (one `Strategy` subclass per file). New strategies go in
+  `strategies/<name>.py`; the file name is the strategy's name. `quanty list` can also show
+  strategies from folders in the user's `~/.config/quanty/config.toml`; leave those alone and don't
+  reuse their names.
+- `experiments/main.toml`: which strategies run (`[[instances]]`), their params, their broker
+  (`kind = "sim"`, `"shadow"` or `"live"`) and risk limits.
+- `feeds.toml`: the venues and series to connect to. `.env`: API keys.
+
+## Rules
+
+- **Never run `quanty live`, never set `kind = "live"` or `QUANTY_MODE=live`, and never raise
+  `max_qty`, `max_notional` or `[limits]`, unless the user explicitly asks.** These place or permit
+  real orders with real money.
+- **Never read, print or edit `.env`** (API keys). `uv run quanty doctor` checks it without showing it.
+- A strategy only reads events and acts through `ctx`: no network calls, files, clocks
+  (`time.time()`) or randomness of its own, so backtests replay exactly what live would do. State on
+  `self` is fine (each run builds a fresh instance; nothing on `self` survives a restart).
+- Read `self.params` when deciding, not once at startup: params can be edited while a session runs.
+
+## Writing a strategy
+
+```python
+from pydantic import Field
+
+from quanty.core import Book, Context, Market, Params, Side, Strategy, Tif
+
+
+class EdgeParams(Params):
+    min_edge: float = Field(0.02, ge=0, description="Buy when the model beats the price by this much")
+    size: int = Field(10, gt=0, description="Contracts per order")
+
+
+class Edge(Strategy[EdgeParams]):
+    params_type = EdgeParams
+    series = ("{series}",)  # "<venue>:<series>"; empty = every market
+    description = "One line on what it does"
+
+    def __init__(self, params: EdgeParams) -> None:
+        super().__init__(params)
+        self.tried: set[str] = set()  # markets already bought in, filled or not
+
+    def on_book(self, ctx: Context, book: Book) -> None:
+        mid = book.market_id
+        if mid in self.tried:
+            return
+        fair = 0.5  # P(YES): the model goes here
+        for side, prob in ((Side.YES, fair), (Side.NO, 1 - fair)):
+            ask = book.ask(side)
+            if ask is not None and prob - ask >= self.params.min_edge:
+                self.tried.add(mid)  # once per market: an IOC that misses leaves no order behind
+                ctx.buy(mid, side, ask, self.params.size, tif=Tif.IOC)
+                return
+
+    def on_market_close(self, ctx: Context, market: Market) -> None:
+        self.tried.discard(market.id)
+```
+
+**Prices** are in the terms of the side named, in dollars per contract that pays $1: buying NO at
+0.97 pays 97¢ for $1 if NO wins. `book.ask(side)` is the price to buy that side now (YES: the best
+ask; NO: 1 − the best YES bid) and `book.bid(side)` the price to sell it; both are top of book only,
+and None when that side is empty. `book.asks` / `book.bids` hold the levels as
+`(yes_price, size)`.
+
+**Markets**: `ctx.market(id)` has `.series`, `.close_ts` and `.terms`, and `.describe()` gives
+`title`, `subtitle`, `event`, `strike` (the threshold, if any: Kalshi's `floor_strike`, Polymarket
+US's price to beat), `reference` (the data key it settles against) and `unit`. For an up/down
+market: `m = ctx.market(mid).describe()`, then `ctx.latest(m["reference"])` is the index's latest
+value event (`.value`; None until one arrives), to compare with `m["strike"]`.
+
+**Index data** only arrives if a feed streams it. BTC up/down markets on both venues settle on
+`cfbenchmarks:BRTI`, which only the Kalshi feed streams (`index_ids = ["BRTI"]` under
+`[feeds.kalshi]` in `feeds.toml`, with Kalshi keys); synthetic markets settle on `synthetic:index`,
+always present. A strategy that waits for the index does nothing without it, so log once when it's
+missing; `quanty doctor` warns when no feed provides it.
+
+**Hooks** (override what you need): `on_start(ctx)`, `on_market_open(ctx, market)`,
+`on_book(ctx, book)`, `on_trade(ctx, trade)`, `on_data(ctx, event)` (index values and other data),
+`on_clock(ctx, clock)`, `on_fill(ctx, fill)`, `on_order(ctx, order)`, `on_market_close(ctx, market)`,
+then later `on_settled(ctx, market, outcome)`, and `on_params(ctx, old)` after a params edit.
+
+**`ctx`**: `now` (ms), `markets()`, `market(id)`, `seconds_left(id)`, `book(id)`,
+`latest(key)` (the latest data event, `.value`, e.g. for `"cfbenchmarks:BRTI"`), `signal(name)`,
+`position(id, side)` (contracts held), `orders(id)` (*open* orders only: filled, canceled and
+rejected ones are gone), `outcomes(id)`, `buy(id, side, price, qty, tif=, post_only=, tag=)`,
+`sell(...)` (only what you hold), `cancel(order)`, `cancel_all(id)`, `log(msg, **fields)` (plain
+values: numbers, strings, lists, dicts). `buy`/`sell` return the `Order`: an order that breaks a rule
+(price outside 0–1, tick size, a risk limit, market closed) comes back with `.status` REJECTED and a
+`.reason` instead of raising. `Tif.IOC` takes what is there and cancels the rest; the default `GTC`
+rests until filled, canceled or the market closes.
+
+Full reference: {REPO}/blob/main/docs/strategies.md (may be private). Working examples, in the
+installed package: `.venv/lib/python3.*/site-packages/quanty/strategies/example_favorite.py` (a
+probability model from an index) and `example_bucket.py` (range markets).
+
+## Checking your work
+
+1. `uv run quanty list` shows the strategy (an import error shows here), and
+   `uv run quanty params <name>` its params.
+2. `uv run quanty demo --strategy <name>` runs it on built-in synthetic markets: no keys, a few
+   seconds. A strategy written for a venue's series is pointed at the synthetic 5-minute up/down
+   series (`synthetic:updown_5m`, settling on the index `synthetic:index`) automatically; add
+   `--param size=2` to override params, `--seed N` for another day, `--hours N` for longer.
+3. To check *what* it did, not just the totals: add `--ledger data/backtest/<name>.sqlite` (a new
+   file each run: it refuses to overwrite), then either `uv run quanty ui --data data` (the
+   dashboard: every trade with its outcome) or query the SQLite tables `orders`, `fills`,
+   `settlements`, `markets` and `logs` (times in ms, `side` is `yes`/`no`, `logs.fields` is JSON
+   from `ctx.log`, settlement `pnl` is after fees).
+4. Add it to `experiments/main.toml` (an `[[instances]]` entry) to run it with the others. Without
+   `--data`, `uv run quanty backtest experiments/main.toml` uses synthetic markets, where only
+   instances trading synthetic series trade (it says which can't). Don't put a synthetic `series`
+   override in `main.toml`, which paper and live use too; for synthetic runs use `quanty demo`, or
+   a separate `experiments/synthetic.toml` whose `[[instances]]` set `series = ["synthetic:updown_5m"]`.
+5. On real markets: `uv run quanty record --config feeds.toml --data data --duration 3600` (needs
+   each venue's keys in `.env`; without them it stops with an error), then
+   `uv run quanty backtest experiments/main.toml --data data`.
+6. `uv run quanty paper experiments/main.toml --feeds feeds.toml --data data --ui` paper trades live
+   markets with the dashboard on http://127.0.0.1:8765. It runs until stopped: ask before starting
+   it, and stop it when done.
+
+A backtest prints, per instance: orders, rejected, fills, contracts, fees, markets won and lost,
+and realized P&L in dollars. Zero orders usually means the series doesn't match (it says so) or the
+entry conditions never held. Synthetic markets test logic, not edge: a profit there says nothing
+about a real venue.
+"""
 
 
 def _readme(a: Answers, name: str) -> str:

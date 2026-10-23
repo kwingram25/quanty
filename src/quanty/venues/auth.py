@@ -35,7 +35,7 @@ def keys() -> Keys:
 
 def _need(value: SecretStr | None, name: str) -> str:
     if value is None or not value.get_secret_value().strip():
-        raise RuntimeError(f"{name} is not set (in the environment or .env); see .env.example")
+        raise RuntimeError(f"{name} is not set: add it to .env (or the environment)")
     return value.get_secret_value().strip().strip('"')
 
 

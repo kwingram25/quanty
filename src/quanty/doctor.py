@@ -100,12 +100,18 @@ def _config(out: list[Check], project: Path, experiments: list[Path], feeds: Pat
         )
     else:
         try:
-            kinds = {f.config.kind for f in load_feeds(feeds, None).values()}
+            loaded = load_feeds(feeds, None)
+            kinds = {f.config.kind for f in loaded.values()}
         except (ValueError, OSError) as exc:
             out.append(Check(sec, "feeds.toml", "fail", str(exc).splitlines()[0], "fix the field it names"))
         else:
             out.append(Check(sec, "feeds.toml", "ok", ", ".join(sorted(kinds))))
             venues |= kinds
+            indexes = {i for f in loaded.values() for i in getattr(f.config, "index_ids", ())}
+            if "polymarket_us" in kinds and "BRTI" not in indexes:
+                detail = "Polymarket US BTC markets settle on cfbenchmarks:BRTI; no feed here streams it"
+                fix = 'add [feeds.kalshi] with index_ids = ["BRTI"] (needs Kalshi keys)'
+                out.append(Check(sec, "index data", "warn", detail, fix))
     return venues & set(VENUES)
 
 
