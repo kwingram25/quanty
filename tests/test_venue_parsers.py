@@ -20,7 +20,7 @@ from venue_msgs import (
 )
 
 from quanty import feeds
-from quanty.core import Action, Book, IndexValue, Liquidity, MarketOpen, MarketTrade, Settled, Side
+from quanty.core import Action, Book, IndexValue, Liquidity, MarketOpen, MarketTrade, Settled, Side, Status
 from quanty.feeds.base import Link, Raw
 from quanty.venues import auth
 from quanty.venues.kalshi import Kalshi
@@ -94,8 +94,12 @@ def test_kalshi_book_from_snapshot_and_deltas() -> None:
 def test_kalshi_sequence_gap_is_reported_and_reconnect_resets() -> None:
     k = kalshi()
     k.parse(raw(k_snapshot(TK, yes=[("0.40", "10")], no=[("0.55", "3")])))
-    with pytest.raises(ValueError, match="sequence gap"):
-        k.parse(raw(k_delta(TK, "yes", "0.42", "1", seq=5)))
+    events = k.parse(raw(k_delta(TK, "yes", "0.42", "1", seq=5)))  # 2..4 missing
+    assert isinstance(events[0], Book) and events[0].bids[0] == (0.42, 1.0)  # the update still applies
+    assert (
+        isinstance(events[1], Status) and events[1].key == "kalshi:seq_gap" and "2 -> 5" not in events[1].text
+    )
+    assert "1 -> 5" in events[1].text
     assert k.parse(raw(k_delta(TK, "yes", "0.44", "1", seq=1))) != []  # seq 1: a new subscription, not a gap
     k.on_link(Link("v", T0, "up"))
     assert k.parse(raw(k_delta(TK, "yes", "0.43", "1", seq=6))) == []  # no snapshot yet on this connection
@@ -235,3 +239,22 @@ def test_missing_keys_name_the_variable(monkeypatch: pytest.MonkeyPatch) -> None
         auth.PolymarketSigner.from_env()
     secret = auth.Keys(_env_file=None, polymarket_secret_key="abc")
     assert "abc" not in repr(secret)  # SecretStr keeps keys out of logs and reprs
+
+
+def test_kalshi_ignores_other_series() -> None:
+    k = kalshi(series=["KXBTC15M"])
+    other = "KXETH15M-26OCT230015-15"
+    assert k.parse(raw(k_snapshot(other, yes=[("0.40", "1")], no=[("0.50", "1")]))) == []
+    assert k.parse(raw(k_trade(other, "z", "0.5", "1", "yes"))) == []
+    assert k.parse(raw(kalshi_rest([kalshi_market(other, T0, T0 + 15 * MIN)], series="KXETH15M"))) == []
+    assert k.parse(raw(k_trade(TK, "y", "0.5", "1", "yes"))) != []
+
+
+def test_kalshi_sequence_spans_series() -> None:
+    """Sequence numbers count every market on a subscription, so skipped series still advance them."""
+    k = kalshi(series=["KXBTC15M"])
+    other = "KXETH15M-26OCT230015-15"
+    k.parse(raw(k_snapshot(TK, yes=[("0.40", "1")], no=[("0.50", "1")], seq=1)))
+    assert k.parse(raw(k_delta(other, "yes", "0.40", "1", seq=2))) == []
+    events = k.parse(raw(k_delta(TK, "yes", "0.41", "1", seq=3)))
+    assert not any(isinstance(e, Status) for e in events)

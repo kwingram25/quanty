@@ -4,6 +4,7 @@ Discovery uses the public REST API (no key); the WebSocket needs a key (KALSHI_K
 """
 
 import json
+import re
 from datetime import datetime
 from typing import Any, ClassVar, Literal
 
@@ -13,7 +14,7 @@ from pydantic import Field, NonNegativeFloat, PositiveFloat
 from sortedcontainers import SortedDict
 from websockets.asyncio.client import ClientConnection
 
-from quanty.core.events import Book, Event, IndexValue, MarketOpen, MarketTrade, Settled
+from quanty.core.events import Book, Event, IndexValue, MarketOpen, MarketTrade, Settled, Status
 from quanty.core.fees import QuadraticFee
 from quanty.core.types import Action, Market, Side
 from quanty.feeds.base import FeedConfig, Link, Raw, Sink, now_ms
@@ -22,6 +23,7 @@ from quanty.venues.base import VenueConfig, VenueFeed, Window, same_book, top
 
 VENUE = "kalshi"
 WS_PATH = "/trade-api/ws/v2"
+_BOOK_SEQ = re.compile(r'\{\s*"type"\s*:\s*"(orderbook_\w+)"\s*,\s*"sid"\s*:\s*(\d+)\s*,\s*"seq"\s*:\s*(\d+)')
 TERM_FIELDS = (
     "floor_strike",
     "cap_strike",
@@ -72,7 +74,7 @@ class Kalshi(VenueFeed):
 
     Books are rebuilt from the snapshot and deltas Kalshi sends (bids only on each side: YES
     asks are 1 − NO bids) and emitted when the top book_depth levels change. A sequence gap is
-    reported as a parse error, since the book may be wrong until the next snapshot.
+    reported as a Status event keyed "<feed>:seq_gap", since books may be wrong until the next snapshot.
     """
 
     kind = "kalshi"
@@ -97,6 +99,7 @@ class Kalshi(VenueFeed):
         self._last_book: dict[str, Book] = {}
         self._seq: dict[int, int] = {}
         self._trade_ids: dict[str, None] = {}
+        self._ticker_marks = tuple(f'"{s}-' for s in self.config.series)  # tickers start "<series>-"
 
     # --- transport ---
 
@@ -179,8 +182,35 @@ class Kalshi(VenueFeed):
             self._seq.clear()
 
     def parse(self, raw: Raw) -> list[Event]:
-        msg = orjson.loads(raw.text)
+        text = raw.text
+        gap = self._seq_gap(
+            text
+        )  # every book message counts, including other series' (sequences are per subscription)
+        # only this feed's series: skip other markets' books and trades before decoding them
+        skip = "market_ticker" in text and not any(m in text for m in self._ticker_marks)
+        events = [] if skip else self._decode(raw, text)
+        if gap:
+            events.append(Status(ts=raw.t, key=f"{self.name}:seq_gap", text=gap))
+        return events
+
+    def _seq_gap(self, text: str) -> str:
+        """Description of a sequence gap on an order book subscription, or ""."""
+        m = _BOOK_SEQ.match(text)
+        if m is None:
+            return ""
+        kind, sid, seq = m[1], int(m[2]), int(m[3])
+        prev = self._seq.get(sid)
+        self._seq[sid] = seq
+        # seq 1 starts a fresh subscription (also how a reconnect shows in recordings without link events)
+        if kind == "orderbook_delta" and prev is not None and seq not in (1, prev + 1):
+            return f"sid {sid}: seq {prev} -> {seq}; books may be stale until the next snapshot"
+        return ""
+
+    def _decode(self, raw: Raw, text: str) -> list[Event]:
+        msg = orjson.loads(text)
         if "rest" in msg:
+            if msg["params"].get("series") not in self.config.series:
+                return []
             return self._parse_markets(raw, msg)
         kind = msg.get("type")
         if kind in ("orderbook_snapshot", "orderbook_delta"):
@@ -226,13 +256,8 @@ class Kalshi(VenueFeed):
         return out
 
     def _parse_book(self, raw: Raw, msg: dict[str, Any]) -> list[Event]:
-        sid, seq, body = msg.get("sid"), msg.get("seq"), msg["msg"]
+        body = msg["msg"]
         ticker = body["market_ticker"]
-        gap = False
-        if sid is not None and seq is not None:
-            # seq 1 starts a fresh subscription (also how a reconnect shows in recordings without link events)
-            gap = msg["type"] == "orderbook_delta" and sid in self._seq and seq not in (1, self._seq[sid] + 1)
-            self._seq[sid] = seq
         if msg["type"] == "orderbook_snapshot":
             self._books[ticker] = (
                 SortedDict({round(float(p), 4): float(q) for p, q in body.get("yes_dollars_fp", [])}),
@@ -254,8 +279,6 @@ class Kalshi(VenueFeed):
         if not same_book(self._last_book.get(ticker), book):
             self._last_book[ticker] = book
             out.append(book)
-        if gap:
-            raise ValueError(f"kalshi sequence gap on sid {sid} at seq {seq}; {ticker} book may be stale")
         return out
 
     def _book(self, t: int, src: int | None, ticker: str) -> Book:
