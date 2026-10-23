@@ -7,6 +7,7 @@ import { ToastProvider } from "./components/Toasts";
 import { FeedsPage } from "./pages/Feeds";
 import { RunPage } from "./pages/Run";
 import { RunsPage } from "./pages/Runs";
+import { setZone, useZone, zoneName } from "./format";
 import "./styles.css";
 
 function ThemeToggle() {
@@ -23,6 +24,18 @@ function ThemeToggle() {
   return (
     <button className="icon-btn" onClick={flip} aria-label={`Switch to ${dark ? "light" : "dark"} theme`}>
       {dark ? "☀" : "☾"}
+    </button>
+  );
+}
+
+/** Times in your own zone or UTC; the label names the zone in use. */
+function ZoneToggle() {
+  const z = useZone();
+  const other = z === "utc" ? "your time zone" : "UTC";
+  return (
+    <button className="icon-btn zone" onClick={() => setZone(z === "utc" ? "local" : "utc")}
+      title={`Times are in ${zoneName(Date.now(), true)}. Click for ${other}.`} aria-label={`Show times in ${other}`}>
+      {zoneName()}
     </button>
   );
 }
@@ -44,6 +57,7 @@ function Shortcuts() {
 }
 
 function App() {
+  useZone(); // re-render every page when the time zone changes
   return (
     <BrowserRouter>
       <Shortcuts />
@@ -58,6 +72,7 @@ function App() {
           <NavLink to="/feeds">Feeds</NavLink>
         </nav>
         <Accounts />
+        <ZoneToggle />
         <ThemeToggle />
         {document.querySelector('meta[name="quanty-auth"]') && (
           <form method="post" action="/logout"><button className="icon-btn signout" title="Sign out">Sign out</button></form>

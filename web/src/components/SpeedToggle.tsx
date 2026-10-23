@@ -1,6 +1,7 @@
 import { motion } from "motion/react";
 import { useEffect, useState } from "react";
 import { sendCommand, type SessionState } from "../api";
+import { clock } from "../format";
 import { useToast } from "./Toasts";
 
 /** A demo's playback speed: fast or real time. Only demo sessions report a speed. */
@@ -39,6 +40,23 @@ export function SpeedToggle({ run, session }: { run: string; session: SessionSta
         </button>
       ))}
     </div>
+  );
+}
+
+/** A demo runs on its own clock: it starts at the current time and then plays faster than real time,
+ * so it pulls ahead. Says so, and by how much, so its times aren't taken for real ones. */
+export function DemoClock({ session }: { session: SessionState | null }) {
+  const sp = session?.speed;
+  if (!sp || sp.catching_up || session?.now == null) return null;
+  const ahead = (session.now - Date.now()) / 60_000; // minutes
+  const lead = Math.abs(ahead) < 1 ? "in step with real time"
+    : Math.abs(ahead) < 90 ? `${ahead > 0 ? "+" : "−"}${Math.round(Math.abs(ahead))} min`
+    : `${ahead > 0 ? "+" : "−"}${+(Math.abs(ahead) / 60).toFixed(Math.abs(ahead) < 600 ? 1 : 0)} h`;
+  return (
+    <span className="pill demo-clock" title={"Demo clock: the demo's synthetic markets run on their own time. It starts at the "
+      + `current time and plays ${sp.value}× faster, so it gets ahead of real time. Real sessions use the venues' time.`}>
+      Demo clock {clock(session.now, false)}<span className="muted"> · {lead}</span>
+    </span>
   );
 }
 

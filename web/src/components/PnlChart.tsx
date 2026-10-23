@@ -1,7 +1,7 @@
 import { scaleLinear } from "d3-scale";
 import { AnimatePresence, motion } from "motion/react";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { clock, money } from "../format";
+import { clock, money, weekday, zoneName } from "../format";
 
 type Curves = Record<string, [number, number][]>;
 
@@ -111,7 +111,7 @@ export function PnlChart({ curves: all, slots, halted, range = null, now = null 
         ))}
         {[t0, (t0 + t1) / 2, t1].map((t, i) => (
           <text key={i} className="tick" x={x(t)} y={H - 8} textAnchor={i === 0 ? "start" : i === 2 ? "end" : "middle"}>
-            {t1 - t0 > 20 * 3_600_000 ? `${new Date(t).toUTCString().slice(0, 3)} ${clock(t, false)}` : clock(t, seconds)}
+            {t1 - t0 > 20 * 3_600_000 ? `${weekday(t)} ${clock(t, false)}` : clock(t, seconds)}
           </text>
         ))}
         {names.map((n) => {
@@ -136,7 +136,7 @@ export function PnlChart({ curves: all, slots, halted, range = null, now = null 
       </svg>
       {hover && (
         <div className="tooltip" style={hover.x > W * 0.6 ? { right: W - hover.x + 12, top: 12 } : { left: hover.x + 12, top: 12 }}>
-          <div className="when">{clock(hover.t)} UTC</div>
+          <div className="when">{clock(hover.t)} {zoneName(hover.t)}</div>
           {names.map((n) => {
             const v = valueAt(curves[n], hover.t);
             return (

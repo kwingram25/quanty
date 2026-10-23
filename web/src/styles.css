@@ -445,3 +445,7 @@ table.trades .market-cell span { display: block; }
 table.trades .market-cell .muted, table.trades .cost { font-size: 11px; }
 table.trades .cost { display: block; }
 .icon-btn.signout { width: auto; padding: 0 10px; font-size: 12px; }
+
+/* time zone switch in the top bar */
+.icon-btn.zone { width: auto; padding: 0 8px; font-size: 12px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.pill.demo-clock { font-weight: 500; font-variant-numeric: tabular-nums; }

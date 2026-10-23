@@ -1,3 +1,5 @@
+import { useSyncExternalStore } from "react";
+
 export const money = (v: number | null | undefined, signed = false): string => {
   const x = v ?? 0;
   const sign = x < -0.005 ? "−" : signed && x > 0.005 ? "+" : "";
@@ -15,11 +17,44 @@ export const cents = (p: number | null | undefined): string => {
 
 const pad = (n: number) => String(n).padStart(2, "0");
 
-export const clock = (ms: number, seconds = true): string => {
-  const d = new Date(ms);
-  const hm = `${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}`;
-  return seconds ? `${hm}:${pad(d.getUTCSeconds())}` : hm;
+/** Which time zone the dashboard shows times in: the viewer's own (default) or UTC. Remembered per
+ * browser; components re-render on a change through useZone (the app root subscribes). */
+export type Zone = "local" | "utc";
+let zone: Zone = (() => {
+  try { return localStorage.getItem("zone") === "utc" ? "utc" : "local"; } catch { return "local"; }
+})();
+const listeners = new Set<() => void>();
+const formats = new Map<string, Intl.DateTimeFormat>();
+
+export const setZone = (z: Zone) => {
+  zone = z;
+  formats.clear();
+  try { localStorage.setItem("zone", z); } catch { /* private mode */ }
+  listeners.forEach((f) => f());
 };
+export const useZone = (): Zone =>
+  useSyncExternalStore((f) => { listeners.add(f); return () => { listeners.delete(f); }; }, () => zone);
+
+const fmt = (key: string, opts: Intl.DateTimeFormatOptions): Intl.DateTimeFormat => {
+  let f = formats.get(key);
+  if (!f) {
+    // UTC reads as 24-hour, as it's usually written; local time follows the browser's locale
+    f = new Intl.DateTimeFormat(undefined, zone === "utc" ? { ...opts, timeZone: "UTC", hourCycle: "h23" } : opts);
+    formats.set(key, f);
+  }
+  return f;
+};
+
+/** "PDT", "UTC": the zone times are shown in (at that moment, for daylight saving). */
+export const zoneName = (ms = Date.now(), long = false): string =>
+  fmt(long ? "zl" : "zs", { timeZoneName: long ? "long" : "short" })
+    .formatToParts(ms).find((p) => p.type === "timeZoneName")?.value ?? (zone === "utc" ? "UTC" : "");
+
+export const clock = (ms: number, seconds = true): string =>
+  fmt(seconds ? "hms" : "hm", { hour: "numeric", minute: "2-digit", ...(seconds ? { second: "2-digit" } : {}) }).format(ms);
+
+/** "Thu" in the shown zone. */
+export const weekday = (ms: number): string => fmt("wd", { weekday: "short" }).format(ms);
 
 export const ago = (ms: number | null): string => {
   if (!ms) return "never";
@@ -44,11 +79,10 @@ export const duration = (s: number): string => {
   return h < 24 ? `${h}h ${pad(m % 60)}m` : `${Math.floor(h / 24)}d ${pad(h % 24)}h`;
 };
 
-/** "Thu 14:00" for closes more than a day away, "14:00" otherwise (UTC). */
+/** "Thu 2:00 PM" for closes more than a day away, "2:00 PM" otherwise (in the shown zone). */
 export const closesAt = (ms: number, now: number | null): string => {
-  const d = new Date(ms);
   const hm = clock(ms, false);
-  return now != null && ms - now > 86_400_000 ? `${d.toUTCString().slice(0, 3)} ${hm}` : hm;
+  return now != null && ms - now > 86_400_000 ? `${weekday(ms)} ${hm}` : hm;
 };
 
 /** A market's display name, from the snapshot's names (falls back to the id). */

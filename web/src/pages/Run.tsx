@@ -5,7 +5,7 @@ import { useRunStream, type NewRows, type Snapshot } from "../api";
 import { AnimatedNumber } from "../components/AnimatedNumber";
 import { Markets } from "../components/Markets";
 import { PnlChart } from "../components/PnlChart";
-import { NewDay, SpeedToggle } from "../components/SpeedToggle";
+import { DemoClock, NewDay, SpeedToggle } from "../components/SpeedToggle";
 import { Strategies } from "../components/Strategies";
 import { Tape } from "../components/Tape";
 import { useToast } from "../components/Toasts";
@@ -55,6 +55,7 @@ function Run({ snap, live }: { snap: Snapshot; live: boolean }) {
               </span>
             ))}
             <SpeedToggle run={snap.run.name} session={snap.session} />
+            <DemoClock session={snap.session} />
             <NewDay run={snap.run.name} session={snap.session} />
             {snap.session?.speed?.catching_up && <span className="pill warning"><span className="dot" />loading history…</span>}
           </h1>
