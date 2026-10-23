@@ -464,3 +464,10 @@ table.orders .outcome.resting { color: var(--series-1); }
 table.orders .outcome.unfilled { color: var(--muted); }
 table.orders .outcome + .cost { margin-top: 3px; }
 table.orders td:last-child { white-space: normal; max-width: 320px; }
+
+/* a demo loading its day of history */
+.loading-day { margin-top: 12px; padding: 48px 24px; display: grid; justify-items: center; gap: 12px; text-align: center; }
+.loading-day p { margin: 0; color: var(--ink-2); }
+.loading-day .bar { width: min(420px, 100%); height: 6px; border-radius: 999px; background: var(--raised); overflow: hidden;
+  border: 1px solid var(--border); }
+.loading-day .bar span { display: block; height: 100%; background: var(--focus); border-radius: inherit; }

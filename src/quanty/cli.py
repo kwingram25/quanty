@@ -541,13 +541,21 @@ def _demo_live(
     async def play(trader: Engine, day: synthetic.Spec) -> None:
         # the past (before now) at once, so the dashboard opens on a run with history; then live
         live_from = _now_window_ms()
-        playback.catching_up = True
+        playback.catching_up, playback.progress = True, 0.0
         playback.set(playback.speed)  # re-anchor for this day
+        book = trader.ledger
+        assert book is not None
+        book.durable = False  # the history is written in bulk (several times faster), committed when live
+        span = max(1, live_from - day.start_ms)
         for n, ev in enumerate(synthetic.events_multi(day, ladder=True)):
             if ev.ts > live_from:
-                playback.catching_up = False
+                if playback.catching_up:
+                    book.commit()
+                    book.durable = True
+                    playback.catching_up, playback.progress = False, 1.0
                 await playback.wait_for(ev.ts)
             elif n % 5000 == 0:
+                playback.progress = (ev.ts - day.start_ms) / span
                 await asyncio.sleep(0)  # the history plays at once; let the dashboard serve meanwhile
             trader.advance(ev.ts)
             trader.process(ev)
@@ -570,6 +578,7 @@ def _demo_live(
     def restart() -> int:
         seed = random.randrange(1, 1_000_000)
         playback.seed = seed
+        playback.catching_up, playback.progress = True, 0.0  # reported at once: the page shows progress
         asyncio.get_running_loop().create_task(new_day(seed))
         return seed
 

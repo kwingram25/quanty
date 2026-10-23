@@ -185,6 +185,7 @@ class Playback:
     def __init__(self, speed: float, options: tuple[float, ...]) -> None:
         self.speed, self.options = speed, options
         self.catching_up = False  # playing the history before now, as fast as it can
+        self.progress = 0.0  # how much of that history has played, 0 to 1
         self.seed: int | None = None  # the synthetic day being played (a demo)
         self.on_new_day: Callable[[], int] | None = None  # starts over on a new day; returns its seed
         self._anchor: tuple[float, int] | None = None  # (monotonic s, event ms) at the last change
@@ -312,6 +313,7 @@ class Controller:
                 "value": self.playback.speed,
                 "options": list(self.playback.options),
                 "catching_up": self.playback.catching_up,
+                "progress": round(self.playback.progress, 3),
                 "seed": self.playback.seed,
                 "new_day": self.playback.on_new_day is not None,
             },

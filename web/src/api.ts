@@ -80,7 +80,7 @@ export interface SessionState {
   /** exclusive event -> instance -> worst-case loss and best-case gain */
   exposure?: Record<string, Record<string, { loss: number; gain: number }>>;
   /** a demo's playback speed (x real time) and the speeds it can switch to */
-  speed?: { value: number; options: number[]; catching_up?: boolean; seed?: number | null; new_day?: boolean } | null;
+  speed?: { value: number; options: number[]; catching_up?: boolean; progress?: number; seed?: number | null; new_day?: boolean } | null;
   /** feeds this session is connected to and their health ("simulated" in a demo) */
   platforms?: { name: string; status: string }[];
 }
@@ -225,7 +225,7 @@ export interface NewRows { fills: unknown[]; settlements: unknown[]; logs: unkno
 
 /** A run's snapshot, pushed over a WebSocket as it changes (reconnecting); `onNew` gets the rows
  *  that arrived since the previous push, for callouts. */
-export function useRunStream(run: string, onNew?: (n: NewRows) => void) {
+export function useRunStream(run: string, onNew?: (n: NewRows, snap: Snapshot) => void) {
   const [snap, setSnap] = useState<Snapshot | null>(null);
   const [state, setState] = useState<"connecting" | "open" | "closed" | "missing">("connecting");
   const onNewRef = useRef(onNew);
@@ -244,7 +244,7 @@ export function useRunStream(run: string, onNew?: (n: NewRows) => void) {
         const msg = JSON.parse(e.data);
         if (msg.type === "snapshot") {
           setSnap(msg.data);
-          if (msg.new) onNewRef.current?.(msg.new);
+          if (msg.new) onNewRef.current?.(msg.new, msg.data);
         }
       };
       ws.onclose = (e) => {

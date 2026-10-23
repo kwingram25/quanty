@@ -68,7 +68,9 @@ export function NewDay({ run, session }: { run: string; session: SessionState | 
   if (!sp?.new_day) return null;
   const go = async () => {
     setBusy(true);
+    dispatchEvent(new Event("quanty:new-day")); // the page shows progress at once, not after the round trip
     const r = await sendCommand(run, "new_day");
+    if (!r.ok) dispatchEvent(new Event("quanty:new-day-failed"));
     toast({ kind: r.ok ? "ok" : "error", title: r.ok ? "New day" : "Couldn't start a new day", body: r.result });
     setBusy(false);
   };

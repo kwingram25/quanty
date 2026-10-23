@@ -17,7 +17,8 @@ export function RunPage() {
   const { mode = "", name = "" } = useParams();
   const run = `${mode}/${name}`;
   const toast = useToast();
-  const onNew = useCallback((n: NewRows) => {
+  const onNew = useCallback((n: NewRows, s: Snapshot) => {
+    if (s.session?.speed?.catching_up) return; // a demo loading its history: no callouts for the past
     for (const raw of n.logs) {
       const l = raw as { level: string; msg: string; instance: string; fields: Record<string, unknown> };
       if (l.level === "error" || ALERTS.test(l.msg)) {
@@ -41,6 +42,17 @@ function Run({ snap, live }: { snap: Snapshot; live: boolean }) {
     [snap.session],
   );
   const open = snap.positions.length;
+  // a demo playing its day of history: the numbers are half-built until it's done, so show progress
+  // (from the click on "New day": this page is replaced when the new day's snapshot arrives)
+  const [starting, setStarting] = useState(false);
+  useEffect(() => {
+    const on = () => setStarting(true);
+    const off = () => setStarting(false);
+    addEventListener("quanty:new-day", on);
+    addEventListener("quanty:new-day-failed", off);
+    return () => { removeEventListener("quanty:new-day", on); removeEventListener("quanty:new-day-failed", off); };
+  }, []);
+  const loading = snap.session?.speed?.catching_up ? snap.session.speed.progress ?? 0 : starting ? 0 : null;
   return (
     <div className="page run-page">
       <div className="run-head">
@@ -57,21 +69,21 @@ function Run({ snap, live }: { snap: Snapshot; live: boolean }) {
             <SpeedToggle run={snap.run.name} session={snap.session} />
             <DemoClock session={snap.session} />
             <NewDay run={snap.run.name} session={snap.session} />
-            {snap.session?.speed?.catching_up && <span className="pill warning"><span className="dot" />loading history…</span>}
+
           </h1>
           <p>{snap.run.file} · last activity {ago(snap.run.last_ts)}</p>
         </div>
-        <div className="kpis">
+        {loading == null && <div className="kpis">
           <div className="kpi hero"><div className="label">Realized P&L</div>
             <AnimatedNumber className={`value ${tone(snap.stats.pnl)}`} value={snap.stats.pnl} format={(v) => money(v)} /></div>
           <div className="kpi"><div className="label">Fills</div><div className="value">{snap.stats.fills}</div></div>
           <div className="kpi"><div className="label">Open positions</div><div className="value">{open}</div></div>
           <div className="kpi"><div className="label">Errors</div>
             <div className={`value ${snap.stats.errors ? "down" : ""}`}>{snap.stats.errors}</div></div>
-        </div>
+        </div>}
       </div>
 
-      <div className="workspace">
+      {loading != null ? <LoadingDay progress={loading} /> : <div className="workspace">
         <Strategies snap={snap} slots={slots} />
         <Center snap={snap} slots={slots} halted={halted} />
         <div className="right-col">
@@ -81,7 +93,21 @@ function Run({ snap, live }: { snap: Snapshot; live: boolean }) {
             <div className="panel-body scroll"><Tape items={snap.tape} slots={slots} names={snap.names} /></div>
           </section>
         </div>
+      </div>}
+    </div>
+  );
+}
+
+/** In place of the workspace while a demo plays its day of history (a few seconds). */
+function LoadingDay({ progress }: { progress: number }) {
+  const pct = Math.round(Math.min(1, Math.max(0, progress)) * 100);
+  return (
+    <div className="loading-day panel" role="status" aria-live="polite">
+      <p>Playing the day's history so the dashboard opens on a full day…</p>
+      <div className="bar" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={pct}>
+        <motion.span initial={false} animate={{ width: `${pct}%` }} transition={{ duration: 0.3, ease: "easeOut" }} />
       </div>
+      <p className="muted small">{pct}%</p>
     </div>
   );
 }
