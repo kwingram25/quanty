@@ -46,6 +46,7 @@ def _plain(v: Any) -> Any:
 class Command(BaseModel):
     action: str
     target: str = ""
+    value: dict[str, Any] | None = None  # params: {name: new value}
     confirm: str = ""
 
 
@@ -260,7 +261,7 @@ class Api:
             if store.session(run) is None:
                 raise HTTPException(409, "this run is not running")
             try:
-                cid = store.submit(run, cmd.action, cmd.target)
+                cid = store.submit(run, cmd.action, cmd.target, cmd.value)
             except ValueError as exc:
                 raise HTTPException(400, str(exc)) from None
             for _ in range(30):  # sessions poll every second; wait briefly for the outcome

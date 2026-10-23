@@ -26,7 +26,7 @@ need several things to go wrong at once. This page is what to know before `--arm
 | `error_limit` | A broker disables itself after this many consecutive venue rejections. |
 | Unknown outcomes | If an order's reply never arrives (timeout, dropped connection), the broker disables itself at once and the order stays pending. It is never assumed rejected: the venue may have filled it. |
 | Order journal | Each order is written down before it is sent. On start, orders a previous run left resting are canceled; on Kalshi, orders whose reply never came are found by client id (`quanty-…`). Only journaled orders are touched, so other programs trading the same account are safe. |
-| Dashboard controls | Halt a strategy (no new buys, exits still allowed), disarm a broker (no orders at all, resting ones canceled), or halt everything. Actions on a live run need its name typed. |
+| Dashboard controls | Halt a strategy (no new buys, exits still allowed), disarm a broker (no orders at all, resting ones canceled), or halt everything; change a strategy's params (validated by the strategy, saved for restarts; limits and broker caps can't be raised from the dashboard, so they still bound a bad value). Actions on a live run need its name typed. |
 
 A disabled broker cannot be re-armed from the dashboard: something unexpected happened, so check
 the venue and restart the session.

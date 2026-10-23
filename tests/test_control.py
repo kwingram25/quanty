@@ -4,11 +4,14 @@ from pathlib import Path
 
 import pytest
 from helpers import Hooks
+from pydantic import Field
 
 from quanty.brokers.live import LiveBroker
 from quanty.brokers.sim import SimBroker
 from quanty.control import Controller, ControlStore
 from quanty.core import Engine, Instance, Ledger
+from quanty.core.engine import Context
+from quanty.core.strategy import Params, Strategy
 
 pytest.importorskip("fastapi")
 from fastapi.testclient import TestClient
@@ -45,7 +48,13 @@ def test_actions_apply_to_the_session(tmp_path: Path) -> None:
         "armed": True,
         "disabled": "",
     }
-    assert state["state"]["instances"]["a"] == {"halted": True, "broker": "sim", "blocked": 0}
+    assert state["state"]["instances"]["a"] == {
+        "halted": True,
+        "broker": "sim",
+        "blocked": 0,
+        "params": {},
+        "edited": [],
+    }
 
 
 def test_bad_commands_fail_without_effect(tmp_path: Path) -> None:
@@ -190,3 +199,88 @@ def test_new_day_only_in_demos(tmp_path: Path) -> None:
     c.playback.on_new_day = lambda: 4242
     r = run_cmd(c, store, "new_day")
     assert r["status"] == "done" and r["result"] == "started a new day (seed 4242)"
+
+
+class SizeParams(Params):
+    size: float = Field(10, gt=0, le=100, description="contracts per order")
+    side: str = "yes"
+
+
+class Sized(Strategy[SizeParams]):
+    params_type = SizeParams
+
+    def __init__(self, params: SizeParams) -> None:
+        super().__init__(params)
+        self.seen: list[tuple[float, float]] = []
+
+    def on_params(self, ctx: Context, old: SizeParams) -> None:
+        self.seen.append((old.size, self.params.size))
+
+
+def sized(tmp: Path) -> tuple[Controller, ControlStore, Engine]:
+    insts = [Instance("s", Sized(SizeParams(size=5)), SimBroker("sim"))]
+    engine = Engine(insts, ledger=Ledger(tmp / "l.sqlite", durable=True), clock_ms=None, strict=False)
+    store = ControlStore(tmp / "control.sqlite")
+    return Controller(store, "paper/acct", engine, can_arm=False), store, engine
+
+
+def params_cmd(c: Controller, store: ControlStore, action: str, value: object = None) -> dict[str, object]:
+    cid = store.submit("paper/acct", action, "s", value)
+    c.tick()
+    return next(r for r in store.history("paper/acct") if r["id"] == cid)
+
+
+def test_params_change_while_running_and_survive_a_restart(tmp_path: Path) -> None:
+    c, store, engine = sized(tmp_path)
+    strat = engine.instances["s"].strategy
+    assert isinstance(strat, Sized)
+    r = params_cmd(c, store, "params", {"size": 25})
+    assert r["status"] == "done" and r["result"] == "s: size 5.0 → 25.0"
+    assert strat.params.size == 25 and strat.seen == [(5, 25)]  # the strategy was told
+    state = store.session("paper/acct")
+    assert state is not None and state["state"]["instances"]["s"]["edited"] == ["size"]
+    for bad in ({"size": 0}, {"size": "big"}, {"leverage": 3}):
+        r = params_cmd(c, store, "params", bad)
+        assert r["status"] == "failed" and strat.params.size == 25, r  # refused; nothing changed
+    assert "no param leverage" in str(params_cmd(c, store, "params", {"leverage": 3})["result"])
+
+    c2, _, engine2 = sized(tmp_path)  # a restarted session: same run, fresh engine from the file
+    assert engine2.instances["s"].strategy.params.size == 25 and c2.edited("s") == {"size": 25}
+    r = params_cmd(c2, store, "reset_params")
+    assert r["status"] == "done" and engine2.instances["s"].strategy.params.size == 5
+    assert store.overrides("paper/acct") == {}
+
+
+def test_saved_changes_that_no_longer_fit_are_dropped(tmp_path: Path) -> None:
+    store = ControlStore(tmp_path / "control.sqlite")
+    store.set_override("paper/acct", "s", {"size": 25, "removed_param": 1})
+    _, _, engine = sized(tmp_path)
+    assert engine.instances["s"].strategy.params.size == 5 and store.overrides("paper/acct") == {}
+
+
+def test_edit_from_the_dashboard(tmp_path: Path) -> None:
+    (tmp_path / "paper").mkdir()
+    c, _, engine = sized(tmp_path)
+    Ledger(tmp_path / "paper" / "acct.sqlite").close()
+    c.tick()
+    client = TestClient(create_app(tmp_path))
+    stop = threading.Event()
+
+    def session() -> None:
+        while not stop.is_set():
+            c.tick()
+            time.sleep(0.05)
+
+    t = threading.Thread(target=session)
+    t.start()
+    try:
+        r = client.post(
+            "/api/runs/paper/acct/control",
+            json={"action": "params", "target": "s", "value": {"size": 12.5}},
+            headers={"x-quanty-token": token(client)},
+        )
+    finally:
+        stop.set()
+        t.join()
+    assert r.json() == {"ok": True, "result": "s: size 5.0 → 12.5"}
+    assert engine.instances["s"].strategy.params.size == 12.5

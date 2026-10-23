@@ -4,7 +4,10 @@ One SQLite file (data/control.sqlite) holds a command queue and each running ses
 and state. A session (quanty paper / quanty live) polls for its own run's commands every second,
 applies them to its engine and brokers, and writes back the outcome, so every action is on record.
 
-Actions: halt / resume an instance (or all); disarm / arm a live broker; kill (halt everything).
+Actions: halt / resume an instance (or all); disarm / arm a live broker; kill (halt everything);
+params (change an instance's strategy params: value = {name: new value}) and reset_params (back to
+the experiment file's). Param changes are kept per run as overrides, so a restarted session picks
+them up again; the instance limits and broker caps can't be changed here, so they still bound them.
 Halting stops new buys and cancels resting buys but lets exits through; disarming a live broker
 refuses every order, exits included, and cancels its resting orders. Arming is only possible for
 a session started with `quanty live --arm`.
@@ -28,6 +31,7 @@ from sqlalchemy import (
     Table,
     Text,
     create_engine,
+    delete,
     insert,
     select,
     update,
@@ -36,11 +40,12 @@ from sqlalchemy import (
 from quanty.brokers.live import LiveBroker
 from quanty.brokers.shadow import ShadowBroker
 from quanty.core.engine import Engine as Trader
+from quanty.core.engine import describe
 from quanty.core.portfolio import Position
 from quanty.core.risk import event_exposure
 from quanty.core.types import Side
 
-ACTIONS = ("halt", "resume", "disarm", "arm", "kill", "speed", "new_day")
+ACTIONS = ("halt", "resume", "disarm", "arm", "kill", "speed", "new_day", "params", "reset_params")
 ALIVE_S = 10  # a session whose heartbeat is older than this is not running
 
 meta = MetaData()
@@ -51,10 +56,19 @@ commands = Table(
     Column("run", String, index=True, nullable=False),
     Column("action", String, nullable=False),
     Column("target", String, nullable=False, default=""),  # instance or broker; "" = all
+    Column("value", JSON),  # the action's argument, if any (params: {name: value})
     Column("created_ts", Integer, nullable=False),
     Column("status", String, nullable=False, default="pending"),  # pending / done / failed
     Column("result", Text, nullable=False, default=""),
     Column("done_ts", Integer),
+)
+overrides = Table(
+    "overrides",
+    meta,
+    Column("run", String, primary_key=True),
+    Column("instance", String, primary_key=True),
+    Column("params", JSON, nullable=False),  # {name: value} that differ from the experiment file
+    Column("updated_ts", Integer, nullable=False),
 )
 sessions = Table(
     "sessions",
@@ -84,18 +98,24 @@ class ControlStore:
             with self.engine.begin() as conn:
                 conn.exec_driver_sql("PRAGMA journal_mode=WAL")
             meta.create_all(self.engine)
+            with self.engine.begin() as conn:  # files from before commands had a value
+                cols = {r[1] for r in conn.exec_driver_sql("PRAGMA table_info(commands)")}
+                if "value" not in cols:
+                    conn.exec_driver_sql("ALTER TABLE commands ADD COLUMN value JSON")
 
     def close(self) -> None:
         self.engine.dispose()
 
     # --- UI side ---
 
-    def submit(self, run: str, action: str, target: str = "") -> int:
+    def submit(self, run: str, action: str, target: str = "", value: Any = None) -> int:
         if action not in ACTIONS:
             raise ValueError(f"unknown action {action!r}")
         with self.engine.begin() as conn:
             res = conn.execute(
-                insert(commands).values(run=run, action=action, target=target, created_ts=now_ms())
+                insert(commands).values(
+                    run=run, action=action, target=target, value=value, created_ts=now_ms()
+                )
             )
             key = res.inserted_primary_key
             assert key is not None
@@ -129,6 +149,21 @@ class ControlStore:
         with self.engine.begin() as conn:
             done = {"status": "done" if ok else "failed", "result": result, "done_ts": now_ms()}
             conn.execute(update(commands).where(commands.c.id == command_id).values(**done))
+
+    def overrides(self, run: str) -> dict[str, dict[str, Any]]:
+        with self.engine.connect() as conn:
+            rows = conn.execute(select(overrides).where(overrides.c.run == run)).mappings()
+            return {r["instance"]: dict(r["params"]) for r in rows}
+
+    def set_override(self, run: str, instance: str, params: dict[str, Any]) -> None:
+        """Save an instance's param overrides; empty = none (back to the experiment file)."""
+        with self.engine.begin() as conn:
+            where = (overrides.c.run == run) & (overrides.c.instance == instance)
+            conn.execute(delete(overrides).where(where))
+            if params:
+                conn.execute(
+                    insert(overrides).values(run=run, instance=instance, params=params, updated_ts=now_ms())
+                )
 
     def heartbeat(self, run: str, started_ts: int, can_arm: bool, state: dict[str, Any]) -> None:
         row = {
@@ -191,7 +226,59 @@ class Controller:
         self.playback = playback
         self.feeds: Callable[[], Mapping[str, str]] | None = None  # feed -> health, set by a live session
         self.started_ts = now_ms()
+        self.attach(trader)
+
+    def attach(self, trader: Trader) -> None:
+        """Control this engine (a demo's "new day" swaps in a fresh one), with the run's saved param
+        overrides applied again."""
+        self.trader = trader
         self.brokers = {i.broker.name: i.broker for i in trader.instances.values()}
+        self.file_params = {iid: i.strategy.params for iid, i in trader.instances.items()}
+        for iid, changes in self.store.overrides(self.run).items():
+            if iid not in trader.instances:
+                continue
+            try:
+                result = self._set_params(iid, changes)
+            except ValueError as exc:  # the strategy's params changed since: drop what no longer fits
+                self.store.set_override(self.run, iid, {})
+                result = f"dropped saved changes that no longer fit: {exc}"
+            self._log("control: params restored", {"target": iid, "ok": True, "result": result})
+
+    def _log(self, msg: str, fields: dict[str, Any], level: str = "warning") -> None:
+        if self.trader.ledger is not None:
+            self.trader.ledger.log(self.trader.now, "control", msg, fields, level=level)
+
+    def edited(self, iid: str) -> dict[str, Any]:
+        """The instance's params that differ from the experiment file's."""
+        cur = self.trader.instances[iid].strategy.params.model_dump(mode="json")
+        base = self.file_params[iid].model_dump(mode="json")
+        return {k: v for k, v in cur.items() if base.get(k) != v}
+
+    def _set_params(self, iid: str, changes: Mapping[str, Any]) -> str:
+        inst = self.trader.instances[iid]
+        current = inst.strategy.params
+        unknown = set(changes) - set(type(current).model_fields)
+        if unknown:
+            raise ValueError(f"{iid} has no param {', '.join(sorted(unknown))}")
+        new = type(current).from_config({**current.model_dump(mode="json"), **changes}, where=f"{iid}.params")
+        before = current.model_dump(mode="json")
+        self.trader.set_params(iid, new)
+        edited = self.edited(iid)
+        self.store.set_override(self.run, iid, edited)
+        if self.trader.ledger is not None:  # the dashboard shows the latest description
+            self.trader.ledger.log(
+                self.trader.now,
+                iid,
+                "strategy",
+                {
+                    **describe(inst),
+                    "params_set": sorted(self.file_params[iid].model_fields_set),  # still the file's
+                    "edited": sorted(edited),
+                },
+            )
+        after = new.model_dump(mode="json")
+        diff = [f"{k} {before[k]} → {after[k]}" for k in after if before.get(k) != after[k]]
+        return f"{iid}: {', '.join(diff) or 'no change'}"
 
     def state(self) -> dict[str, Any]:
         t = self.trader
@@ -206,6 +293,8 @@ class Controller:
                 "halted": iid in self.trader.halted,
                 "broker": inst.broker.name,
                 "blocked": self.trader.blocked.get(iid, 0),
+                "params": inst.strategy.params.model_dump(mode="json"),
+                "edited": sorted(self.edited(iid)),
             }
             for iid, inst in self.trader.instances.items()
         }
@@ -287,7 +376,7 @@ class Controller:
     def tick(self) -> None:
         for cmd in self.store.pending(self.run):
             try:
-                ok, result = True, self.apply(cmd["action"], cmd["target"])
+                ok, result = True, self.apply(cmd["action"], cmd["target"], cmd.get("value"))
             except ValueError as exc:
                 ok, result = False, str(exc)
             self.trader.ledger.log(
@@ -300,8 +389,17 @@ class Controller:
             self.store.finish(cmd["id"], ok, result)
         self.store.heartbeat(self.run, self.started_ts, self.can_arm, self.state())
 
-    def apply(self, action: str, target: str) -> str:
+    def apply(self, action: str, target: str, value: Any = None) -> str:
         t = self.trader
+        if action in ("params", "reset_params"):
+            if target not in t.instances:
+                raise ValueError(f"no instance {target!r}")
+            if action == "reset_params":
+                base = self.file_params[target].model_dump(mode="json")
+                return self._set_params(target, base) + " (back to the experiment file)"
+            if not isinstance(value, dict) or not value:
+                raise ValueError("params needs {name: value}")
+            return self._set_params(target, value)
         if action == "new_day":
             if self.playback is None or self.playback.on_new_day is None:
                 raise ValueError("only demos can start a new day")

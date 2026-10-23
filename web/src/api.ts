@@ -38,6 +38,8 @@ export interface StrategyInfo {
   broker?: string;
   limits?: Record<string, number>;
   markets_traded?: number;
+  /** params changed from the dashboard (differing from the experiment file) */
+  edited?: string[];
 }
 
 export interface Held { instance: string; side: string; qty: number; avg: number }
@@ -65,7 +67,11 @@ export interface SessionState {
   pid: number;
   heartbeat_ts: number;
   can_arm: boolean;
-  instances: Record<string, { halted: boolean; broker: string; blocked?: number }>;
+  instances: Record<string, {
+    halted: boolean; broker: string; blocked?: number;
+    /** current params, and the names changed from the dashboard */
+    params?: Record<string, unknown>; edited?: string[];
+  }>;
   brokers: Record<string, Broker>;
   now: number | null;
   markets: OpenMarket[];
@@ -176,12 +182,12 @@ export async function getJSON<T>(url: string): Promise<T> {
   return r.json() as Promise<T>;
 }
 
-export async function sendCommand(run: string, action: string, target = "", confirm = ""):
-    Promise<{ ok: boolean; result: string }> {
+export async function sendCommand(run: string, action: string, target = "", confirm = "",
+    value?: Record<string, unknown>): Promise<{ ok: boolean; result: string }> {
   const r = await fetch(`/api/runs/${run}/control`, {
     method: "POST",
     headers: { "content-type": "application/json", "x-quanty-token": token() },
-    body: JSON.stringify({ action, target, confirm }),
+    body: JSON.stringify({ action, target, confirm, value }),
   });
   if (r.status === 401) toLogin();
   const body = await r.json().catch(() => ({}));

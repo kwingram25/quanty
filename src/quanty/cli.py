@@ -541,8 +541,7 @@ def _demo_live(
             Path(f"{ledger_path}{suffix}").unlink(missing_ok=True)
         trader, book, day = build(seed)
         state["book"] = book
-        controller.trader = trader
-        controller.brokers = {i.broker.name: i.broker for i in trader.instances.values()}
+        controller.attach(trader)
         state["task"] = asyncio.create_task(play(trader, day))
 
     def restart() -> int:

@@ -52,6 +52,11 @@ Override only what you need. Every hook gets the context first.
 | `on_order(ctx, order)` | one of your orders changed status (open, filled, canceled, rejected, expired) |
 | `on_market_close(ctx, market)` | trading in a market ended |
 | `on_settled(ctx, market, outcome)` | the market resolved; positions are paid out |
+| `on_params(ctx, old)` | `self.params` was just changed from the dashboard; `old` are the previous ones |
+
+Params can be changed while a session runs (the dashboard's Edit, on a strategy's details), and
+take effect from the next event. Read `self.params` when deciding, as above, rather than copying
+values at startup; if you do derive something from them, recompute it in `on_params`.
 
 Events arrive in time order. In a backtest that order is the recording's; live it is arrival
 order, with receive timestamps.

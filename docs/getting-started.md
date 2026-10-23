@@ -21,7 +21,8 @@ deterministic per `--seed`, so the same command gives the same numbers anywhere.
 `quanty demo --live` does the same as a running session instead: it opens on a day of history
 (`--history`), then plays the markets at 10x real time (`--speed`; a toggle on the page switches to real
 time and back) while the strategies paper trade, so
-the dashboard updates as you watch and its controls (halt, resume, kill switch) work. The markets
+the dashboard updates as you watch and its controls (halt, resume, kill switch, editing a strategy's
+params) work. The markets
 are still synthetic. "New day" starts over on a freshly generated day; the header shows its seed, and
 `quanty demo --live --seed N` replays it.
 
@@ -112,7 +113,8 @@ uv run quanty paper experiment.toml --feeds feeds.toml --data data
 Strategies run in real time on live feeds; fills are simulated by the same broker model as
 backtests. Recording continues alongside, and the ledger is written as it goes
 (`data/paper/<experiment>.sqlite`). The dashboard shows it live and adds controls (halt, resume,
-kill switch).
+kill switch), and a strategy's params, such as its size, can be edited from its details without a
+restart.
 
 ## 6. Shadow trade
 

@@ -11,15 +11,19 @@ export function Strategies({ snap, slots }: { snap: Snapshot; slots: Record<stri
   const run = snap.run.name;
   const toast = useToast();
   const [pending, setPending] = useState<Record<string, boolean>>({}); // optimistic halted state
-  const [confirm, setConfirm] = useState<null | { action: string; target: string; label: string }>(null);
+  type Pending = { action: string; target: string; label: string; value?: Record<string, unknown> };
+  const [confirm, setConfirm] = useState<null | Pending>(null);
 
-  const act = async (action: string, target: string, label: string, confirmText = "") => {
-    if (snap.run.mode === "live" && !confirmText) { setConfirm({ action, target, label }); return; }
+  /** Sends a command; true/false = its outcome, null = waiting for the live-run confirmation. */
+  const act = async (action: string, target: string, label: string, confirmText = "",
+    value?: Record<string, unknown>): Promise<boolean | null> => {
+    if (snap.run.mode === "live" && !confirmText) { setConfirm({ action, target, label, value }); return null; }
     if (action === "halt" || action === "resume") setPending((p) => ({ ...p, [target]: action === "halt" }));
-    const r = await sendCommand(run, action, target, confirmText);
+    const r = await sendCommand(run, action, target, confirmText, value);
     const same = r.result.trim().toLowerCase() === label.trim().toLowerCase();
     toast({ kind: r.ok ? "ok" : "error", title: r.ok ? label : `${label} failed`, body: same ? undefined : r.result });
     if (!r.ok) drop(target); // otherwise kept until the session reports it, so the row doesn't flick back
+    return r.ok;
   };
   const drop = (target: string) => setPending((p) => { const { [target]: _, ...rest } = p; return rest; });
   useEffect(() => {
@@ -42,7 +46,9 @@ export function Strategies({ snap, slots }: { snap: Snapshot; slots: Record<stri
           const halted = pending[st.instance] ?? s?.instances[st.instance]?.halted ?? false;
           return <Row key={st.instance} st={st} slot={slots[st.instance] ?? 1} session={s} halted={halted}
             blocked={s?.instances[st.instance]?.blocked ?? 0}
-            onToggle={() => act(halted ? "resume" : "halt", st.instance, `${halted ? "Resumed" : "Halted"} ${st.instance}`)} />;
+            onToggle={() => act(halted ? "resume" : "halt", st.instance, `${halted ? "Resumed" : "Halted"} ${st.instance}`)}
+            onEdit={(value) => act("params", st.instance, `Changed ${st.instance}`, "", value)}
+            onReset={() => act("reset_params", st.instance, `Reset ${st.instance} to the experiment file`)} />;
         })}
         {s && <Brokers s={s} act={act} />}
       </div>
@@ -55,14 +61,17 @@ export function Strategies({ snap, slots }: { snap: Snapshot; slots: Record<stri
       <AnimatePresence>
         {confirm && <ConfirmDialog name={run.split("/")[1]} label={confirm.label}
           onCancel={() => setConfirm(null)}
-          onConfirm={(text) => { const c = confirm; setConfirm(null); act(c.action, c.target, c.label, text); }} />}
+          onConfirm={(text) => { const c = confirm; setConfirm(null); act(c.action, c.target, c.label, text, c.value); }} />}
       </AnimatePresence>
     </aside>
   );
 }
 
-function Row({ st, slot, session, halted, blocked, onToggle }: {
+type Edit = (value: Record<string, unknown>) => Promise<boolean | null>;
+
+function Row({ st, slot, session, halted, blocked, onToggle, onEdit, onReset }: {
   st: Strategy; slot: number; session: SessionState | null; halted: boolean; blocked: number; onToggle: () => void;
+  onEdit: Edit; onReset: () => Promise<boolean | null>;
 }) {
   const [open, setOpen] = useState(() => {
     try { return sessionStorage.getItem(`open:${st.instance}`) === "1"; } catch { return false; }
@@ -118,7 +127,7 @@ function Row({ st, slot, session, halted, blocked, onToggle }: {
         {open && (
           <motion.div className="details" initial={{ height: 0, opacity: 0 }} animate={{ height: "auto", opacity: 1 }}
             exit={{ height: 0, opacity: 0 }} transition={{ duration: 0.2, ease: [0.22, 1, 0.36, 1] }}>
-            <Details st={st} session={session} />
+            <Details st={st} session={session} onEdit={onEdit} onReset={onReset} />
           </motion.div>
         )}
       </AnimatePresence>
@@ -130,7 +139,10 @@ const fmtParam = (v: unknown): string =>
   Array.isArray(v) ? v.join(", ") : typeof v === "number" ? String(+v.toFixed(6)) : v == null ? "–" : String(v);
 
 /** Everything worth knowing about one strategy instance. */
-function Details({ st, session }: { st: Strategy; session: SessionState | null }) {
+function Details({ st, session, onEdit, onReset }: {
+  st: Strategy; session: SessionState | null; onEdit: Edit; onReset: () => Promise<boolean | null>;
+}) {
+  const [editing, setEditing] = useState(false);
   // tolerate ledgers whose details were stored in another shape
   const raw = st.info ?? {};
   const obj = (v: unknown) => (v && typeof v === "object" && !Array.isArray(v) ? (v as Record<string, never>) : undefined);
@@ -144,7 +156,11 @@ function Details({ st, session }: { st: Strategy; session: SessionState | null }
   const holding = (session?.markets ?? []).flatMap((m) =>
     m.held.filter((h) => h.instance === st.instance).map((h) => ({ m, h })));
   const set = new Set(info.params_set ?? []);
-  const params = Object.entries(info.params ?? {}).filter(([k]) => k !== "series")
+  const running = session?.instances[st.instance];
+  const current = obj(running?.params) ?? info.params ?? {}; // a running session's are the latest
+  const editedList = running?.edited ?? (Array.isArray(raw.edited) ? raw.edited : []);
+  const edited = new Set(editedList);
+  const params = Object.entries(current).filter(([k]) => k !== "series")
     .sort(([a], [b]) => Number(set.has(b)) - Number(set.has(a)));
   const limits = Object.entries(info.limits ?? {});
   return (
@@ -185,14 +201,26 @@ function Details({ st, session }: { st: Strategy; session: SessionState | null }
 
       {params.length > 0 && (
         <>
-          <h4>Parameters <span className="muted small">set by the experiment in bold</span></h4>
-          <dl className="params">
-            {params.map(([k, v]) => (
-              <div key={k} className={set.has(k) ? "set" : ""} title={info.param_help?.[k] || undefined}>
-                <dt>{k}</dt><dd className="num">{fmtParam(v)}</dd>
-              </div>
-            ))}
-          </dl>
+          <h4 className="with-action">
+            <span>Parameters <span className="muted small">
+              {edited.size ? <><i className="edited-dot" /> changed here</> : "set by the experiment in bold"}</span></span>
+            {running && !editing && <button className="btn mini" onClick={() => setEditing(true)}>Edit</button>}
+          </h4>
+          {editing ? (
+            <ParamEditor params={params} help={info.param_help ?? {}} edited={edited}
+              onCancel={() => setEditing(false)}
+              onSave={async (changes) => { if ((await onEdit(changes)) !== false) setEditing(false); }}
+              onReset={async () => { if ((await onReset()) !== false) setEditing(false); }} />
+          ) : (
+            <dl className="params">
+              {params.map(([k, v]) => (
+                <div key={k} className={`${set.has(k) ? "set" : ""} ${edited.has(k) ? "edited" : ""}`}
+                  title={[info.param_help?.[k], edited.has(k) ? "changed from the dashboard" : ""].filter(Boolean).join(" · ") || undefined}>
+                  <dt>{k}</dt><dd className="num">{fmtParam(v)}</dd>
+                </div>
+              ))}
+            </dl>
+          )}
         </>
       )}
       {limits.length > 0 && (
@@ -208,7 +236,53 @@ function Details({ st, session }: { st: Strategy; session: SessionState | null }
   );
 }
 
-function Brokers({ s, act }: { s: SessionState; act: (a: string, t: string, l: string) => void }) {
+/** Edits a running instance's params: numbers, switches and text (lists stay as configured). Only
+ * what changed is sent; the session validates it with the strategy's own rules. */
+function ParamEditor({ params, help, edited, onCancel, onSave, onReset }: {
+  params: [string, unknown][]; help: Record<string, string>; edited: Set<string>;
+  onCancel: () => void; onSave: (changes: Record<string, unknown>) => void; onReset: () => void;
+}) {
+  const editable = params.filter(([, v]) => ["number", "boolean", "string"].includes(typeof v));
+  const [draft, setDraft] = useState<Record<string, string | boolean>>(() =>
+    Object.fromEntries(editable.map(([k, v]) => [k, typeof v === "boolean" ? v : String(v)])));
+  const original = Object.fromEntries(editable);
+  const parsed: Record<string, unknown> = {};
+  const invalid = new Set<string>();
+  for (const [k, v] of Object.entries(draft)) {
+    const was = original[k];
+    const val = typeof was === "number" ? (String(v).trim() === "" ? NaN : Number(v)) : v;
+    if (typeof val === "number" && !Number.isFinite(val)) invalid.add(k);
+    else if (val !== was) parsed[k] = val;
+  }
+  const changed = Object.keys(parsed).length > 0;
+  const fixed = params.filter(([, v]) => !["number", "boolean", "string"].includes(typeof v));
+  return (
+    <form className="param-edit" onSubmit={(e) => { e.preventDefault(); if (changed && !invalid.size) onSave(parsed); }}>
+      {editable.map(([k, v]) => (
+        <label key={k} className={invalid.has(k) ? "invalid" : k in parsed ? "dirty" : ""}>
+          <span className="pname">{k}{edited.has(k) && <i className="edited-dot" title="changed from the dashboard" />}</span>
+          {typeof v === "boolean" ? (
+            <input type="checkbox" checked={draft[k] as boolean} onChange={(e) => setDraft({ ...draft, [k]: e.target.checked })} />
+          ) : (
+            <input type="text" inputMode={typeof v === "number" ? "decimal" : undefined} value={draft[k] as string}
+              aria-invalid={invalid.has(k)} onChange={(e) => setDraft({ ...draft, [k]: e.target.value })} />
+          )}
+          {help[k] && <span className="phelp">{help[k]}</span>}
+        </label>
+      ))}
+      {fixed.length > 0 && <p className="muted small">{fixed.map(([k]) => k).join(", ")}: change in the experiment file.</p>}
+      <p className="muted small">Takes effect from the next market update. Order limits still apply.</p>
+      <div className="actions">
+        {edited.size > 0 && <button type="button" className="btn ghost" onClick={onReset}>Reset to file</button>}
+        <span className="grow" />
+        <button type="button" className="btn" onClick={onCancel}>Cancel</button>
+        <button type="submit" className="btn primary" disabled={!changed || invalid.size > 0}>Save</button>
+      </div>
+    </form>
+  );
+}
+
+function Brokers({ s, act }: { s: SessionState; act: (a: string, t: string, l: string) => unknown }) {
   const live = Object.entries(s.brokers).filter(([, b]) => b.kind === "live");
   if (!live.length) return null;
   return (
@@ -256,7 +330,7 @@ function ConfirmDialog({ name, label, onCancel, onConfirm }: {
         initial={{ y: 12, scale: 0.98 }} animate={{ y: 0, scale: 1 }} exit={{ y: 12, opacity: 0 }}
         onSubmit={(e) => { e.preventDefault(); if (text === name) onConfirm(text); }}>
         <h3>This is a live run</h3>
-        <p>{label.replace(/^(Halted|Resumed|Armed|Disarmed)/, (m) => ({ Halted: "Halt", Resumed: "Resume", Armed: "Arm", Disarmed: "Disarm" }[m] ?? m))} on real money. Type <b>{name}</b> to confirm.</p>
+        <p>{label.replace(/^(Halted|Resumed|Armed|Disarmed|Changed)/, (m) => ({ Halted: "Halt", Resumed: "Resume", Armed: "Arm", Disarmed: "Disarm", Changed: "Change" }[m] ?? m))} on real money. Type <b>{name}</b> to confirm.</p>
         <input autoFocus value={text} onChange={(e) => setText(e.target.value)} placeholder={name} aria-label="Run name" />
         <div className="actions">
           <button type="button" className="btn" onClick={onCancel}>Cancel</button>

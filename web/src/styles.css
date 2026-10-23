@@ -396,6 +396,31 @@ tbody tr:hover td { background: var(--raised); }
 .params > div { display: flex; justify-content: space-between; gap: 8px; color: var(--muted); }
 .params > div.set { color: var(--ink); font-weight: 600; }
 .params dt, .params dd { margin: 0; }
+.params > div.edited dd { color: var(--focus); }
+.params > div.edited dt::after, .edited-dot {
+  content: ""; display: inline-block; width: 6px; height: 6px; margin-left: 5px; border-radius: 50%;
+  background: var(--focus); vertical-align: middle;
+}
+.details-body h4.with-action { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.btn.mini { height: 22px; padding: 0 8px; font-size: 11px; }
+.btn.primary { background: var(--focus); border-color: var(--focus); color: #fff; }
+.btn.primary:hover { background: color-mix(in srgb, var(--focus) 88%, #000); }
+.btn.primary:disabled { opacity: 0.45; }
+.btn.ghost { border-color: transparent; background: none; color: var(--ink-2); }
+.param-edit { display: grid; gap: 8px; }
+.param-edit label { display: grid; grid-template-columns: 1fr 96px; align-items: center; gap: 2px 8px; }
+.param-edit .pname { color: var(--ink); }
+.param-edit input[type="text"] {
+  height: 26px; width: 100%; padding: 0 8px; border-radius: 6px; border: 1px solid var(--border);
+  background: var(--page); color: var(--ink); font: inherit; text-align: right; font-variant-numeric: tabular-nums;
+}
+.param-edit input[type="checkbox"] { justify-self: end; width: 16px; height: 16px; accent-color: var(--focus); }
+.param-edit input:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
+.param-edit label.dirty input[type="text"] { border-color: var(--focus); }
+.param-edit label.invalid input[type="text"] { border-color: var(--critical); }
+.param-edit .phelp { grid-column: 1 / -1; color: var(--muted); font-size: 11px; }
+.param-edit .actions { display: flex; align-items: center; gap: 6px; margin-top: 2px; }
+.param-edit .grow { flex: 1; }
 
 /* anything that explains itself on hover says so (buttons and links keep their pointer) */
 [title]:not(button):not(a):not(input):not([role="tab"]):not([role="radio"]):not(svg) { cursor: help; }

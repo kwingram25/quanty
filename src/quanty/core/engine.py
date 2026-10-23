@@ -33,7 +33,7 @@ from quanty.core.ledger import Ledger
 from quanty.core.orders import Order
 from quanty.core.portfolio import Portfolio
 from quanty.core.risk import Limits, Risk
-from quanty.core.strategy import Strategy
+from quanty.core.strategy import Params, Strategy
 from quanty.core.types import Action, Market, OrderStatus, Side, Tif
 
 if TYPE_CHECKING:
@@ -309,6 +309,12 @@ class Engine:
         order = self.live.get(order_id)
         if order is not None:
             self.instances[order.instance].broker.cancel(order)
+
+    def set_params(self, instance_id: str, params: Params) -> None:
+        """Swap an instance's params while running; strategies see them from the next event."""
+        inst = self.instances[instance_id]
+        old, inst.strategy.params = inst.strategy.params, params
+        inst.strategy.on_params(self._ctx[instance_id], old)
 
     def halt(self, instance_id: str | None = None, reason: str = "") -> None:
         """Kill switch: no new buys and resting buys canceled, for one instance or all.
