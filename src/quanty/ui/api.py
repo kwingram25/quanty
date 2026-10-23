@@ -94,13 +94,14 @@ class Api:
         v = queries.view(r)
         session, history = self.control(r.name)
         summaries = {s.instance: s for s in v.summaries}
+        info = queries.strategy_info(r)
         state = (session or {}).get("state", {})
         for iid in state.get("instances", {}):
             summaries.setdefault(iid, Summary(iid, 0, 0, 0, 0.0, 0.0, 0.0, 0, 0))
         snap: dict[str, Any] = {
             "run": {"name": r.name, "mode": r.mode, "file": f"{r.mode}/{r.path.name}", "last_ts": v.last_ts},
             "stats": {"pnl": v.pnl, "fills": v.fills, "errors": v.errors},
-            "strategies": [_row(summaries[k]) for k in sorted(summaries)],
+            "strategies": [{**_row(summaries[k]), "info": info.get(k, {})} for k in sorted(summaries)],
             "curves": queries.pnl_curves(r),
             "positions": [_row(p) for p in queries.positions(r)],
             "activity": [

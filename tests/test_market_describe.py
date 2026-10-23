@@ -68,3 +68,27 @@ def test_ladder_is_traded_named_and_reported(tmp_path: Path) -> None:
     names = queries.names(run, ids)
     assert set(names) == ids
     assert any(n["subtitle"].endswith("°F") or "°F or above" in n["subtitle"] for n in names.values())
+
+
+def test_strategy_details_are_recorded_and_read_back(tmp_path: Path) -> None:
+    from quanty.core import Limits
+
+    (tmp_path / "paper").mkdir()
+    insts = [
+        Instance("fav", FavoriteLate(FavoriteParams(min_conf=0.93)), SimBroker(), Limits(max_order_qty=10))
+    ]
+    ledger = Ledger(tmp_path / "paper" / "r.sqlite", durable=True)
+    Engine(insts, ledger=ledger, clock_ms=None).run(synthetic.events(synthetic.Spec(hours=1, seed=2)))
+    ledger.close()
+    run = queries.run_by_name(tmp_path, "paper/r")
+    assert run is not None
+    info = queries.strategy_info(run)["fav"]
+    assert info["strategy"] == "example_favorite" and "favorite" in info["description"]
+    assert info["series"] == [
+        "synthetic:updown_5m",
+        "synthetic:updown_15m",
+        "synthetic:updown_1h",
+    ]  # a list, not text
+    assert info["params_set"] == ["min_conf"] and info["params"]["min_conf"] == 0.93
+    assert info["limits"] == {"max_order_qty": 10} and info["broker"] == "sim"
+    assert info["markets_traded"] > 0

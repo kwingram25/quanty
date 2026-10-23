@@ -175,7 +175,18 @@ class Ledger:
 
 
 def _jsonable(fields: Mapping[str, object]) -> dict[str, object]:
-    return {k: v if isinstance(v, str | int | float | bool | None) else repr(v) for k, v in fields.items()}
+    return {str(k): _json_value(v) for k, v in fields.items()}
+
+
+def _json_value(v: object) -> object:
+    """JSON values as they are (lists and dicts too, recursively); anything else as its repr."""
+    if isinstance(v, str | int | float | bool | None):
+        return v
+    if isinstance(v, list | tuple):
+        return [_json_value(x) for x in v]
+    if isinstance(v, Mapping):
+        return {str(k): _json_value(x) for k, x in v.items()}
+    return repr(v)
 
 
 def summarize(execute: Callable[[Any], Any]) -> list[Summary]:

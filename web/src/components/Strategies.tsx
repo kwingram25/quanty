@@ -1,7 +1,7 @@
 import { AnimatePresence, motion, useAnimationControls, useReducedMotion } from "motion/react";
 import { useEffect, useRef, useState } from "react";
-import { sendCommand, type SessionState, type Snapshot, type Strategy } from "../api";
-import { money, tone } from "../format";
+import { sendCommand, type SessionState, type Snapshot, type Strategy, type StrategyInfo } from "../api";
+import { cents, money, seriesName, tone } from "../format";
 import { AnimatedNumber } from "./AnimatedNumber";
 import { useToast } from "./Toasts";
 
@@ -64,6 +64,12 @@ export function Strategies({ snap, slots }: { snap: Snapshot; slots: Record<stri
 function Row({ st, slot, session, halted, blocked, onToggle }: {
   st: Strategy; slot: number; session: SessionState | null; halted: boolean; blocked: number; onToggle: () => void;
 }) {
+  const [open, setOpen] = useState(() => {
+    try { return sessionStorage.getItem(`open:${st.instance}`) === "1"; } catch { return false; }
+  });
+  useEffect(() => {
+    try { sessionStorage.setItem(`open:${st.instance}`, open ? "1" : "0"); } catch { /* private mode */ }
+  }, [open, st.instance]);
   const prev = useRef(st.pnl);
   const [delta, setDelta] = useState<{ v: number; k: number } | null>(null);
   const flash = useAnimationControls();
@@ -83,7 +89,11 @@ function Row({ st, slot, session, halted, blocked, onToggle }: {
   return (
     <motion.div className={`strategy ${halted ? "halted" : ""}`} animate={flash} style={{ borderRadius: 8 }}>
       <div className="top">
-        <span className="name"><i className="swatch" style={{ ["--c" as string]: `var(--series-${slot})` }} />{st.instance}</span>
+        <button className="name expander" aria-expanded={open} onClick={() => setOpen(!open)}
+          title={open ? "Hide details" : st.info?.description || "Show details"}>
+          <motion.span className="chev" animate={{ rotate: open ? 90 : 0 }} transition={{ duration: 0.15 }}>›</motion.span>
+          <i className="swatch" style={{ ["--c" as string]: `var(--series-${slot})` }} />{st.instance}
+        </button>
         <AnimatedNumber className={`pnl ${tone(st.pnl)}`} value={st.pnl} format={(v) => money(v)} />
         <AnimatePresence>
           {delta && (
@@ -104,7 +114,97 @@ function Row({ st, slot, session, halted, blocked, onToggle }: {
           <button className="btn" onClick={onToggle}>{halted ? "Resume" : "Halt"}</button>
         </>}
       </div>
+      <AnimatePresence initial={false}>
+        {open && (
+          <motion.div className="details" initial={{ height: 0, opacity: 0 }} animate={{ height: "auto", opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }} transition={{ duration: 0.2, ease: [0.22, 1, 0.36, 1] }}>
+            <Details st={st} session={session} />
+          </motion.div>
+        )}
+      </AnimatePresence>
     </motion.div>
+  );
+}
+
+const fmtParam = (v: unknown): string =>
+  Array.isArray(v) ? v.join(", ") : typeof v === "number" ? String(+v.toFixed(6)) : v == null ? "–" : String(v);
+
+/** Everything worth knowing about one strategy instance. */
+function Details({ st, session }: { st: Strategy; session: SessionState | null }) {
+  // tolerate ledgers whose details were stored in another shape
+  const raw = st.info ?? {};
+  const obj = (v: unknown) => (v && typeof v === "object" && !Array.isArray(v) ? (v as Record<string, never>) : undefined);
+  const info: StrategyInfo = {
+    ...raw,
+    series: Array.isArray(raw.series) ? raw.series : undefined,
+    params_set: Array.isArray(raw.params_set) ? raw.params_set : undefined,
+    params: obj(raw.params), param_help: obj(raw.param_help), limits: obj(raw.limits),
+  };
+  const settled = st.wins + st.losses;
+  const holding = (session?.markets ?? []).flatMap((m) =>
+    m.held.filter((h) => h.instance === st.instance).map((h) => ({ m, h })));
+  const set = new Set(info.params_set ?? []);
+  const params = Object.entries(info.params ?? {}).filter(([k]) => k !== "series")
+    .sort(([a], [b]) => Number(set.has(b)) - Number(set.has(a)));
+  const limits = Object.entries(info.limits ?? {});
+  return (
+    <div className="details-body">
+      {info.description && <p className="desc">{info.description}</p>}
+      {info.strategy && <p className="muted small">strategy <code>{info.strategy}</code>{info.broker && <> · broker <code>{info.broker}</code></>}</p>}
+
+      <h4>Markets it trades</h4>
+      <div className="chips">
+        {(info.series?.length ? info.series : ["every market"]).map((s) => (
+          <span key={s} className="chip" title={s}>{s === "every market" ? s : seriesName(s)}</span>
+        ))}
+      </div>
+
+      {session && (
+        <>
+          <h4>Holding now</h4>
+          {holding.length ? (
+            <ul className="holding">
+              {holding.map(({ m, h }) => (
+                <li key={m.id + h.side}><span>{m.title}{m.subtitle && <span className="muted"> · {m.subtitle}</span>}</span>
+                  <span className="num">{h.qty} {h.side === "yes" ? "Yes" : "No"} at {cents(h.avg)}</span></li>
+              ))}
+            </ul>
+          ) : <p className="muted small">Nothing open.</p>}
+        </>
+      )}
+
+      <h4>Results</h4>
+      <dl className="stats-grid">
+        <div><dt>Win rate</dt><dd>{settled ? `${Math.round((st.wins / settled) * 100)}%` : "–"}</dd></div>
+        <div><dt>Markets traded</dt><dd>{info.markets_traded ?? "–"}</dd></div>
+        <div><dt>Avg per market</dt><dd className={tone(settled ? st.pnl / settled : 0)}>{settled ? money(st.pnl / settled, true) : "–"}</dd></div>
+        <div><dt>Contracts</dt><dd>{+st.contracts.toFixed(2)}</dd></div>
+        <div><dt>Fees</dt><dd>{money(st.fees)}</dd></div>
+        <div><dt>Orders</dt><dd>{st.orders}{st.rejected ? <span className="muted"> ({st.rejected} rejected)</span> : null}</dd></div>
+      </dl>
+
+      {params.length > 0 && (
+        <>
+          <h4>Parameters <span className="muted small">set by the experiment in bold</span></h4>
+          <dl className="params">
+            {params.map(([k, v]) => (
+              <div key={k} className={set.has(k) ? "set" : ""} title={info.param_help?.[k] || undefined}>
+                <dt>{k}</dt><dd className="num">{fmtParam(v)}</dd>
+              </div>
+            ))}
+          </dl>
+        </>
+      )}
+      {limits.length > 0 && (
+        <>
+          <h4>Limits</h4>
+          <dl className="params">
+            {limits.map(([k, v]) => <div key={k} className="set"><dt>{k}</dt><dd className="num">{fmtParam(v)}</dd></div>)}
+          </dl>
+        </>
+      )}
+      {!st.info && <p className="muted small">This ledger predates recorded strategy details.</p>}
+    </div>
   );
 }
 

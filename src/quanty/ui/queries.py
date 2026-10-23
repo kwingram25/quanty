@@ -226,6 +226,31 @@ def activity(run: Run, limit: int = 100) -> list[Activity]:
     return out
 
 
+def strategy_info(run: Run) -> dict[str, dict[str, Any]]:
+    """Per instance: what it is (logged when the run started) and how many markets it has traded."""
+    engine = _open(run.path)
+    try:
+        with Session(engine) as conn:
+            rows = (
+                conn.execute(select(LogRow).where(LogRow.msg == "strategy").order_by(LogRow.id))
+                .scalars()
+                .all()
+            )
+            traded = dict(
+                conn.execute(
+                    select(FillRow.instance, func.count(func.distinct(FillRow.market_id))).group_by(
+                        FillRow.instance
+                    )
+                ).all()
+            )
+    finally:
+        engine.dispose()
+    out: dict[str, dict[str, Any]] = {r.instance: dict(r.fields or {}) for r in rows}  # the latest start wins
+    for inst, n in traded.items():
+        out.setdefault(inst, {})["markets_traded"] = n
+    return out
+
+
 def names(run: Run, ids: set[str]) -> dict[str, dict[str, str]]:
     """What each market is (title, subtitle, event, series), for the ids the dashboard shows."""
     if not ids:

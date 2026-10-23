@@ -9,6 +9,7 @@ Events scheduled for the same ts as the next input are processed before it.
 
 import heapq
 import itertools
+import sys
 from collections import defaultdict
 from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass, field
@@ -49,6 +50,25 @@ class Instance:
     strategy: Strategy[Any]
     broker: Broker
     limits: Limits = field(default_factory=Limits)
+
+
+def describe(inst: Instance) -> dict[str, object]:
+    """What an instance is: its strategy, description, the series it trades, every param (and which
+    ones its config set), broker and limits. Logged when a run starts, for the dashboard."""
+    strategy, params = inst.strategy, inst.strategy.params
+    doc = (type(strategy).__doc__ or "").strip().splitlines()
+    module_doc = (sys.modules[type(strategy).__module__].__doc__ or "").strip()
+    return {
+        "strategy": type(strategy).__module__.rsplit(".", 1)[-1],
+        "description": strategy.description or (doc[0] if doc else ""),
+        "about": module_doc,
+        "series": list(getattr(params, "series", None) or strategy.series),
+        "params": params.model_dump(mode="json"),
+        "params_set": sorted(params.model_fields_set),
+        "param_help": {k: f.description or "" for k, f in type(params).model_fields.items()},
+        "broker": inst.broker.name,
+        "limits": inst.limits.model_dump(exclude_none=True),
+    }
 
 
 class Context:
@@ -167,6 +187,8 @@ class Engine:
         for sig in signals:
             self._signals_by_key.setdefault(sig.key, []).append(sig)
         self._ctx = {i.id: Context(self, i) for i in instances}
+        for inst in instances:  # what each instance is, so a ledger can say what was run
+            self.ledger.log(self.now, inst.id, "strategy", describe(inst))
         self._brokers: dict[str, Broker] = {}
         for inst in instances:
             if self._brokers.setdefault(inst.broker.name, inst.broker) is not inst.broker:

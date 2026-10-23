@@ -23,6 +23,21 @@ export interface Strategy {
   pnl: number;
   wins: number;
   losses: number;
+  info?: StrategyInfo;
+}
+
+/** What an instance is, recorded when its run started (older ledgers don't have it). */
+export interface StrategyInfo {
+  strategy?: string;
+  description?: string;
+  about?: string;
+  series?: string[];
+  params?: Record<string, unknown>;
+  params_set?: string[];
+  param_help?: Record<string, string>;
+  broker?: string;
+  limits?: Record<string, number>;
+  markets_traded?: number;
 }
 
 export interface Held { instance: string; side: string; qty: number; avg: number }
