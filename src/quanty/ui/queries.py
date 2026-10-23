@@ -226,6 +226,69 @@ def activity(run: Run, limit: int = 100) -> list[Activity]:
     return out
 
 
+def trades(run: Run, limit: int = 100) -> list[dict[str, Any]]:
+    """One row per position a strategy took (instance, market, side): what it bought and sold, what
+    it cost, how it ended (won, lost, sold, still open) and its P&L, newest first."""
+    engine = _open(run.path)
+    try:
+        with Session(engine) as conn:
+            key = (FillRow.instance, FillRow.market_id, FillRow.side)
+            rows = conn.execute(
+                select(
+                    *key,
+                    func.min(FillRow.ts).label("opened"),
+                    func.max(FillRow.ts).label("last"),
+                    func.sum(case((FillRow.action == Action.BUY, FillRow.qty), else_=0)).label("bought"),
+                    func.sum(
+                        case((FillRow.action == Action.BUY, FillRow.qty * FillRow.price), else_=0)
+                    ).label("cost"),
+                    func.sum(case((FillRow.action == Action.SELL, FillRow.qty), else_=0)).label("sold"),
+                    func.sum(
+                        case((FillRow.action == Action.SELL, FillRow.qty * FillRow.price), else_=0)
+                    ).label("proceeds"),
+                    func.sum(FillRow.fee).label("fees"),
+                    func.sum(FillRow.realized).label("realized"),
+                )
+                .group_by(*key)
+                .order_by(func.max(FillRow.ts).desc())
+                .limit(limit)
+            ).all()
+            settled = {
+                (r.instance, r.market_id, str(r.side)): r
+                for r in conn.execute(select(SettlementRow)).scalars()
+            }
+    finally:
+        engine.dispose()
+    out = []
+    for r in rows:
+        st = settled.get((r.instance, r.market_id, str(r.side)))
+        pnl: float | None = (r.realized or 0.0) + (st.pnl if st else 0.0)
+        if st is not None:
+            outcome = "won" if st.payout > 0 else "lost"
+        elif r.sold >= r.bought - 1e-9 and r.sold > 0:
+            outcome = "sold"
+        else:
+            outcome, pnl = ("open", None) if not r.realized else ("open", r.realized)
+        out.append(
+            {
+                "instance": r.instance,
+                "market_id": r.market_id,
+                "side": str(r.side),
+                "opened": r.opened,
+                "closed": st.ts if st else (r.last if outcome == "sold" else None),
+                "bought": r.bought,
+                "avg_price": r.cost / r.bought if r.bought else None,
+                "cost": r.cost + (r.fees or 0.0),
+                "sold": r.sold,
+                "avg_sell": r.proceeds / r.sold if r.sold else None,
+                "fees": r.fees or 0.0,
+                "outcome": outcome,
+                "pnl": pnl,
+            }
+        )
+    return out
+
+
 def strategy_info(run: Run) -> dict[str, dict[str, Any]]:
     """Per instance: what it is (logged when the run started) and how many markets it has traded."""
     engine = _open(run.path)

@@ -134,6 +134,8 @@ class Api:
         }
         shown = {a["market_id"] for a in snap["activity"]} | {p["market_id"] for p in snap["positions"]}
         shown |= {i["market_id"] for i in snap["tape"] if "market_id" in i}
+        snap["trades"] = queries.trades(r)
+        shown |= {t["market_id"] for t in snap["trades"]}
         snap["names"] = queries.names(r, shown)
         return snap
 

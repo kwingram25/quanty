@@ -399,3 +399,23 @@ tbody tr:hover td { background: var(--raised); }
 
 /* anything that explains itself on hover says so (buttons and links keep their pointer) */
 [title]:not(button):not(a):not(input):not([role="tab"]):not([role="radio"]):not(svg) { cursor: help; }
+
+/* trades table */
+.trades-summary { margin: 0; padding: 10px 12px 4px; font-size: 12px; color: var(--ink-2); }
+table.trades .who { display: inline-flex; align-items: center; gap: 6px; }
+table.trades .side { display: inline-block; min-width: 30px; text-align: center; padding: 0 6px; border-radius: 5px;
+  font-size: 11px; font-weight: 600; }
+table.trades .side.yes { color: var(--up); background: var(--up-wash); }
+table.trades .side.no { color: var(--down); background: var(--down-wash); }
+table.trades .outcome { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 11px; font-weight: 600;
+  border: 1px solid var(--border); color: var(--ink-2); }
+table.trades .outcome.won { color: var(--up); background: var(--up-wash); border-color: transparent; }
+table.trades .outcome.lost { color: var(--down); background: var(--down-wash); border-color: transparent; }
+table.trades .outcome.open { color: var(--series-1); }
+table.trades td.pnl { font-weight: 600; }
+table.trades tr.o-open td { background: color-mix(in srgb, var(--series-1) 4%, transparent); }
+table.trades td { vertical-align: top; }
+table.trades .market-cell { white-space: normal; min-width: 180px; max-width: 280px; }
+table.trades .market-cell span { display: block; }
+table.trades .market-cell .muted, table.trades .cost { font-size: 11px; }
+table.trades .cost { display: block; }

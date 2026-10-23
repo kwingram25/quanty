@@ -1,5 +1,7 @@
 from pathlib import Path
 
+import pytest
+
 from quanty import synthetic
 from quanty.brokers.sim import SimBroker
 from quanty.control import Controller, ControlStore
@@ -92,3 +94,24 @@ def test_strategy_details_are_recorded_and_read_back(tmp_path: Path) -> None:
     assert info["params_set"] == ["min_conf"] and info["params"]["min_conf"] == 0.93
     assert info["limits"] == {"max_order_qty": 10} and info["broker"] == "sim"
     assert info["markets_traded"] > 0
+
+
+def test_trades_explain_every_position_and_add_up(tmp_path: Path) -> None:
+    from collections import defaultdict
+
+    (tmp_path / "paper").mkdir()
+    e, _ = run_demo(tmp_path)
+    e.ledger.commit()
+    totals = {s.instance: s.pnl for s in e.ledger.summary()}
+    run = queries.run_by_name(tmp_path, "paper/run")
+    assert run is not None
+    trades = queries.trades(run, limit=100_000)
+    by: dict[str, float] = defaultdict(float)
+    for t in trades:
+        by[t["instance"]] += t["pnl"] or 0.0
+        if t["outcome"] == "won":
+            assert t["pnl"] > 0 and t["closed"] is not None
+        if t["outcome"] == "lost":
+            assert t["pnl"] == pytest.approx(-t["cost"])  # a losing position loses what it cost
+    assert {k: round(v, 6) for k, v in by.items()} == {k: round(v, 6) for k, v in totals.items()}
+    assert {t["outcome"] for t in trades} >= {"won", "lost"}

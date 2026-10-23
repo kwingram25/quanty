@@ -123,6 +123,24 @@ export interface Snapshot {
   session: SessionState | null;
   commands: CommandRow[];
   names: Record<string, MarketName>;
+  trades: Trade[];
+}
+
+/** One position a strategy took: what it bought, what it cost and how it ended. */
+export interface Trade {
+  instance: string;
+  market_id: string;
+  side: string;
+  opened: number;
+  closed: number | null;
+  bought: number;
+  avg_price: number | null;
+  cost: number;
+  sold: number;
+  avg_sell: number | null;
+  fees: number;
+  outcome: "won" | "lost" | "sold" | "open";
+  pnl: number | null;
 }
 
 export interface MarketName { title: string; subtitle: string; event: string; series: string }

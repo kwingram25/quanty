@@ -85,7 +85,7 @@ function Run({ snap, live }: { snap: Snapshot; live: boolean }) {
   );
 }
 
-const TABS = ["chart", "activity", "positions", "commands"] as const;
+const TABS = ["chart", "trades", "positions", "orders", "commands"] as const;
 type Tab = (typeof TABS)[number];
 
 const RANGES: Record<string, number | null> = { "1h": 3_600_000, "6h": 21_600_000, "24h": 86_400_000, All: null };
@@ -102,14 +102,15 @@ function Center({ snap, slots, halted }: { snap: Snapshot; slots: Record<string,
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.target instanceof HTMLInputElement || e.metaKey || e.ctrlKey || e.altKey) return;
-      const i = ["1", "2", "3", "4"].indexOf(e.key);
+      const i = ["1", "2", "3", "4", "5"].indexOf(e.key);
       if (i >= 0) pick(TABS[i]);
     };
     addEventListener("keydown", onKey);
     return () => removeEventListener("keydown", onKey);
   }, []);
   const counts: Record<Tab, number | null> = {
-    chart: null, activity: snap.activity.length, positions: snap.positions.length, commands: snap.commands.length,
+    chart: null, trades: snap.trades?.length ?? 0, positions: snap.positions.length, orders: snap.activity.length,
+    commands: snap.commands.length,
   };
   const label = (t: Tab) => (t === "chart" ? "P&L" : t[0].toUpperCase() + t.slice(1));
   const [range, setRange] = useState<string>(() => {
@@ -139,7 +140,8 @@ function Center({ snap, slots, halted }: { snap: Snapshot; slots: Record<string,
       <div className={tab === "chart" ? "chart-pane" : "table-wrap"} role="tabpanel">
         {tab === "chart" && <PnlChart curves={snap.curves} slots={slots} halted={halted} range={RANGES[range]}
           now={snap.session?.now ?? null} />}
-        {tab === "activity" && <Activity snap={snap} />}
+        {tab === "trades" && <Trades snap={snap} slots={slots} />}
+        {tab === "orders" && <Activity snap={snap} />}
         {tab === "positions" && <Positions snap={snap} />}
         {tab === "commands" && <Commands snap={snap} />}
       </div>
@@ -207,4 +209,48 @@ function Commands({ snap }: { snap: Snapshot }) {
 function Name({ snap, id }: { snap: Snapshot; id: string }) {
   const n = nameOf(snap.names, id);
   return <span title={id}>{n.title}{n.subtitle && <span className="muted"> · {n.subtitle}</span>}</span>;
+}
+
+const OUTCOME: Record<string, string> = { won: "Won", lost: "Lost", sold: "Sold", open: "Open" };
+
+/** What each strategy bought, what it cost, and how it ended. */
+function Trades({ snap, slots }: { snap: Snapshot; slots: Record<string, number> }) {
+  const trades = snap.trades ?? [];
+  if (!trades.length) return <p className="empty" style={{ padding: 16 }}>No trades yet.</p>;
+  const won = trades.filter((t) => t.outcome === "won").length;
+  const lost = trades.filter((t) => t.outcome === "lost").length;
+  const net = trades.reduce((a, t) => a + (t.pnl ?? 0), 0);
+  return (
+    <>
+      <p className="trades-summary">
+        {trades.length} most recent trades · <span className="up">{won} won</span> · <span className="down">{lost} lost</span>
+        {" "}· net <b className={`num ${tone(net)}`}>{money(net, true)}</b>
+      </p>
+      <table className="trades">
+        <thead><tr><th>Opened</th><th>Strategy</th><th>Market</th><th>Bought</th>
+          <th>Outcome</th><th className="r">P&L</th></tr></thead>
+        <tbody>
+          {trades.map((t) => (
+            <tr key={`${t.instance}-${t.market_id}-${t.side}`} className={`o-${t.outcome}`}>
+              <td className="muted">{clock(t.opened)}</td>
+              <td><span className="who"><i className="swatch" style={{ ["--c" as string]: `var(--series-${slots[t.instance] ?? 1})` }} />{t.instance}</span></td>
+              <td className="market-cell" title={t.market_id}>
+                <span className="q">{nameOf(snap.names, t.market_id).title}</span>
+                <span className="muted">{nameOf(snap.names, t.market_id).subtitle}</span>
+              </td>
+              <td>
+                <span className={`side ${t.side}`}>{t.side === "yes" ? "Yes" : "No"}</span>{" "}
+                <span className="num">{+t.bought.toFixed(2)} at {cents(t.avg_price)}</span>
+                <span className="muted num cost" title={`includes ${money(t.fees)} in fees`}>{money(t.cost)} with fees
+                  {t.sold > 0 && <> · sold {+t.sold.toFixed(2)} at {cents(t.avg_sell)}</>}</span>
+              </td>
+              <td><span className={`outcome ${t.outcome}`} title={t.closed ? `${t.outcome === "sold" ? "sold" : "settled"} ${clock(t.closed)}` : "the market hasn't settled yet"}>
+                {OUTCOME[t.outcome]}</span></td>
+              <td className={`r num pnl ${tone(t.pnl)}`}>{t.pnl == null ? "–" : money(t.pnl, true)}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </>
+  );
 }
