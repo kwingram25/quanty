@@ -26,6 +26,14 @@ function useEventClock(s: SessionState | null): number | null {
   return s.now + (Date.now() - s.heartbeat_ts) * (s.speed?.value ?? rate.current);
 }
 
+/** How far apart two values are, with digits that show it at any scale (thousands of dollars or
+ *  fractions of a point). */
+const gap = (d: number): string => {
+  const a = Math.abs(d);
+  const digits = a >= 100 ? 0 : a >= 0.1 ? 2 : a >= 0.01 ? 3 : 4;
+  return a.toLocaleString("en-US", { minimumFractionDigits: digits, maximumFractionDigits: digits });
+};
+
 /** Two numbers that would print the same get enough decimals to tell them apart. */
 const close = (a: number, b: number): [string, string] => {
   const big = Math.max(Math.abs(a), Math.abs(b)) >= 1000;
@@ -87,9 +95,9 @@ function Event({ ms, now, slots, exposure }: {
         {ladder && ref != null && <> · now <b className="num">{fmtNum(ref)}{m0.unit}</b></>}
       </div>
       {!ladder && above != null && (
-        <div className={`vs ${above ? "up" : "down"}`}>
-          {above ? "▲" : "▼"} <b className="num">{close(ref!, m0.strike!)[0]}</b>
-          <span className="muted"> {above ? "above" : "below"} {close(ref!, m0.strike!)[1]}</span>
+        <div className="vs" title={`now ${close(ref!, m0.strike!)[0]}, strike ${close(ref!, m0.strike!)[1]}`}>
+          <b className={`num ${above ? "up" : "down"}`}>{above ? "▲" : "▼"} {gap(ref! - m0.strike!)}</b>
+          <span className="muted"> {above ? "above" : "below"} strike {close(ref!, m0.strike!)[1]} · now {close(ref!, m0.strike!)[0]}</span>
         </div>
       )}
       <div className="outcomes">
