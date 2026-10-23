@@ -1,0 +1,114 @@
+{% extends "base.html" %}
+{% block title %}quanty · {{ v.run.name }}{% endblock %}
+{% block main %}
+<h1>{{ v.run.name.split("/", 1)[1] }} <span class="badge {{ v.run.mode }}">{{ v.run.mode }}</span></h1>
+<p class="sub"><span title="{{ v.run.path }}">{{ v.run.mode }}/{{ v.run.path.name }}</span> · last activity {{ v.last_ts | ago }}</p>
+
+<div class="stats">
+  <div class="stat"><div class="label">Realized P&amp;L</div><div class="value {{ v.pnl | sign }}">{{ v.pnl | money }}</div></div>
+  <div class="stat"><div class="label">Fills</div><div class="value">{{ v.fills }}</div></div>
+  <div class="stat"><div class="label">Open positions</div><div class="value">{{ positions | length }}</div></div>
+  <div class="stat"><div class="label">Errors</div><div class="value">{{ v.errors }}</div></div>
+</div>
+
+<section class="card">
+  <h2 style="margin-top:0">Cumulative realized P&amp;L</h2>
+  {% if curves | length > 1 %}
+  <div class="legend">
+    {% for name in curves | sort %}<span><span class="swatch s{{ slots[name] }}"></span>{{ name }}</span>{% endfor %}
+  </div>
+  {% endif %}
+  {{ chart }}
+</section>
+
+<section class="card">
+  <h2 style="margin-top:0">Strategies</h2>
+  <table>
+    <thead><tr>
+      <th>Instance</th><th class="num">Orders</th><th class="num">Rejected</th><th class="num">Fills</th>
+      <th class="num">Contracts</th><th class="num">Fees</th><th class="num">Won</th><th class="num">Lost</th>
+      <th class="num">Realized P&amp;L</th>
+    </tr></thead>
+    <tbody>
+    {% for s in v.summaries %}
+      <tr>
+        <td>{% if s.instance in slots %}<span class="swatch s{{ slots[s.instance] }}"></span>{% endif %}{{ s.instance }}</td>
+        <td class="num">{{ s.orders }}</td><td class="num">{{ s.rejected }}</td><td class="num">{{ s.fills }}</td>
+        <td class="num">{{ "%g" | format(s.contracts) }}</td><td class="num">{{ s.fees | money }}</td>
+        <td class="num">{{ s.wins }}</td><td class="num">{{ s.losses }}</td>
+        <td class="num {{ s.pnl | sign }}">{{ s.pnl | money }}</td>
+      </tr>
+    {% else %}
+      <tr><td colspan="9" class="empty">No activity yet.</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</section>
+
+<section class="card">
+  <h2 style="margin-top:0">Open positions</h2>
+  {% if positions %}
+  <table>
+    <thead><tr><th>Instance</th><th>Market</th><th>Side</th><th class="num">Contracts</th><th class="num">Avg price</th></tr></thead>
+    <tbody>
+    {% for p in positions %}
+      <tr><td>{{ p.instance }}</td><td>{{ p.market_id }}</td><td>{{ p.side }}</td>
+        <td class="num">{{ "%g" | format(p.qty) }}</td><td class="num">{{ "%.3f" | format(p.avg_price) }}</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% else %}<p class="empty">None.</p>{% endif %}
+</section>
+
+<section class="card">
+  <h2 style="margin-top:0">Events</h2>
+  <p class="sub">Warnings, errors, shadow previews and live broker events, newest first.</p>
+  {% if recent.logs %}
+  <table>
+    <thead><tr><th>Time</th><th>Level</th><th>Source</th><th>Event</th><th>Details</th></tr></thead>
+    <tbody>
+    {% for r in recent.logs %}
+      <tr><td class="muted">{{ r.ts | clock }}</td><td><span class="badge {{ r.level }}">{{ r.level }}</span></td>
+        <td>{{ r.instance }}</td><td>{{ r.msg }}</td><td class="wrap">{{ r.fields | brief }}</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% else %}<p class="empty">Nothing notable.</p>{% endif %}
+</section>
+
+<section class="card">
+  <h2 style="margin-top:0">Recent fills</h2>
+  {% if recent.fills %}
+  <table>
+    <thead><tr><th>Time</th><th>Instance</th><th>Market</th><th>Order</th><th class="num">Qty</th>
+      <th class="num">Price</th><th class="num">Fee</th><th>Liquidity</th><th class="num">Realized</th></tr></thead>
+    <tbody>
+    {% for f in recent.fills %}
+      <tr><td class="muted">{{ f.ts | clock }}</td><td>{{ f.instance }}</td><td>{{ f.market_id }}</td>
+        <td>{{ f.action }} {{ f.side }}</td><td class="num">{{ "%g" | format(f.qty) }}</td>
+        <td class="num">{{ "%.3f" | format(f.price) }}</td><td class="num">{{ f.fee | money }}</td><td>{{ f.liquidity }}</td>
+        <td class="num {{ f.realized | sign }}">{% if f.realized %}{{ f.realized | money }}{% endif %}</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% else %}<p class="empty">No fills yet.</p>{% endif %}
+</section>
+
+<section class="card">
+  <h2 style="margin-top:0">Recent orders</h2>
+  {% if recent.orders %}
+  <table>
+    <thead><tr><th>Time</th><th>Instance</th><th>Market</th><th>Order</th><th class="num">Price</th>
+      <th class="num">Qty</th><th class="num">Filled</th><th>Status</th><th>Reason</th></tr></thead>
+    <tbody>
+    {% for o in recent.orders %}
+      <tr><td class="muted">{{ o.created_ts | clock }}</td><td>{{ o.instance }}</td><td>{{ o.market_id }}</td>
+        <td>{{ o.action }} {{ o.side }} {{ o.tif }}{% if o.post_only %} post-only{% endif %}</td>
+        <td class="num">{{ "%.3f" | format(o.price) }}</td><td class="num">{{ "%g" | format(o.qty) }}</td>
+        <td class="num">{{ "%g" | format(o.filled) }}</td><td>{{ o.status }}</td><td class="wrap">{{ o.reason }}</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% else %}<p class="empty">No orders yet.</p>{% endif %}
+</section>
+{% endblock %}

@@ -4,7 +4,7 @@ Writes are buffered and flushed in bulk (fast backtests); `durable=True` flushes
 (live). Reads flush first, so they always see everything written.
 """
 
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -112,56 +112,7 @@ class Ledger:
             return session.execute(stmt).freeze()()  # detached, usable after the session closes
 
     def summary(self) -> list[Summary]:
-        orders = {
-            r.instance: r
-            for r in self.execute(
-                select(
-                    OrderRow.instance,
-                    func.count().label("n"),
-                    func.sum(case((OrderRow.status == OrderStatus.REJECTED, 1), else_=0)).label("rejected"),
-                ).group_by(OrderRow.instance)
-            )
-        }
-        fills = {
-            r.instance: r
-            for r in self.execute(
-                select(
-                    FillRow.instance,
-                    func.count().label("n"),
-                    func.sum(case((FillRow.action == Action.BUY, FillRow.qty), else_=0)).label("contracts"),
-                    func.sum(FillRow.fee).label("fees"),
-                    func.sum(FillRow.realized).label("realized"),
-                ).group_by(FillRow.instance)
-            )
-        }
-        settled = {
-            r.instance: r
-            for r in self.execute(
-                select(
-                    SettlementRow.instance,
-                    func.sum(SettlementRow.pnl).label("pnl"),
-                    func.sum(case((SettlementRow.pnl > 0, 1), else_=0)).label("wins"),
-                    func.sum(case((SettlementRow.pnl < 0, 1), else_=0)).label("losses"),
-                ).group_by(SettlementRow.instance)
-            )
-        }
-        out = []
-        for inst in sorted(orders.keys() | fills.keys() | settled.keys()):
-            o, f, s = orders.get(inst), fills.get(inst), settled.get(inst)
-            out.append(
-                Summary(
-                    instance=inst,
-                    orders=o.n if o else 0,
-                    rejected=o.rejected if o else 0,
-                    fills=f.n if f else 0,
-                    contracts=f.contracts if f else 0,
-                    fees=f.fees if f else 0.0,
-                    pnl=(f.realized if f else 0.0) + (s.pnl if s else 0.0),
-                    wins=s.wins if s else 0,
-                    losses=s.losses if s else 0,
-                )
-            )
-        return out
+        return summarize(self.execute)
 
     # --- helpers ---
 
@@ -177,3 +128,57 @@ class Ledger:
 
 def _jsonable(fields: Mapping[str, object]) -> dict[str, object]:
     return {k: v if isinstance(v, str | int | float | bool | None) else repr(v) for k, v in fields.items()}
+
+
+def summarize(execute: Callable[[Any], Any]) -> list[Summary]:
+    """Per-instance totals from a ledger database (Ledger.execute, or any connection's execute)."""
+    orders = {
+        r.instance: r
+        for r in execute(
+            select(
+                OrderRow.instance,
+                func.count().label("n"),
+                func.sum(case((OrderRow.status == OrderStatus.REJECTED, 1), else_=0)).label("rejected"),
+            ).group_by(OrderRow.instance)
+        )
+    }
+    fills = {
+        r.instance: r
+        for r in execute(
+            select(
+                FillRow.instance,
+                func.count().label("n"),
+                func.sum(case((FillRow.action == Action.BUY, FillRow.qty), else_=0)).label("contracts"),
+                func.sum(FillRow.fee).label("fees"),
+                func.sum(FillRow.realized).label("realized"),
+            ).group_by(FillRow.instance)
+        )
+    }
+    settled = {
+        r.instance: r
+        for r in execute(
+            select(
+                SettlementRow.instance,
+                func.sum(SettlementRow.pnl).label("pnl"),
+                func.sum(case((SettlementRow.pnl > 0, 1), else_=0)).label("wins"),
+                func.sum(case((SettlementRow.pnl < 0, 1), else_=0)).label("losses"),
+            ).group_by(SettlementRow.instance)
+        )
+    }
+    out = []
+    for inst in sorted(orders.keys() | fills.keys() | settled.keys()):
+        o, f, s = orders.get(inst), fills.get(inst), settled.get(inst)
+        out.append(
+            Summary(
+                instance=inst,
+                orders=o.n if o else 0,
+                rejected=o.rejected if o else 0,
+                fills=f.n if f else 0,
+                contracts=f.contracts if f else 0,
+                fees=f.fees if f else 0.0,
+                pnl=(f.realized if f else 0.0) + (s.pnl if s else 0.0),
+                wins=s.wins if s else 0,
+                losses=s.losses if s else 0,
+            )
+        )
+    return out

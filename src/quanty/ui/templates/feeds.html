@@ -1,0 +1,7 @@
+{% extends "base.html" %}
+{% block title %}quanty · feeds{% endblock %}
+{% block main %}
+<h1>Feeds</h1>
+<p class="sub">Health per recording window. Lag is receive time minus the venue's own timestamp.</p>
+{% include "_feeds.html" %}
+{% endblock %}

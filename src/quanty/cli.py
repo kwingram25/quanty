@@ -146,6 +146,24 @@ def live(
     _session("live", path, feeds, data, ledger, duration, window, armed=True)
 
 
+@app.command()
+def ui(
+    data: DataOpt = Path("data"),
+    host: Annotated[
+        str, typer.Option(help="Interface to listen on (keep it local: there is no login)")
+    ] = "127.0.0.1",
+    port: Annotated[int, typer.Option(help="Port")] = 8765,
+    refresh: Annotated[int, typer.Option(help="Seconds between page refreshes")] = 5,
+) -> None:
+    """Dashboard of runs (ledgers under <data>/{live,paper,backtest}) and feed health. Read-only."""
+    import uvicorn
+
+    from quanty.ui.app import create_app
+
+    typer.echo(f"quanty ui on http://{host}:{port} (data {data}; Ctrl-C to stop)")
+    uvicorn.run(create_app(data, refresh_s=refresh), host=host, port=port, log_level="warning")
+
+
 def _session(
     mode: str,
     path: Path,

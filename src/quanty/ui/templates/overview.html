@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+{% block title %}quanty · runs{% endblock %}
+{% block main %}
+<h1>Runs</h1>
+<p class="sub">Ledgers under <code>{{ data }}</code>: live, paper and backtest runs, newest first.</p>
+<section class="card">
+  {% if runs %}
+  <table>
+    <thead><tr>
+      <th>Run</th><th>Mode</th><th class="num">Strategies</th><th class="num">Fills</th>
+      <th class="num">Realized P&amp;L</th><th class="num">Errors</th><th>Last activity</th>
+    </tr></thead>
+    <tbody>
+    {% for v in runs %}
+      <tr>
+        <td><a href="/runs/{{ v.run.name }}">{{ v.run.name.split("/", 1)[1] }}</a></td>
+        <td><span class="badge {{ v.run.mode }}">{{ v.run.mode }}</span></td>
+        <td class="num">{{ v.summaries | length }}</td>
+        <td class="num">{{ v.fills }}</td>
+        <td class="num {{ v.pnl | sign }}">{{ v.pnl | money }}</td>
+        <td class="num">{% if v.errors %}<span class="badge error">{{ v.errors }}</span>{% else %}0{% endif %}</td>
+        <td class="muted">{{ v.last_ts | ago }}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p class="empty">No runs yet. Start one with <code>quanty paper</code>, or write a backtest ledger to
+    <code>{{ data }}/backtest/</code> with <code>quanty backtest … --ledger</code>.</p>
+  {% endif %}
+</section>
+
+<h2>Feeds</h2>
+{% include "_feeds.html" %}
+{% endblock %}

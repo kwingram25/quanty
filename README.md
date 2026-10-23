@@ -6,7 +6,7 @@ economic releases, or any market that recurs on a schedule and settles against a
 
 > **Status: early development.** The engine, simulated broker, feed and venue recording/replay
 > (Kalshi, Polymarket US), backtests, paper trading, shadow mode and a live broker (tested against
-> a fake exchange) work; the web UI is next.
+> a fake exchange) and a read-only web dashboard work.
 
 ## Quickstart
 
@@ -125,6 +125,17 @@ venue before restarting). Each live broker journals its orders next to the ledge
 and nothing else, so other programs on the same account are safe. `quanty.venues.fake.FakeExchange` speaks both venues' order APIs with
 injectable faults, for testing brokers without real orders.
 
+## Dashboard
+
+```sh
+uv run quanty ui --data data    # http://127.0.0.1:8765
+```
+
+Every run under `data/{live,paper,backtest}/`: realized P&L over time per strategy, open positions,
+fills, orders, and the events worth seeing (warnings, errors, shadow previews, live broker
+events), plus feed health. Read-only and safe beside running sessions; it refreshes itself.
+There is no login, so it listens on localhost only by default.
+
 ## Pieces
 
 | | |
@@ -136,6 +147,7 @@ injectable faults, for testing brokers without real orders.
 | `brokers/sim.py` | simulated venue: latency, taker fills, queue position (configurable `QueueModel`), post-only |
 | `brokers/shadow.py` | simulated fills plus a real venue preview of every order |
 | `brokers/live.py` | real orders: placement, fill polling, cancel races, safety stops |
+| `ui/` | the dashboard (FastAPI, server-rendered pages, HTMX refresh, SVG charts) |
 | `venues/orders.py`, `venues/fake.py` | venue order APIs, and a fake exchange that speaks them |
 | `feeds/` | WebSocket and polling transports, Coinbase and Binance adapters, raw recording, replay, health and latency |
 | `venues/` | Kalshi and Polymarket US: discovery, books, trades, settlement, fees, request signing |
