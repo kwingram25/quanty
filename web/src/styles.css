@@ -86,6 +86,10 @@ a { color: inherit; }
 /* run header */
 .run-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 24px; flex-wrap: wrap; margin-bottom: 20px; }
 .run-title h1 { margin: 0; font-size: 22px; font-weight: 600; letter-spacing: -0.015em; display: flex; align-items: center; gap: 10px; }
+/* status pills and controls side by side in the run header: one height */
+.run-title h1 .pill, .run-title h1 .btn { height: 28px; }
+.run-title h1 .segmented { margin-left: 0; }
+.pill > .muted { margin-left: -3px; } /* "· detail" sits with its text, not a pill's gap away */
 .run-title p { margin: 4px 0 0; color: var(--muted); font-size: 13px; }
 .kpis { display: flex; gap: 36px; }
 .kpi .label { font-size: 12px; color: var(--muted); }
