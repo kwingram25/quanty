@@ -88,7 +88,7 @@ def init(
     except ValueError as exc:
         raise _fail(exc) from None
     typer.echo(f"created {path}/: " + ", ".join(written))
-    typer.echo(f"next: cd {path} && quanty list   (then see README.md)")
+    typer.echo(f"next: cd {path} && uv run quanty list   (then see README.md)")
 
 
 @app.command("list")

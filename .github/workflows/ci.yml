@@ -49,6 +49,9 @@ jobs:
       - run: uv sync --locked
       - name: create a project (vendors a wheel of this commit)
         run: uv run quanty init generated-project --yes --venue polymarket_us
+      - name: uv run works inside the project with nothing installed
+        working-directory: generated-project
+        run: env -u VIRTUAL_ENV uv run quanty list | grep -q my_strategy
       - name: build the image and backtest inside it
         working-directory: generated-project
         run: |

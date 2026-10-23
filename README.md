@@ -35,7 +35,8 @@ files to deploy it:
 
 ```sh
 uv run quanty init my-quanty          # a few questions; --yes for the defaults
-cd my-quanty && docker compose up -d --build   # on a server: trader + dashboard, restarted on failure
+cd my-quanty && uv run quanty list    # works there too: the first run sets everything up
+docker compose up -d --build          # on a server: trader + dashboard, restarted on failure
 ```
 
 [Getting started](docs/getting-started.md) goes step by step from experiments to recording real data,

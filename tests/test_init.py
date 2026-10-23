@@ -16,6 +16,9 @@ def test_init_writes_a_working_project(tmp_path: Path) -> None:
     assert {"strategies/edge_finder.py", "experiments/main.toml", "feeds.toml", ".env", "Dockerfile",
             "compose.yaml"} <= set(written)  # fmt: skip
     assert stat.S_IMODE((proj / ".env").stat().st_mode) == 0o600  # keys: owner only
+    assert (
+        "pyproject.toml" in written and 'dependencies = ["quanty"]' in (proj / "pyproject.toml").read_text()
+    )
     assert ".env" in (proj / ".dockerignore").read_text()  # never baked into the image
     found = plugins.discover([proj / "strategies"], include_examples=False, local=None)
     exp = experiment.load(proj / "experiments" / "main.toml")

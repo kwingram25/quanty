@@ -6,6 +6,10 @@
 uv run quanty init my-quanty     # strategy skeleton, feeds.toml, experiments/main.toml, .env, Dockerfile, compose.yaml
 ```
 
+Inside the project, `uv run quanty …` works with nothing installed first: the project's
+`pyproject.toml` points at quanty (the wheel in `vendor/`, else GitHub), and the first `uv run` sets
+up `.venv/`.
+
 ## With Docker (recommended)
 
 Copy the folder, including `.env`, to a server with Docker, then:

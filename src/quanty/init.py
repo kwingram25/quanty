@@ -8,6 +8,7 @@ my-quanty/
   strategies/<name>.py     a strategy skeleton aimed at the first series
   Dockerfile, compose.yaml trader + dashboard, persistent data, restart on failure
   vendor/                  a quanty wheel, when init runs from a source checkout
+  pyproject.toml           so `uv run quanty ...` works here with nothing installed first
   README.md                next steps
 """
 
@@ -55,8 +56,8 @@ def files(a: Answers) -> dict[str, str]:
     first = next((f"{v}:{a.series[v][0]}" for v in a.venues if a.series.get(v)), "kalshi:KXBTC15M")
     return {
         ".env": _env(a),
-        ".gitignore": ".env\ndata/\n__pycache__/\n",
-        ".dockerignore": ".env\ndata/\n.git/\n__pycache__/\n",
+        ".gitignore": ".env\ndata/\n__pycache__/\n.venv/\n",
+        ".dockerignore": ".env\ndata/\n.git/\n__pycache__/\n.venv/\n",
         "feeds.toml": _feeds(a),
         "experiments/main.toml": _experiment(a),
         f"strategies/{a.strategy}.py": _strategy(a.strategy, first),
@@ -84,9 +85,9 @@ def create(dest: Path, a: Answers, *, force: bool = False, vendor: bool | None =
     checkout = Path(quanty.__file__).resolve().parents[2]
     if vendor is None:
         vendor = (checkout / "pyproject.toml").exists()
-    if vendor:
-        written += _vendor(checkout, dest / "vendor")
-    return written
+    wheels = _vendor(checkout, dest / "vendor") if vendor else []
+    (dest / "pyproject.toml").write_text(_pyproject(dest, wheels[0] if wheels else None))
+    return [*written, *wheels, "pyproject.toml"]
 
 
 def _vendor(checkout: Path, into: Path) -> list[str]:
@@ -103,6 +104,24 @@ def _vendor(checkout: Path, into: Path) -> list[str]:
     except (OSError, subprocess.SubprocessError):
         return []
     return [f"vendor/{w.name}" for w in into.glob("quanty-*.whl")]
+
+
+def _pyproject(dest: Path, wheel: str | None) -> str:
+    """A uv project depending on quanty (the vendored wheel, else GitHub), so `uv run quanty` just works."""
+    name = re.sub(r"[^a-z0-9]+", "-", dest.resolve().name.lower()).strip("-") or "quanty-project"
+    source = f'{{ path = "{wheel}" }}' if wheel else f'{{ git = "{REPO}" }}'
+    return f"""[project]
+name = "{name}"
+version = "0.1.0"
+requires-python = ">=3.12"
+dependencies = ["quanty"]
+
+[tool.uv]
+package = false   # your strategies are loaded from strategies/, not installed
+
+[tool.uv.sources]
+quanty = {source}
+"""
 
 
 def _env(a: Answers) -> str:
@@ -146,9 +165,9 @@ def _feeds(a: Answers) -> str:
 
 
 def _experiment(a: Answers) -> str:
-    return f"""# What runs: `quanty paper experiments/main.toml --feeds feeds.toml`.
+    return f"""# What runs: `uv run quanty paper experiments/main.toml --feeds feeds.toml`.
 # Brokers: kind = "sim" simulates fills (paper); "shadow" also checks every order with the venue
-# without placing it; "live" places real orders (needs max_qty, max_notional and `quanty live --arm`).
+# without placing it; "live" places real orders (needs max_qty, max_notional and `uv run quanty live --arm`).
 
 [limits]               # account-wide
 max_open_risk = 100
@@ -191,15 +210,18 @@ A quanty project: your strategy, its configuration, and what's needed to deploy 
 
 ## Next steps
 
-1. **Write the strategy** in `strategies/{a.strategy}.py` (the TODOs). `quanty list` should show it.
+1. **Write the strategy** in `strategies/{a.strategy}.py` (the TODOs). `uv run quanty list` should show it
+   (the first `uv run` sets up everything it needs in `.venv/`; nothing to install beforehand).
 2. **Check your keys** in `.env`, then record some data and look at it:
-   `quanty record --config feeds.toml --data data` (Ctrl-C to stop), then `quanty ui --data data`.
-3. **Backtest** on what you recorded: `quanty backtest experiments/main.toml --data data`.
+   `uv run quanty record --config feeds.toml --data data` (Ctrl-C to stop),
+   then `uv run quanty ui --data data`.
+3. **Backtest** on what you recorded: `uv run quanty backtest experiments/main.toml --data data`.
 4. **Paper trade** live markets with simulated fills, with the dashboard alongside:
-   `quanty paper experiments/main.toml --feeds feeds.toml --data data` and `quanty ui --data data`.
+   `uv run quanty paper experiments/main.toml --feeds feeds.toml --data data`
+   and `uv run quanty ui --data data`.
 5. **Shadow, then live**: set `kind = "shadow"` in `experiments/main.toml` to have every order checked
    by the venue; for real orders, `kind = "live"` with `max_qty` and `max_notional`, and
-   `quanty live experiments/main.toml --feeds feeds.toml --data data --arm`.
+   `uv run quanty live experiments/main.toml --feeds feeds.toml --data data --arm`.
 
 ## Deploy
 
