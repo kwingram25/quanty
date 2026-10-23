@@ -23,8 +23,10 @@ def backtest_ledger(path: Path) -> Ledger:
     mods = discover([], include_examples=True, local=None)
     cls = strategy_class(mods["example_favorite"])
     broker = SimBroker()
-    insts = [Instance(n, cls(cls.params_type.from_config({"min_conf": c}, where=n)), broker)
-             for n, c in (("fav_90", 0.90), ("fav_97", 0.97))]  # fmt: skip
+    insts = [
+        Instance(n, cls(cls.params_type.from_config({"min_conf": c}, where=n)), broker)
+        for n, c in (("fav_90", 0.90), ("fav_97", 0.97))
+    ]
     ledger = Ledger(path, durable=True)
     Engine(insts, ledger=ledger, clock_ms=None).run(synthetic.events(synthetic.Spec(hours=2, seed=1)))
     return ledger
@@ -41,8 +43,12 @@ def live_ledger(path: Path) -> Ledger:
     s = Hooks(book=lambda ctx, b: act(ctx, b) if not s.fills() and not s.statuses() else None)
     e = Engine([Instance("live_a", s, SimBroker())], ledger=ledger, clock_ms=None, strict=False)
     e.run([*opened(), book(1000, [(0.40, 50)], [(0.45, 50)])])
-    for msg, level in (("shadow preview", "info"), ("live order rejected", "warning"), ("tick", "info"),
-                       ("live broker disabled", "error")):  # fmt: skip
+    for msg, level in (
+        ("shadow preview", "info"),
+        ("live order rejected", "warning"),
+        ("tick", "info"),
+        ("live broker disabled", "error"),
+    ):
         ledger.log(2000, "live_a", msg, {"order_id": "x", "request": {"big": "body"}}, level=level)
     ledger.commit()
     return ledger
@@ -203,3 +209,39 @@ def test_session_reports_platforms(tmp_path: Path) -> None:
     assert c.platforms() == []
     c.feeds = lambda: {"kalshi": "ok", "polymarket_us": "stale"}
     assert c.platforms() == [{"name": "kalshi", "status": "ok"}, {"name": "polymarket_us", "status": "stale"}]
+
+
+def test_orders_are_classified_and_counted(tmp_path: Path) -> None:
+    from quanty import experiment, plugins, synthetic
+    from quanty.core import Engine, Ledger
+    from quanty.enums import OrderStatus, Tif
+    from quanty.ui import queries
+
+    R = queries.order_result
+    assert [
+        R(OrderStatus.FILLED, 10, 10, Tif.IOC),
+        R(OrderStatus.CANCELED, 4, 10, Tif.IOC),
+        R(OrderStatus.CANCELED, 0, 10, Tif.IOC),
+        R(OrderStatus.EXPIRED, 0, 10, Tif.GTC),
+        R(OrderStatus.REJECTED, 0, 10, Tif.IOC),
+        R(OrderStatus.OPEN, 2, 10, Tif.GTC),
+    ] == ["filled", "partial", "missed", "unfilled", "rejected", "resting"]
+
+    (tmp_path / "backtest").mkdir()
+    path = tmp_path / "backtest" / "slow.sqlite"
+    raw = {
+        "brokers": {"sim": {"kind": "sim", "latency_ms": 3000}},  # slow: some IOCs find nothing
+        "instances": [{"id": "x", "strategy": "example_favorite"}],
+    }
+    exp = experiment.parse(raw)
+    ledger = Ledger(path)
+    engine = Engine(experiment.build(exp, plugins.discover([], local=None), synthetic.FEES), ledger=ledger)
+    engine.run(synthetic.events(synthetic.Spec(hours=6)))
+    ledger.close()
+    run = queries.run_by_name(tmp_path, "backtest/slow")
+    assert run is not None
+    stats = queries.order_stats(run)["x"]
+    assert stats["missed"] > 0 and stats["orders"] == sum(v for k, v in stats.items() if k != "orders")
+    issues = queries.activity(run, needs_look=True)
+    assert issues and all(a.result != "filled" for a in issues)
+    assert len(issues) == min(100, stats["orders"] - stats["filled"])

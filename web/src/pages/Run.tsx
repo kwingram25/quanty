@@ -1,7 +1,7 @@
 import { motion } from "motion/react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useParams } from "react-router-dom";
-import { useRunStream, type NewRows, type Snapshot } from "../api";
+import { useRunStream, type ActivityRow, type NewRows, type OrderStats, type Snapshot } from "../api";
 import { AnimatedNumber } from "../components/AnimatedNumber";
 import { Markets } from "../components/Markets";
 import { PnlChart } from "../components/PnlChart";
@@ -86,7 +86,7 @@ function Run({ snap, live }: { snap: Snapshot; live: boolean }) {
   );
 }
 
-const TABS = ["chart", "trades", "positions", "orders", "commands"] as const;
+const TABS = ["chart", "trades", "orders", "commands"] as const;
 type Tab = (typeof TABS)[number];
 
 const RANGES: Record<string, number | null> = { "1h": 3_600_000, "6h": 21_600_000, "24h": 86_400_000, All: null };
@@ -103,14 +103,14 @@ function Center({ snap, slots, halted }: { snap: Snapshot; slots: Record<string,
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.target instanceof HTMLInputElement || e.metaKey || e.ctrlKey || e.altKey) return;
-      const i = ["1", "2", "3", "4", "5"].indexOf(e.key);
+      const i = ["1", "2", "3", "4"].indexOf(e.key);
       if (i >= 0) pick(TABS[i]);
     };
     addEventListener("keydown", onKey);
     return () => removeEventListener("keydown", onKey);
   }, []);
   const counts: Record<Tab, number | null> = {
-    chart: null, trades: snap.trades?.length ?? 0, positions: snap.positions.length, orders: snap.activity.length,
+    chart: null, trades: snap.trades?.length ?? 0, orders: needsLook(snap.order_stats) ?? snap.activity.length,
     commands: snap.commands.length,
   };
   const label = (t: Tab) => (t === "chart" ? "P&L" : t[0].toUpperCase() + t.slice(1));
@@ -142,50 +142,99 @@ function Center({ snap, slots, halted }: { snap: Snapshot; slots: Record<string,
         {tab === "chart" && <PnlChart curves={snap.curves} slots={slots} halted={halted} range={RANGES[range]}
           now={snap.session?.now ?? null} />}
         {tab === "trades" && <Trades snap={snap} slots={slots} />}
-        {tab === "orders" && <Activity snap={snap} />}
-        {tab === "positions" && <Positions snap={snap} />}
+        {tab === "orders" && <Orders snap={snap} slots={slots} />}
         {tab === "commands" && <Commands snap={snap} />}
       </div>
     </section>
   );
 }
 
-function Activity({ snap }: { snap: Snapshot }) {
-  if (!snap.activity.length) return <p className="empty" style={{ padding: 16 }}>No orders yet.</p>;
-  return (
-    <table>
-      <thead><tr><th>Time</th><th>Strategy</th><th>Market</th><th>Order</th><th className="r">Limit</th>
-        <th className="r">Filled</th><th className="r">Avg fill</th><th className="r">Fees</th><th>Liquidity</th>
-        <th className="r">Realized</th><th>Status</th></tr></thead>
-      <tbody>
-        {snap.activity.map((a) => (
-          <tr key={a.id}>
-            <td className="muted">{clock(a.created_ts)}</td><td>{a.instance}</td><td><Name snap={snap} id={a.market_id} /></td>
-            <td>{a.action} {a.side.toUpperCase()} {a.tif.toUpperCase()}{a.post_only ? " post-only" : ""}</td>
-            <td className="r">{cents(a.price)}</td><td className="r">{a.filled} / {a.qty}</td>
-            <td className="r">{a.avg_price == null ? "" : cents(a.avg_price)}</td>
-            <td className="r">{a.fills ? money(a.fees) : ""}</td><td>{a.liquidity}</td>
-            <td className={`r ${tone(a.realized)}`}>{a.realized ? money(a.realized, true) : ""}</td>
-            <td>{a.status}{a.reason && <span className="why" title={a.reason}> · {a.reason.slice(0, 40)}</span>}</td>
-          </tr>
-        ))}
-      </tbody>
-    </table>
-  );
+/** Orders that didn't simply fill, over every order (null before the ledger reported counts). */
+const needsLook = (stats: OrderStats | undefined): number | null =>
+  stats ? Object.values(stats).reduce((n, s) => n + s.orders - s.filled, 0) : null;
+
+const RESULT: Record<ActivityRow["result"], string> = {
+  filled: "Filled", partial: "Partly filled", missed: "Missed", unfilled: "Not filled", rejected: "Rejected", resting: "Resting",
+};
+const qty = (q: number) => String(+q.toFixed(2));
+
+function resultDetail(a: ActivityRow): string {
+  const at = a.avg_price != null ? ` at ${cents(a.avg_price)}` : "";
+  switch (a.result) {
+    case "filled": return `${qty(a.filled)}${at}`;
+    case "partial": return `${qty(a.filled)} of ${qty(a.qty)}${at}; the rest ${a.status === "expired" ? "expired at the close" : "canceled"}`;
+    case "missed": return a.action === "buy" ? `nothing offered at ${cents(a.price)} or less` : `no bid at ${cents(a.price)} or more`;
+    case "unfilled": return a.status === "expired" ? "expired at the close" : "canceled before anything filled";
+    case "rejected": return a.reason || "refused";
+    case "resting": return `${qty(a.filled)} of ${qty(a.qty)} filled so far`;
+  }
 }
 
-function Positions({ snap }: { snap: Snapshot }) {
-  if (!snap.positions.length) return <p className="empty" style={{ padding: 16 }}>No open positions.</p>;
+/** Execution: what each order asked for and how it turned out. By default only the orders worth a
+ * look (missed, partly filled, rejected, still resting); what filled shows up in Trades. */
+function Orders({ snap, slots }: { snap: Snapshot; slots: Record<string, number> }) {
+  const [view, setView] = useState<"look" | "all">(() => {
+    try { return localStorage.getItem("orders:view") === "all" ? "all" : "look"; } catch { return "look"; }
+  });
+  const pickView = (v: "look" | "all") => { setView(v); try { localStorage.setItem("orders:view", v); } catch { /* private mode */ } };
+  const stats = snap.order_stats ?? {};
+  const total = Object.values(stats).reduce(
+    (t, s) => { for (const k of Object.keys(s) as (keyof typeof s)[]) t[k] = (t[k] ?? 0) + s[k]; return t; },
+    {} as Record<string, number>);
+  const look = needsLook(snap.order_stats) ?? 0;
+  const rows = view === "look" ? snap.order_issues ?? [] : snap.activity;
+  if (!snap.activity.length) return <p className="empty" style={{ padding: 16 }}>No orders yet.</p>;
+  const perStrategy = Object.entries(stats).map(([k, s]) =>
+    `${k}: ${s.orders} orders, ${s.filled} filled, ${s.missed} missed, ${s.partial} partly filled, ${s.rejected} rejected`).join("\n");
+  const parts = (["missed", "partial", "unfilled", "rejected", "resting"] as const)
+    .filter((k) => total[k]).map((k) => `${total[k]} ${RESULT[k].toLowerCase()}`);
   return (
-    <table>
-      <thead><tr><th>Strategy</th><th>Market</th><th>Side</th><th className="r">Contracts</th><th className="r">Avg price</th></tr></thead>
-      <tbody>
-        {snap.positions.map((p) => (
-          <tr key={`${p.instance}-${p.market_id}-${p.side}`}><td>{p.instance}</td><td><Name snap={snap} id={p.market_id} /></td>
-            <td>{p.side.toUpperCase()}</td><td className="r">{p.qty}</td><td className="r">{cents(p.avg_price)}</td></tr>
-        ))}
-      </tbody>
-    </table>
+    <>
+      <div className="orders-head">
+        <p className="trades-summary" title={perStrategy || undefined}>
+          {total.orders} orders · <b>{total.orders ? Math.round((100 * (total.filled ?? 0)) / total.orders) : 0}%</b> filled in full
+          {parts.length > 0 && <> · {parts.join(" · ")}</>}
+        </p>
+        <div className="segmented" role="radiogroup" aria-label="Which orders">
+          {(["look", "all"] as const).map((v) => (
+            <button key={v} role="radio" aria-checked={view === v} onClick={() => pickView(v)}
+              title={v === "look" ? "Orders that didn't simply fill: missed, partly filled, rejected, resting" : "Every recent order"}>
+              {view === v && <motion.span className="thumb" layoutId="orders-thumb" transition={{ type: "spring", stiffness: 500, damping: 38 }} />}
+              <span>{v === "look" ? `Needs a look${look ? ` ${look}` : ""}` : "All"}</span>
+            </button>
+          ))}
+        </div>
+      </div>
+      {rows.length === 0 ? (
+        <p className="empty" style={{ padding: 16 }}>Every order filled in full. What they bought is in Trades.</p>
+      ) : (
+        <table className="trades orders">
+          <thead><tr><th>Sent</th><th>Strategy</th><th>Market</th><th>Order</th><th>Result</th></tr></thead>
+          <tbody>
+            {rows.map((a) => (
+              <tr key={a.id} className={`r-${a.result}`}>
+                <td className="muted">{clock(a.created_ts)}</td>
+                <td><span className="who"><i className="swatch" style={{ ["--c" as string]: `var(--series-${slots[a.instance] ?? 1})` }} />{a.instance}</span></td>
+                <td className="market-cell" title={a.market_id}>
+                  <span className="q">{nameOf(snap.names, a.market_id).title}</span>
+                  <span className="muted">{nameOf(snap.names, a.market_id).subtitle}</span>
+                </td>
+                <td>
+                  {a.action === "buy" ? "Buy" : "Sell"} <span className="num">{qty(a.qty)}</span>{" "}
+                  <span className={`side ${a.side}`}>{a.side === "yes" ? "Yes" : "No"}</span>{" "}
+                  <span className="num">at {cents(a.price)}</span>
+                  <span className="muted cost">{[a.tif.toUpperCase(), a.post_only && "post-only", a.tag].filter(Boolean).join(" · ")}</span>
+                </td>
+                <td title={a.fills ? `${a.liquidity || "?"} · fees ${money(a.fees)} · ${a.fills} fill${a.fills > 1 ? "s" : ""}` : a.status}>
+                  <span className={`outcome ${a.result}`}>{RESULT[a.result]}</span>
+                  <span className="muted cost">{resultDetail(a)}</span>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+    </>
   );
 }
 
@@ -207,26 +256,38 @@ function Commands({ snap }: { snap: Snapshot }) {
   );
 }
 
-function Name({ snap, id }: { snap: Snapshot; id: string }) {
-  const n = nameOf(snap.names, id);
-  return <span title={id}>{n.title}{n.subtitle && <span className="muted"> · {n.subtitle}</span>}</span>;
-}
-
 const OUTCOME: Record<string, string> = { won: "Won", lost: "Lost", sold: "Sold", open: "Open" };
 
 /** What each strategy bought, what it cost, and how it ended. */
 function Trades({ snap, slots }: { snap: Snapshot; slots: Record<string, number> }) {
-  const trades = snap.trades ?? [];
-  if (!trades.length) return <p className="empty" style={{ padding: 16 }}>No trades yet.</p>;
+  const [onlyOpen, setOnlyOpen] = useState(false);
+  const all = snap.trades ?? [];
+  const open = all.filter((t) => t.outcome === "open");
+  const trades = onlyOpen ? open : all;
+  if (!all.length) return <p className="empty" style={{ padding: 16 }}>No trades yet.</p>;
   const won = trades.filter((t) => t.outcome === "won").length;
   const lost = trades.filter((t) => t.outcome === "lost").length;
   const net = trades.reduce((a, t) => a + (t.pnl ?? 0), 0);
   return (
     <>
-      <p className="trades-summary">
-        {trades.length} most recent trades · <span className="up">{won} won</span> · <span className="down">{lost} lost</span>
-        {" "}· net <b className={`num ${tone(net)}`}>{money(net, true)}</b>
-      </p>
+      <div className="orders-head">
+        <p className="trades-summary">
+          {onlyOpen
+            ? <>{open.length} open · <b className="num">{money(open.reduce((a, t) => a + t.cost, 0))}</b> at cost, settling or sold later</>
+            : <>{trades.length} most recent trades · <span className="up">{won} won</span> · <span className="down">{lost} lost</span>
+              {" "}· net <b className={`num ${tone(net)}`}>{money(net, true)}</b></>}
+        </p>
+        <div className="segmented" role="radiogroup" aria-label="Which trades">
+          {[false, true].map((o) => (
+            <button key={String(o)} role="radio" aria-checked={onlyOpen === o} onClick={() => setOnlyOpen(o)}
+              title={o ? "Positions still held: the market hasn't settled and they weren't sold" : "Every recent trade"}>
+              {onlyOpen === o && <motion.span className="thumb" layoutId="trades-thumb" transition={{ type: "spring", stiffness: 500, damping: 38 }} />}
+              <span>{o ? `Open ${open.length}` : "All"}</span>
+            </button>
+          ))}
+        </div>
+      </div>
+      {trades.length === 0 && <p className="empty" style={{ padding: 16 }}>Nothing open right now.</p>}
       <table className="trades">
         <thead><tr><th>Opened</th><th>Strategy</th><th>Market</th><th>Bought</th>
           <th>Outcome</th><th className="r">P&L</th></tr></thead>

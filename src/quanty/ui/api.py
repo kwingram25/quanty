@@ -54,6 +54,18 @@ class Command(BaseModel):
     confirm: str = ""
 
 
+def _activity(a: queries.Activity) -> dict[str, Any]:
+    return {
+        **_row(a.order),
+        "fills": a.fills,
+        "avg_price": a.avg_price,
+        "fees": a.fees,
+        "realized": a.realized,
+        "liquidity": a.liquidity,
+        "result": a.result,
+    }
+
+
 class Api:
     def __init__(self, data: Path, auth: "Auth | None" = None) -> None:
         self.data = data
@@ -111,17 +123,9 @@ class Api:
             "strategies": [{**_row(summaries[k]), "info": info.get(k, {})} for k in sorted(summaries)],
             "curves": queries.pnl_curves(r),
             "positions": [_row(p) for p in queries.positions(r)],
-            "activity": [
-                {
-                    **_row(a.order),
-                    "fills": a.fills,
-                    "avg_price": a.avg_price,
-                    "fees": a.fees,
-                    "realized": a.realized,
-                    "liquidity": a.liquidity,
-                }
-                for a in queries.activity(r)
-            ],
+            "activity": [_activity(a) for a in queries.activity(r)],
+            "order_issues": [_activity(a) for a in queries.activity(r, needs_look=True)],
+            "order_stats": queries.order_stats(r),
             "tape": queries.tape(r),
             "session": None
             if session is None
@@ -140,7 +144,8 @@ class Api:
             },
             "commands": history,
         }
-        shown = {a["market_id"] for a in snap["activity"]} | {p["market_id"] for p in snap["positions"]}
+        shown = {a["market_id"] for a in snap["activity"] + snap["order_issues"]}
+        shown |= {p["market_id"] for p in snap["positions"]}
         shown |= {i["market_id"] for i in snap["tape"] if "market_id" in i}
         snap["trades"] = queries.trades(r)
         shown |= {t["market_id"] for t in snap["trades"]}

@@ -95,6 +95,7 @@ export interface ActivityRow {
   qty: number;
   tif: string;
   post_only: boolean;
+  tag: string;
   created_ts: number;
   status: string;
   filled: number;
@@ -104,7 +105,12 @@ export interface ActivityRow {
   fees: number;
   realized: number;
   liquidity: string;
+  /** how it turned out: filled, partial, missed (IOC found nothing), unfilled, rejected, resting */
+  result: "filled" | "partial" | "missed" | "unfilled" | "rejected" | "resting";
 }
+
+/** Per strategy, over every order: how many there were and how they turned out. */
+export type OrderStats = Record<string, Record<"orders" | ActivityRow["result"], number>>;
 
 export interface Position { instance: string; market_id: string; side: string; qty: number; avg_price: number }
 
@@ -127,6 +133,9 @@ export interface Snapshot {
   curves: Record<string, [number, number][]>;
   positions: Position[];
   activity: ActivityRow[];
+  /** the latest orders that didn't simply fill in full */
+  order_issues?: ActivityRow[];
+  order_stats?: OrderStats;
   tape: TapeItem[];
   session: SessionState | null;
   commands: CommandRow[];

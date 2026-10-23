@@ -145,7 +145,7 @@ def temperature_ladder(spec: Spec, bucket: float = 2.0) -> Iterator[Event]:
                 market = Market(
                     id=f"{VENUE}:TEMP-{close_s}-B{i}", venue=VENUE, series=f"{VENUE}:temp_1h", open_ts=t,
                     close_ts=close_s * 1000, group=f"{VENUE}:temp",
-                    terms={"title": f"Synthville temperature at {close}?", "subtitle": label,
+                    terms={"title": f"Synthville temperature at {close} UTC?", "subtitle": label,
                            "event": f"{VENUE}:TEMP-{close_s}",
                         "exclusive": True,
                         "exhaustive": True, "reference": TEMP_KEY, "unit": "°F",
@@ -234,7 +234,7 @@ def _updown_terms(strike: float, close_ts: int) -> dict[str, object]:
     close = time.strftime("%H:%M", time.gmtime(close_ts / 1000))
     return {
         "strike": strike,
-        "title": f"Index up at {close}?",
+        "title": f"Index up at {close} UTC?",
         "subtitle": f"at or above {strike:.2f}",
         "reference": INDEX_KEY,
     }

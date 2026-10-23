@@ -8,14 +8,14 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from sqlalchemy import Engine, case, func, select
+from sqlalchemy import ColumnElement, Engine, case, func, select
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session
 
 from quanty import db
 from quanty.core.ledger import Summary, summarize
 from quanty.db.models import FeedMetricRow, FillRow, LogRow, MarketRow, OrderRow, SettlementRow
-from quanty.enums import Action
+from quanty.enums import Action, OrderStatus, Tif
 
 MODES = ("live", "paper", "backtest")
 STALE_S = 180  # a feed window older than this means the recorder isn't running
@@ -186,15 +186,73 @@ class Activity:
     realized: float
     liquidity: str  # maker / taker / mixed / ""
 
+    @property
+    def result(self) -> str:
+        return order_result(self.order.status, self.order.filled, self.order.qty, self.order.tif)
 
-def activity(run: Run, limit: int = 100) -> list[Activity]:
-    """The latest orders, newest first, each with what filled, at what price and cost."""
+
+QTY_EPS = 1e-9
+RESTING = (OrderStatus.PENDING, OrderStatus.OPEN)
+
+
+def order_result(status: OrderStatus, filled: float, qty: float, tif: Tif) -> str:
+    """How an order turned out, in one word: filled, partial (some filled, the rest didn't), missed
+    (an IOC that found nothing), unfilled (a resting order canceled or expired with nothing),
+    rejected, or resting (still on the book)."""
+    if status == OrderStatus.REJECTED:
+        return "rejected"
+    if status in RESTING:
+        return "resting"
+    if filled >= qty - QTY_EPS:
+        return "filled"
+    if filled > QTY_EPS:
+        return "partial"
+    return "missed" if tif == Tif.IOC else "unfilled"
+
+
+# orders worth a look: anything but filled in full
+_NEEDS_LOOK = (OrderRow.status != OrderStatus.FILLED) | (OrderRow.filled < OrderRow.qty - QTY_EPS)
+
+
+def order_stats(run: Run) -> dict[str, dict[str, int]]:
+    """Per instance, over every order: how many there were and how each kind of result ended."""
+    rejected = OrderRow.status == OrderStatus.REJECTED
+    resting = OrderRow.status.in_(RESTING)
+    done = ~rejected & ~resting
+    full = OrderRow.filled >= OrderRow.qty - QTY_EPS
+    some = OrderRow.filled > QTY_EPS
+
+    def count(cond: ColumnElement[bool]) -> ColumnElement[int]:
+        return func.sum(case((cond, 1), else_=0))
+
     engine = _open(run.path)
     try:
         with Session(engine) as conn:
-            orders = list(
-                conn.execute(select(OrderRow).order_by(OrderRow.created_ts.desc()).limit(limit)).scalars()
-            )
+            rows = conn.execute(
+                select(
+                    OrderRow.instance,
+                    func.count().label("orders"),
+                    count(done & full).label("filled"),
+                    count(done & some & ~full).label("partial"),
+                    count(done & ~some & (OrderRow.tif == Tif.IOC)).label("missed"),
+                    count(done & ~some & (OrderRow.tif != Tif.IOC)).label("unfilled"),
+                    count(rejected).label("rejected"),
+                    count(resting).label("resting"),
+                ).group_by(OrderRow.instance)
+            ).all()
+    finally:
+        engine.dispose()
+    return {r.instance: {k: int(v or 0) for k, v in r._mapping.items() if k != "instance"} for r in rows}
+
+
+def activity(run: Run, limit: int = 100, needs_look: bool = False) -> list[Activity]:
+    """The latest orders, newest first, each with what filled, at what price and cost.
+    needs_look: only those that didn't simply fill in full (missed, partial, rejected, resting...)."""
+    engine = _open(run.path)
+    try:
+        with Session(engine) as conn:
+            q = select(OrderRow).order_by(OrderRow.created_ts.desc()).limit(limit)
+            orders = list(conn.execute(q.where(_NEEDS_LOOK) if needs_look else q).scalars())
             ids = [o.id for o in orders]
             agg = {
                 r.order_id: r

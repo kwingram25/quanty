@@ -453,3 +453,14 @@ table.trades .cost { display: block; }
 /* time zone switch in the top bar */
 .icon-btn.zone { width: auto; padding: 0 8px; font-size: 12px; font-weight: 600; font-variant-numeric: tabular-nums; }
 .pill.demo-clock { font-weight: 500; font-variant-numeric: tabular-nums; }
+
+/* orders: execution, and the filter bar shared with trades */
+.orders-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 6px 12px 0 0; }
+.orders-head .trades-summary { padding-bottom: 6px; }
+table.orders .outcome.filled { color: var(--up); }
+table.orders .outcome.partial, table.orders .outcome.missed { color: var(--warning); border-color: color-mix(in srgb, var(--warning) 40%, var(--border)); }
+table.orders .outcome.rejected { color: var(--critical); background: var(--down-wash); border-color: transparent; }
+table.orders .outcome.resting { color: var(--series-1); }
+table.orders .outcome.unfilled { color: var(--muted); }
+table.orders .outcome + .cost { margin-top: 3px; }
+table.orders td:last-child { white-space: normal; max-width: 320px; }
