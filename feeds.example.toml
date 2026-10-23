@@ -10,3 +10,18 @@ expect_every_s = 5          # health: silence longer than this is a gap
 symbols = ["btcusdt"]
 streams = ["bookTicker", "trade"]
 required = false            # health: a stale optional feed doesn't make the host unhealthy
+
+# --- venues (WebSockets need API keys in .env; discovery and replay don't) ---
+
+[feeds.kalshi]
+series = ["KXBTC15M", "KXHIGHNY"]   # any Kalshi series: crypto windows, NYC daily high temperature, ...
+index_ids = ["BRTI"]                # CF Benchmarks indexes over the same socket (settlement source)
+book_depth = 10
+
+[feeds.polymarket_us]
+book_depth = 10
+# repeated markets are found by slug template; these two are the defaults
+series = [
+  { name = "btc_updown_15m", slug_prefix = "cpc-btc-updown-15m", period_s = 900 },
+  { name = "btc_updown_1h", slug_prefix = "cpc-btc-updown-1h", period_s = 3600 },
+]

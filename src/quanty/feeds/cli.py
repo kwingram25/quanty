@@ -126,7 +126,9 @@ def replay(
     for i, ev in enumerate(rp):
         if i < show:
             typer.echo(repr(ev))
-        counts[(getattr(ev, "key", "?"), type(ev).__name__)] += 1
+        counts[
+            (getattr(ev, "key", None) or getattr(ev, "market_id", "?").split(":")[0], type(ev).__name__)
+        ] += 1
     for (key, kind), n in sorted(counts.items()):
         typer.echo(f"{key:28} {kind:12} {n:10}")
     for name, n in rp.errors.items():

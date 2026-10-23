@@ -39,6 +39,7 @@ class Replay:
             health = self.health[item.feed]
             if isinstance(item, Link):
                 health.on_link(item)
+                self.feeds[item.feed].on_link(item)
                 yield Status(ts=item.t, key=f"{item.feed}:link", text=item.state)
                 continue
             try:

@@ -17,7 +17,7 @@ import httpx
 import structlog
 from pydantic import Field, PositiveFloat
 from tenacity import AsyncRetrying, retry_if_exception_type, stop_after_attempt, wait_exponential_jitter
-from websockets.asyncio.client import connect
+from websockets.asyncio.client import ClientConnection, connect
 from websockets.exceptions import WebSocketException
 
 from quanty.core.events import Event
@@ -79,7 +79,14 @@ class Feed(ABC):
 
     @abstractmethod
     def parse(self, raw: Raw) -> list[Event]:
-        """Events in one raw message; ts must be raw.t. Raise on malformed input."""
+        """Events in one raw message; ts must be raw.t. Raise on malformed input.
+
+        Parsers may keep state (e.g. an order book built from deltas), so recordings are parsed in
+        order by one feed instance; on_link is called for connection changes in the same order.
+        """
+
+    def on_link(self, link: Link) -> None:  # noqa: B027 - optional hook
+        """A connection change, in stream order: reset state that a new connection re-sends."""
 
     def raw(self, text: str) -> Raw:
         return Raw(self.name, now_ms(), text)
@@ -117,12 +124,24 @@ class WebSocketFeed(Feed):
         """False drops a message before recording (e.g. protocol pongs)."""
         return True
 
+    def headers(self) -> dict[str, str]:
+        """Extra HTTP headers for the WebSocket handshake (e.g. a signed auth header)."""
+        return {}
+
+    def on_connected(self, ws: ClientConnection) -> None:
+        """Called once a connection is subscribed; ws stays valid until the session ends."""
+
     async def run(self, sink: Sink) -> None:
+        await self.connect_forever(sink, self.subscriptions)
+
+    async def connect_forever(self, sink: Sink, subscriptions: Callable[[], list[str]]) -> None:
+        """Keep one connection up with these subscriptions. Cancelling ends it without a "down" link,
+        so a connection replaced on purpose doesn't count as an outage."""
         delay = self.config.backoff_s
         while True:
             started = time.monotonic()
             try:
-                await self._session(sink)
+                await self._session(sink, subscriptions())
                 reason = "closed by server"
             except (OSError, TimeoutError, WebSocketException) as exc:
                 reason = f"{type(exc).__name__}: {exc}"
@@ -134,11 +153,14 @@ class WebSocketFeed(Feed):
             await asyncio.sleep(wait)
             delay = min(delay * 2, self.config.backoff_max_s)
 
-    async def _session(self, sink: Sink) -> None:
-        async with connect(self.url(), max_size=None, open_timeout=10, close_timeout=2) as ws:
-            for sub in self.subscriptions():
+    async def _session(self, sink: Sink, subscriptions: list[str]) -> None:
+        async with connect(
+            self.url(), additional_headers=self.headers(), max_size=None, open_timeout=10, close_timeout=2
+        ) as ws:
+            for sub in subscriptions:
                 await ws.send(sub)
             sink(self.link("up"))
+            self.on_connected(ws)
             log.info("feed connected", feed=self.name)
             while True:
                 async with asyncio.timeout(self.config.idle_timeout_s):

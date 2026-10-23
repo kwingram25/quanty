@@ -42,6 +42,7 @@ class RecordSession:
         health = self.health[item.feed]
         if isinstance(item, Link):
             health.on_link(item)
+            self.feeds[item.feed].on_link(item)
             return
         try:
             events = self.feeds[item.feed].parse(item)

@@ -4,8 +4,9 @@ A self-hosted framework for recording, backtesting, paper trading and live tradi
 prediction markets** on Polymarket US and Kalshi: crypto up/down windows, daily weather highs,
 economic releases, or any market that recurs on a schedule and settles against a known source.
 
-> **Status: early development.** The engine, simulated broker, feed recording/replay and
-> backtests work; venue adapters, live trading and the web UI are next. Nothing here trades yet.
+> **Status: early development.** The engine, simulated broker, feed and venue recording/replay
+> (Kalshi, Polymarket US) and backtests work; paper/live trading and the web UI are next. Nothing
+> here places orders yet.
 
 ## Quickstart
 
@@ -30,6 +31,17 @@ uv run quanty record --config feeds.toml                 # see feeds.example.tom
 uv run quanty feeds health --data data                   # gaps, reconnects, receive lag p50/p99
 uv run quanty replay --data data --show 5                # parse recordings back into events
 uv run quanty backtest experiment.toml --data data       # run strategies and signals on recordings
+```
+
+Venues record the same way. Kalshi discovers markets for any series ticker (crypto windows,
+weather, economics), rebuilds books from deltas and streams CF Benchmarks indexes; Polymarket US
+finds repeated markets by slug template. Market discovery responses are recorded in the same
+stream as books and trades, so a replay sees markets open, strikes appear and results arrive in
+the order they did live. WebSocket connections need keys in `.env` (see `.env.example`);
+replaying never does.
+
+```sh
+uv run quanty record --config feeds.toml --data data     # with [feeds.kalshi] / [feeds.polymarket_us]
 ```
 
 Recordings live in `data/<feed>/<date>/<hour>.jsonl.gz` (gitignored); per-minute health and
@@ -92,6 +104,7 @@ brokers and risk limits; see `experiments/example.toml`.
 | `core/portfolio.py`, `core/ledger.py` | positions and P&L from fills and settlements; SQLite record |
 | `brokers/sim.py` | simulated venue: latency, taker fills, queue position, post-only |
 | `feeds/` | WebSocket and polling transports, Coinbase and Binance adapters, raw recording, replay, health and latency |
+| `venues/` | Kalshi and Polymarket US: discovery, books, trades, settlement, fees, request signing |
 | `signals.py` | derived values (last, EWMA, realized vol) rebuilt identically in replay |
 | `db/` | SQLAlchemy models and Alembic migrations (ledger, feed metrics) |
 | `synthetic.py` | deterministic synthetic markets for demos and tests |

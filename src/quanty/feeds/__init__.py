@@ -7,7 +7,14 @@ from quanty.feeds.base import Feed, FeedConfig, Link, PollingFeed, Raw, WebSocke
 from quanty.feeds.binance import Binance
 from quanty.feeds.coinbase import Coinbase
 
-KINDS: dict[str, type[Feed]] = {cls.kind: cls for cls in (Coinbase, Binance)}
+
+def _kinds() -> dict[str, type[Feed]]:
+    from quanty.venues import Kalshi, PolymarketUS  # venues build on feeds, so import them late
+
+    return {cls.kind: cls for cls in (Coinbase, Binance, Kalshi, PolymarketUS)}
+
+
+KINDS: dict[str, type[Feed]] = _kinds()
 
 
 def make(name: str, raw: Mapping[str, Any]) -> Feed:
