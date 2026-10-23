@@ -32,6 +32,18 @@ class _CancelArrive(BrokerEvent):
     order_id: str
 
 
+@dataclass(frozen=True)
+class QueueModel:
+    """How resting orders queue and fill. The defaults are the realistic model; the switches let a
+    backtest reproduce a more conservative (or a different venue's) simulator exactly."""
+
+    measure_at: Literal["arrival", "decision"] = "arrival"  # when the queue ahead is read from the book
+    credit_cancels: bool = True  # the queue ahead shrinks when the level shrinks (cancels ahead of us)
+    fill_on_cross: bool = True  # the other side of the book moving onto the order fills it
+    through_fill: Literal["trade_size", "full"] = "trade_size"  # a trade through our price fills this much
+    cancel_stops_fills: bool = False  # no fills once a cancel is sent (optimistic), vs until it arrives
+
+
 @dataclass
 class _Level:
     price: float  # YES
@@ -75,11 +87,15 @@ class SimBroker(Broker):
         latency_ms: int = 0,
         fees: Mapping[str, FeeModel] | None = None,
         arrival: Literal["at_latency", "next_event"] = "at_latency",
+        queue: QueueModel | None = None,
     ) -> None:
         """fees maps venue name -> FeeModel, for markets that don't carry their own; others trade free."""
         super().__init__(name)
         self.latency_ms = latency_ms
         self.arrival = arrival
+        self.queue = queue or QueueModel()
+        self._queue_at_decision: dict[str, float] = {}
+        self._canceling: set[str] = set()
         self._arrived: list[Order] = []  # next_event mode: arrived, waiting for the next event
         self.fees = dict(fees or {})
         self._fee: dict[str, FeeModel] = {}
@@ -92,9 +108,16 @@ class SimBroker(Broker):
 
     def submit(self, order: Order) -> None:
         self._pending[order.id] = order
+        if self.queue.measure_at == "decision":
+            buys_yes, yes_px = order.in_yes()
+            bids, asks = self._books.get(order.market_id, ([], []))
+            same = bids if buys_yes else asks
+            self._queue_at_decision[order.id] = sum(lv.size for lv in same if abs(lv.price - yes_px) < EPS)
         self.emit(_Arrive(ts=self.engine.now + self.latency_ms, broker=self.name, order_id=order.id))
 
     def cancel(self, order: Order) -> None:
+        if self.queue.cancel_stops_fills:
+            self._canceling.add(order.id)
         self.emit(_CancelArrive(ts=self.engine.now + self.latency_ms, broker=self.name, order_id=order.id))
 
     def handle(self, event: BrokerEvent) -> None:
@@ -160,7 +183,8 @@ class SimBroker(Broker):
         elif order.tif is Tif.IOC:
             self._update(w, OrderStatus.CANCELED)
         else:
-            w.queue_ahead = sum(lv.size for lv in same if abs(lv.price - yes_px) < EPS)
+            here = sum(lv.size for lv in same if abs(lv.price - yes_px) < EPS)
+            w.queue_ahead = self._queue_at_decision.pop(order.id, here)
             self._working[order.id] = w
             self._update(w, OrderStatus.OPEN)
 
@@ -177,20 +201,25 @@ class SimBroker(Broker):
         bids, asks = self._books[market_id]
         for w in self._resting(market_id):
             opposite, same = (asks, bids) if w.buys_yes else (bids, asks)
-            here = sum(lv.size for lv in same if abs(lv.price - w.yes_price) < EPS)
-            w.queue_ahead = min(w.queue_ahead, here)  # cancels ahead of us move us up
-            self._take(w, opposite, Liquidity.MAKER, at_level_price=False)
-            self._finish_if_filled(w)
+            if self.queue.credit_cancels:
+                here = sum(lv.size for lv in same if abs(lv.price - w.yes_price) < EPS)
+                w.queue_ahead = min(w.queue_ahead, here)  # cancels ahead of us move us up
+            if self.queue.fill_on_cross and w.order.id not in self._canceling:
+                self._take(w, opposite, Liquidity.MAKER, at_level_price=False)
+                self._finish_if_filled(w)
 
     def _trade(self, t: MarketTrade) -> None:
         left = t.qty
         for w in self._resting(t.market_id):
             if left <= EPS:
                 break
-            through = t.price < w.yes_price - EPS if w.buys_yes else t.price > w.yes_price + EPS
+            if w.order.id in self._canceling:
+                continue
+            # a trade only reaches our side when its taker trades against it (unknown taker: assume so)
             hits_us = t.taker is None or (t.taker is Action.SELL) == w.buys_yes
-            if through:
-                qty = min(w.remaining, left)
+            through = t.price < w.yes_price - EPS if w.buys_yes else t.price > w.yes_price + EPS
+            if through and hits_us:
+                qty = w.remaining if self.queue.through_fill == "full" else min(w.remaining, left)
             elif abs(t.price - w.yes_price) < EPS and hits_us:
                 ahead = min(w.queue_ahead, left)
                 w.queue_ahead -= ahead
@@ -230,6 +259,8 @@ class SimBroker(Broker):
             self._update(w, OrderStatus.FILLED)
 
     def _update(self, w: _Working, status: OrderStatus) -> None:
+        if status.done:
+            self._canceling.discard(w.order.id)
         self._emit_update(w.order, status, w.order.qty - w.remaining)
 
     def _emit_update(self, order: Order, status: OrderStatus, filled: float, reason: str = "") -> None:

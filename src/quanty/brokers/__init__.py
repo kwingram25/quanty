@@ -1,3 +1,3 @@
-from quanty.brokers.sim import SimBroker
+from quanty.brokers.sim import QueueModel, SimBroker
 
-__all__ = ["SimBroker"]
+__all__ = ["QueueModel", "SimBroker"]

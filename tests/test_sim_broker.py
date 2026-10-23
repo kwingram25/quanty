@@ -1,7 +1,20 @@
 import pytest
 from helpers import Hooks, M, book, make, once, opened
 
-from quanty.core import Action, Context, Liquidity, MarketClose, MarketTrade, QuadraticFee, Side, Tif
+from quanty.brokers import QueueModel, SimBroker
+from quanty.core import (
+    Action,
+    Context,
+    Engine,
+    Event,
+    Instance,
+    Liquidity,
+    MarketClose,
+    MarketTrade,
+    QuadraticFee,
+    Side,
+    Tif,
+)
 
 
 def buy(side: Side, price: float, qty: int, **kw: object) -> Hooks:
@@ -139,3 +152,58 @@ def test_next_event_arrival_fills_against_the_book_after_the_next_update() -> No
 
     assert run("at_latency") == [100]  # the offer was still there at 1100
     assert run("next_event") == []  # matched at 1130, after the offer went
+
+
+def test_through_trade_must_hit_our_side() -> None:
+    s = buy(Side.YES, 0.50, 10)
+    make(s).run([*opened(), book(1, [(0.48, 5)], [(0.53, 5)]), trade(2, 0.45, 100, taker=Action.BUY)])
+    assert s.fills() == []  # a buyer lifting offers can't fill a resting bid, whatever the print price
+    s = buy(Side.YES, 0.50, 10)
+    make(s).run([*opened(), book(1, [(0.48, 5)], [(0.53, 5)]), trade(2, 0.45, 100, taker=Action.SELL)])
+    assert [f.qty for f in s.fills()] == [10]
+
+
+def run_queue(
+    model: QueueModel, events: list[Event], latency_ms: int = 0, cancel_at: int | None = None
+) -> Hooks:
+    def place(ctx: Context, b: object) -> None:
+        ctx.buy(M.id, Side.YES, 0.50, 10, post_only=True)
+
+    def cancel(ctx: Context, t: MarketTrade) -> None:
+        if t.ts == cancel_at:
+            for o in ctx.orders():
+                ctx.cancel(o)
+
+    s = Hooks(book=once(place), trade=cancel)
+    Engine([Instance("s", s, SimBroker(latency_ms=latency_ms, queue=model))], clock_ms=None).run(
+        [*opened(), *events]
+    )
+    return s
+
+
+def test_queue_model_options() -> None:
+    base = [book(1, [(0.50, 30)], [(0.53, 5)])]
+    # credit_cancels: the level shrinking to 4 moves us up only when credited
+    ev = [*base, book(2, [(0.50, 4)], [(0.53, 5)]), trade(3, 0.50, 6)]
+    assert [f.qty for f in run_queue(QueueModel(), ev).fills()] == [2]
+    assert run_queue(QueueModel(credit_cancels=False), ev).fills() == []
+    # fill_on_cross: an offer moving onto our bid
+    ev = [*base, book(2, [(0.50, 30)], [(0.50, 3)])]
+    assert [f.qty for f in run_queue(QueueModel(), ev).fills()] == [3]
+    assert run_queue(QueueModel(fill_on_cross=False), ev).fills() == []
+    # through_fill: a 2-lot printing through our price
+    ev = [*base, trade(2, 0.49, 2)]
+    assert [f.qty for f in run_queue(QueueModel(), ev).fills()] == [2]
+    assert [f.qty for f in run_queue(QueueModel(through_fill="full"), ev).fills()] == [10]
+    # measure_at: queue read when deciding (30 ahead) vs at arrival 100 ms later (5 ahead)
+    ev = [*base, book(50, [(0.50, 5)], [(0.53, 5)]), trade(200, 0.50, 8)]
+    model = QueueModel(credit_cancels=False)
+    assert [f.qty for f in run_queue(model, ev, latency_ms=100).fills()] == [3]
+    assert (
+        run_queue(QueueModel(credit_cancels=False, measure_at="decision"), ev, latency_ms=100).fills() == []
+    )
+    # cancel_stops_fills: the order rests from 101; a cancel sent at 200 arrives at 300; a seller prints
+    # through our price at 250, in between
+    ev = [*base, trade(200, 0.60, 1), trade(250, 0.49, 50)]
+    assert [f.qty for f in run_queue(QueueModel(), ev, latency_ms=100, cancel_at=200).fills()] == [10]
+    assert run_queue(QueueModel(cancel_stops_fills=True), ev, latency_ms=100, cancel_at=200).fills() == []
