@@ -108,6 +108,7 @@ def test_session_state_is_in_the_snapshot(ui: tuple[TestClient, Controller, Path
     s = client.get("/api/runs/live/acct").json()["session"]
     assert set(s["instances"]) == {"a", "b"} and s["brokers"]["real"]["kind"] == "live" and s["can_arm"]
     assert "params" in s["actions"]  # the dashboard offers Edit only when the session can do it
+    assert "save" in s  # and Save to file / Copy for the file by how this session can save
 
 
 def test_ui_gates(ui: tuple[TestClient, Controller, Path]) -> None:
@@ -299,3 +300,30 @@ def test_a_session_older_than_the_dashboard_is_told_to_restart(
     r = post(client, {"action": "params", "target": "a", "value": {"x": 1}, "confirm": "acct"})
     assert r.status_code == 409 and "restart it" in r.json()["detail"]  # type: ignore[attr-defined]
     assert store.history("live/acct") == []  # never queued
+
+
+def test_save_params_writes_the_experiment_file(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    import tomllib
+
+    monkeypatch.delenv("QUANTY_IN_IMAGE", raising=False)
+    exp = tmp_path / "main.toml"
+    exp.write_text('# my experiment\n[[instances]]\nid = "s"  # the only one\nstrategy = "sized"\n')
+    c, store, _ = sized(tmp_path)
+    assert c.save_mode is None  # no file: a demo can't save
+    c.experiment = exp
+    assert c.save_mode == "file"
+    params_cmd(c, store, "params", {"size": 25})
+    r = params_cmd(c, store, "save_params")
+    assert r["status"] == "done" and "saved size = 25.0 to main.toml" in str(r["result"])
+    text = exp.read_text()
+    assert "# my experiment" in text and "# the only one" in text  # comments kept
+    assert tomllib.loads(text)["instances"][0]["params"] == {"size": 25.0}
+    assert c.edited("s") == {} and store.overrides("paper/acct") == {}  # the file is the source again
+    assert "nothing changed" in str(params_cmd(c, store, "save_params")["result"])
+
+    monkeypatch.setenv("QUANTY_IN_IMAGE", "1")  # a container: the image's copy is replaced on deploy
+    params_cmd(c, store, "params", {"size": 30})
+    assert c.save_mode == "copy"
+    r = params_cmd(c, store, "save_params")
+    assert r["status"] == "failed" and "copy the lines" in str(r["result"])
+    assert tomllib.loads(exp.read_text())["instances"][0]["params"]["size"] == 25.0

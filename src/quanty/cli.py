@@ -460,6 +460,7 @@ def _session(
     run_name = f"{mode}/{ledger_path.stem}"
     store = ControlStore(data / "control.sqlite")
     controller = Controller(store, run_name, trader, can_arm=armed)
+    controller.experiment = path.resolve()  # the dashboard's "Save to file" writes edits here
     session = RecordSession(
         feed_objs, data, data / "quanty.sqlite", window_s=window, trader=trader, controller=controller
     )

@@ -442,6 +442,9 @@ COPY . .
 RUN if ls vendor/quanty-*.whl >/dev/null 2>&1; then uv pip install --system vendor/quanty-*.whl; \\
     else apt-get update && apt-get install -y --no-install-recommends git \\
     && uv pip install --system "$QUANTY_SOURCE"; fi
+# this image's copy of the project is replaced on every deploy: the dashboard offers to copy
+# edited params for the experiment file instead of writing them here
+ENV QUANTY_IN_IMAGE=1
 ENTRYPOINT ["quanty"]
 """
 

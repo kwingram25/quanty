@@ -6,8 +6,10 @@ applies them to its engine and brokers, and writes back the outcome, so every ac
 
 Actions: halt / resume an instance (or all); disarm / arm a live broker; kill (halt everything);
 params (change an instance's strategy params: value = {name: new value}) and reset_params (back to
-the experiment file's). Param changes are kept per run as overrides, so a restarted session picks
-them up again; the instance limits and broker caps can't be changed here, so they still bound them.
+the experiment file's); save_params writes an instance's changed params into the experiment file
+(where the session runs from a project folder, not a container image). Param changes are kept per
+run as overrides, so a restarted session picks them up again; the instance limits and broker caps
+can't be changed here, so they still bound them.
 Halting stops new buys and cancels resting buys but lets exits through; disarming a live broker
 refuses every order, exits included, and cancels its resting orders. Arming is only possible for
 a session started with `quanty live --arm`.
@@ -45,7 +47,18 @@ from quanty.core.portfolio import Position
 from quanty.core.risk import event_exposure
 from quanty.core.types import Side
 
-ACTIONS = ("halt", "resume", "disarm", "arm", "kill", "speed", "new_day", "params", "reset_params")
+ACTIONS = (
+    "halt",
+    "resume",
+    "disarm",
+    "arm",
+    "kill",
+    "speed",
+    "new_day",
+    "params",
+    "reset_params",
+    "save_params",
+)
 ALIVE_S = 10  # a session whose heartbeat is older than this is not running
 
 meta = MetaData()
@@ -226,6 +239,7 @@ class Controller:
         self.store, self.run, self.trader, self.can_arm, self.poll_s = store, run, trader, can_arm, poll_s
         self.playback = playback
         self.feeds: Callable[[], Mapping[str, str]] | None = None  # feed -> health, set by a live session
+        self.experiment: Path | None = None  # the experiment file, set by a live session (not a demo)
         self.started_ts = now_ms()
         self.attach(trader)
 
@@ -235,6 +249,7 @@ class Controller:
         self.trader = trader
         self.brokers = {i.broker.name: i.broker for i in trader.instances.values()}
         self.file_params = {iid: i.strategy.params for iid, i in trader.instances.items()}
+        self.file_set = {iid: set(i.strategy.params.model_fields_set) for iid, i in trader.instances.items()}
         for iid, changes in self.store.overrides(self.run).items():
             if iid not in trader.instances:
                 continue
@@ -255,6 +270,41 @@ class Controller:
         base = self.file_params[iid].model_dump(mode="json")
         return {k: v for k, v in cur.items() if base.get(k) != v}
 
+    @property
+    def save_mode(self) -> str | None:
+        """How edits reach the experiment file: "file" (written here), "copy" (this runs from a
+        container image, whose copy of the file a redeploy replaces: copy the lines instead), or None
+        (no file: a demo)."""
+        if self.experiment is None:
+            return None
+        writable = os.access(self.experiment, os.W_OK) and os.access(self.experiment.parent, os.W_OK)
+        return "copy" if os.environ.get("QUANTY_IN_IMAGE") or not writable else "file"
+
+    def _save_params(self, iid: str) -> str:
+        from quanty import experiment
+
+        if self.save_mode != "file" or self.experiment is None:
+            raise ValueError(
+                "this session can't write its experiment file (it runs from a container image or a "
+                "read-only folder): copy the lines into the file on your machine, then deploy"
+            )
+        edited = self.edited(iid)
+        if not edited:
+            return f"{iid}: nothing changed from {self.experiment.name}"
+        experiment.save_params(self.experiment, iid, edited)
+        inst = self.trader.instances[iid]
+        self.file_params[iid] = inst.strategy.params  # the file says this now
+        self.file_set[iid] |= set(edited)
+        self.store.set_override(self.run, iid, {})
+        if self.trader.ledger is not None:
+            self.trader.ledger.log(
+                self.trader.now,
+                iid,
+                "strategy",
+                {**describe(inst), "params_set": sorted(self.file_set[iid]), "edited": []},
+            )
+        return f"{iid}: saved {', '.join(f'{k} = {v}' for k, v in edited.items())} to {self.experiment.name}"
+
     def _set_params(self, iid: str, changes: Mapping[str, Any]) -> str:
         inst = self.trader.instances[iid]
         current = inst.strategy.params
@@ -273,7 +323,7 @@ class Controller:
                 "strategy",
                 {
                     **describe(inst),
-                    "params_set": sorted(self.file_params[iid].model_fields_set),  # still the file's
+                    "params_set": sorted(self.file_set[iid]),  # still the file's
                     "edited": sorted(edited),
                 },
             )
@@ -301,6 +351,7 @@ class Controller:
         }
         return {
             "actions": list(ACTIONS),  # what this session's quanty can do (the dashboard may be newer)
+            "save": self.save_mode,
             "instances": instances,
             "brokers": brokers,
             "now": t.now,
@@ -395,9 +446,11 @@ class Controller:
 
     def apply(self, action: str, target: str, value: Any = None) -> str:
         t = self.trader
-        if action in ("params", "reset_params"):
+        if action in ("params", "reset_params", "save_params"):
             if target not in t.instances:
                 raise ValueError(f"no instance {target!r}")
+            if action == "save_params":
+                return self._save_params(target)
             if action == "reset_params":
                 base = self.file_params[target].model_dump(mode="json")
                 return self._set_params(target, base) + " (back to the experiment file)"

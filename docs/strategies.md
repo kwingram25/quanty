@@ -68,7 +68,11 @@ Override only what you need. Every hook gets the context first.
 | `on_params(ctx, old)` | `self.params` was just changed from the dashboard; `old` are the previous ones |
 
 Params can be changed while a session runs (the dashboard's Edit, on a strategy's details), and
-take effect from the next event. Read `self.params` when deciding, as above, rather than copying
+take effect from the next event. An edit is kept for that run (a restart keeps it) but doesn't touch
+your files until you press **Save to file**, which writes it into the instance's
+`[instances.params]` in the experiment file, comments kept, so backtests use it too. A session in a
+container image offers **Copy for the file** instead: paste the lines into the file on your
+machine and deploy, since a deploy replaces the image's copy. Read `self.params` when deciding, as above, rather than copying
 values at startup; if you do derive something from them, recompute it in `on_params`.
 
 Events arrive in time order. In a backtest that order is the recording's; live it is arrival

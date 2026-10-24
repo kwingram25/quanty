@@ -117,6 +117,30 @@ def load(path: Path) -> Experiment:
     return parse(tomllib.loads(path.read_text()), source=path.name)
 
 
+def save_params(path: Path, instance_id: str, values: Mapping[str, Any]) -> None:
+    """Write params into an instance's [instances.params] in an experiment file, keeping its comments
+    and layout; the file must still load afterwards, or it is left as it was."""
+    import tomlkit
+
+    before = path.read_text()
+    doc = tomlkit.parse(before)
+    entry = next((i for i in doc.get("instances", []) if i.get("id") == instance_id), None)
+    if entry is None:
+        raise ValueError(f"{path.name} has no [[instances]] entry with id = {instance_id!r}")
+    if "params" not in entry:
+        entry["params"] = tomlkit.table()
+    for k, v in values.items():
+        entry["params"][k] = v
+    after = tomlkit.dumps(doc)
+    try:
+        parse(tomllib.loads(after), source=path.name)
+    except ValueError as exc:
+        raise ValueError(f"not saved: {path.name} wouldn't load afterwards ({exc})") from None
+    tmp = path.with_name(f".{path.name}.tmp")
+    tmp.write_text(after)
+    tmp.replace(path)  # atomic: never a half-written experiment
+
+
 def parse(raw: Mapping[str, Any], source: str = "experiment") -> Experiment:
     return Experiment.from_config(raw, where=source)
 

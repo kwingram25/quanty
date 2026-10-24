@@ -98,6 +98,13 @@ run from a quanty source checkout), otherwise from GitHub, which needs access wh
 is private. To update the wheel after pulling a newer quanty: `uv build --wheel -o vendor
 /path/to/quanty`, then deploy again.
 
+### Editing strategies on a server
+
+Dashboard edits to a strategy's params apply at once and survive restarts (they're kept in `data/`),
+but the experiment file in the image is replaced on every deploy, so the dashboard offers **Copy for
+the file** there: paste the lines into `experiments/main.toml` on your machine and deploy, or press
+**Reset to file** to drop the edit.
+
 ### API keys on a server
 
 Your keys travel in `.env`, which `.dockerignore` keeps out of the image; compose passes them to the

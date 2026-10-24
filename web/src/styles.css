@@ -511,3 +511,4 @@ td.nowrap { white-space: nowrap; }
 .market .estimate .swatch { display: inline-block; width: 8px; height: 8px; margin-right: 3px; vertical-align: 0; }
 .market .estimate .swatch:last-of-type { margin-right: 6px; }
 .market .chance .model { display: block; color: var(--muted); font-weight: 400; font-size: 10.5px; line-height: 1.2; }
+.details-body h4 .head-actions { display: inline-flex; gap: 4px; }

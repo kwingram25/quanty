@@ -68,6 +68,9 @@ export interface Broker { kind: "sim" | "shadow" | "live"; armed?: boolean; disa
 export interface SessionState {
   /** commands this session's quanty understands (missing: a session from before they were listed) */
   actions?: string[];
+  /** how dashboard edits reach the experiment file: written by the session, or copied by you (a
+   *  session in a container image, whose copy a redeploy replaces); null in a demo */
+  save?: "file" | "copy" | null;
   pid: number;
   heartbeat_ts: number;
   can_arm: boolean;

@@ -48,7 +48,8 @@ export function Strategies({ snap, slots }: { snap: Snapshot; slots: Record<stri
             blocked={s?.instances[st.instance]?.blocked ?? 0} stops={snap.order_stats?.[st.instance]?.stops ?? 0}
             onToggle={() => act(halted ? "resume" : "halt", st.instance, `${halted ? "Resumed" : "Halted"} ${st.instance}`)}
             onEdit={(value) => act("params", st.instance, `Changed ${st.instance}`, "", value)}
-            onReset={() => act("reset_params", st.instance, `Reset ${st.instance} to the experiment file`)} />;
+            onReset={() => act("reset_params", st.instance, `Reset ${st.instance} to the experiment file`)}
+            onSave={() => act("save_params", st.instance, `Saved ${st.instance} to the experiment file`)} />;
         })}
         {s && <Brokers s={s} act={act} />}
       </div>
@@ -69,10 +70,10 @@ export function Strategies({ snap, slots }: { snap: Snapshot; slots: Record<stri
 
 type Edit = (value: Record<string, unknown>) => Promise<boolean | null>;
 
-function Row({ st, slot, session, halted, blocked, stops, onToggle, onEdit, onReset }: {
+function Row({ st, slot, session, halted, blocked, stops, onToggle, onEdit, onReset, onSave }: {
   st: Strategy; slot: number; session: SessionState | null; halted: boolean; blocked: number; stops: number;
   onToggle: () => void;
-  onEdit: Edit; onReset: () => Promise<boolean | null>;
+  onEdit: Edit; onReset: () => Promise<boolean | null>; onSave: () => Promise<boolean | null>;
 }) {
   const [open, setOpen] = useState(() => {
     try { return sessionStorage.getItem(`open:${st.instance}`) === "1"; } catch { return false; }
@@ -129,7 +130,7 @@ function Row({ st, slot, session, halted, blocked, stops, onToggle, onEdit, onRe
         {open && (
           <motion.div className="details" initial={{ height: 0, opacity: 0 }} animate={{ height: "auto", opacity: 1 }}
             exit={{ height: 0, opacity: 0 }} transition={{ duration: 0.2, ease: [0.22, 1, 0.36, 1] }}>
-            <Details st={st} session={session} onEdit={onEdit} onReset={onReset} />
+            <Details st={st} session={session} onEdit={onEdit} onReset={onReset} onSave={onSave} />
           </motion.div>
         )}
       </AnimatePresence>
@@ -141,9 +142,11 @@ const fmtParam = (v: unknown): string =>
   Array.isArray(v) ? v.join(", ") : typeof v === "number" ? String(+v.toFixed(6)) : v == null ? "–" : String(v);
 
 /** Everything worth knowing about one strategy instance. */
-function Details({ st, session, onEdit, onReset }: {
+function Details({ st, session, onEdit, onReset, onSave }: {
   st: Strategy; session: SessionState | null; onEdit: Edit; onReset: () => Promise<boolean | null>;
+  onSave: () => Promise<boolean | null>;
 }) {
+  const toast = useToast();
   const [editing, setEditing] = useState(false);
   // tolerate ledgers whose details were stored in another shape
   const raw = st.info ?? {};
@@ -207,7 +210,25 @@ function Details({ st, session, onEdit, onReset }: {
           <h4 className="with-action">
             <span>Parameters <span className="muted small">
               {edited.size ? <><i className="edited-dot" /> changed here</> : "set by the experiment in bold"}</span></span>
-            {canEdit && !editing && <button className="btn mini" onClick={() => setEditing(true)}>Edit</button>}
+            {canEdit && !editing && <span className="head-actions">
+              {edited.size > 0 && session?.save === "file" && session.actions?.includes("save_params") && (
+                <button className="btn mini" onClick={() => onSave()}
+                  title="Write these changes into the experiment file, so restarts and backtests use them too">Save to file</button>
+              )}
+              {edited.size > 0 && session?.save === "copy" && (
+                <button className="btn mini" title="This session runs from a container image, whose copy of the experiment file a deploy replaces: copy the lines for the file on your machine"
+                  onClick={async () => {
+                    const text = paramsToml(st.instance, Object.fromEntries([...edited].map((k) => [k, current[k]])));
+                    try {
+                      await navigator.clipboard.writeText(text);
+                      toast({ kind: "ok", title: "Copied for the experiment file", body: `Paste under the [[instances]] entry with id = "${st.instance}", then deploy.` });
+                    } catch {
+                      toast({ kind: "warning", title: "Copy these lines into the experiment file", body: text });
+                    }
+                  }}>Copy for the file</button>
+              )}
+              <button className="btn mini" onClick={() => setEditing(true)}>Edit</button>
+            </span>}
           </h4>
           {editing ? (
             <ParamEditor params={params} help={info.param_help ?? {}} edited={edited}
@@ -238,6 +259,11 @@ function Details({ st, session, onEdit, onReset }: {
     </div>
   );
 }
+
+/** Changed params as TOML lines for an [[instances]] entry's params table. */
+const paramsToml = (instance: string, values: Record<string, unknown>): string =>
+  [`# in the [[instances]] entry with id = "${instance}"`, "[instances.params]",
+    ...Object.entries(values).map(([k, v]) => `${k} = ${typeof v === "string" ? JSON.stringify(v) : String(v)}`)].join("\n");
 
 /** Edits a running instance's params: numbers, switches and text (lists stay as configured). Only
  * what changed is sent; the session validates it with the strategy's own rules. */

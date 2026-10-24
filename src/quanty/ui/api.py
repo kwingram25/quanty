@@ -164,6 +164,7 @@ class Api:
                 "heartbeat_ts": session["heartbeat_ts"],
                 "can_arm": session["can_arm"],
                 "actions": state.get("actions", list(BEFORE_ACTIONS_LISTED)),
+                "save": state.get("save"),
                 "instances": state.get("instances", {}),
                 "brokers": state.get("brokers", {}),
                 "now": state.get("now"),
