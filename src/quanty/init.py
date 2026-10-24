@@ -337,7 +337,8 @@ then later `on_settled(ctx, market, outcome)`, and `on_params(ctx, old)` after a
 `position(id, side)` (contracts held), `entry_price(id, side)` (average cost per contract held,
 fees included; None when flat), `orders(id)` (*open* orders only: filled, canceled and
 rejected ones are gone), `outcomes(id)`, `buy(id, side, price, qty, tif=, post_only=, tag=)`,
-`sell(...)` (only what you hold), `cancel(order)`, `cancel_all(id)`, `log(msg, **fields)` (plain
+`sell(...)` (only what you hold), `cancel(order)`, `cancel_all(id)`, `estimate(id, yes)` (the
+model's P(YES), shown beside the market's price in the dashboard), `log(msg, **fields)` (plain
 values: numbers, strings, lists, dicts). `buy`/`sell` return the `Order`: an order that breaks a rule
 (price outside 0–1, tick size, a risk limit, market closed) comes back with `.status` REJECTED and a
 `.reason` instead of raising. `Tif.IOC` takes what is there and cancels the rest; the default `GTC`

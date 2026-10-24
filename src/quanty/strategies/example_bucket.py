@@ -28,12 +28,10 @@ class BucketEdge(Strategy[BucketParams]):
         p = self.params
         mid = book.market_id
         left = ctx.seconds_left(mid)
-        if not 0 < left <= p.enter_last_s or ctx.orders(mid) or ctx.position(mid, Side.YES):
-            return
         reading = ctx.latest(TEMP_KEY)
-        terms = ctx.market(mid).terms
-        if not isinstance(reading, Observation):
+        if left <= 0 or not isinstance(reading, Observation):
             return
+        terms = ctx.market(mid).terms
         lo, hi = terms.get("lo"), terms.get("hi")
         prob = p_range(
             reading.value,
@@ -42,6 +40,9 @@ class BucketEdge(Strategy[BucketParams]):
             left,
             p.sigma_per_s,
         )
+        ctx.estimate(mid, prob)  # the model's view, shown beside the price in the dashboard
+        if left > p.enter_last_s or ctx.orders(mid) or ctx.position(mid, Side.YES):
+            return
         ask = book.ask(Side.YES)
         if ask is not None and prob - ask >= p.min_edge:
             ctx.buy(mid, Side.YES, ask, p.size, tif=Tif.IOC, tag="bucket")

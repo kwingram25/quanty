@@ -116,22 +116,57 @@ function Event({ ms, now, slots, exposure }: {
 
 const price = (p: number | null): number | null => (p != null && p > 0 && p < 1 ? p : null);
 
-/** One outcome as the venues' apps show it: its chance, then what Yes and No cost to buy now. */
+const MARKET_CHANCE = "The market's view: halfway between the best price to buy Yes and the best price to sell it";
+const pctOf = (p: number) => `${Math.round(p * 100)}%`;
+
+/** One outcome as the venues' apps show it: the market's chance of Yes, then what Yes and No cost to
+ *  buy now; with the strategies' own estimates where they report them. */
 function Outcome({ m, label, slots }: { m: OpenMarket; label: string | null; slots: Record<string, number> }) {
   const bid = price(m.bid), ask = price(m.ask);
   const no = bid == null ? null : 1 - bid; // buying No = selling Yes at the best bid
   const chance = bid != null && ask != null ? (bid + ask) / 2 : (bid ?? ask);
-  const pct = chance == null ? "–" : `${Math.round(chance * 100)}%`;
+  const pct = chance == null ? "–" : pctOf(chance);
+  const est = Object.entries(m.estimates ?? {});
   return (
     <div className={`outcome ${label == null ? "single" : ""}`}>
       {label != null ? (
-        <><span className="label">{label}</span><span className="chance num">{pct}</span></>
+        <><span className="label">{label}</span>
+          <span className="chance num" title={MARKET_CHANCE}>{pct}
+            {est.length > 0 && <span className="model" title={est.map(([i, p]) => `${i}: ${pctOf(p)}`).join("\n")}>
+              model {spread(est.map(([, p]) => p))}</span>}</span></>
       ) : (
-        <span className="label"><b className="num">{pct}</b> <span className="muted">chance</span></span>
+        <span className="label" title={MARKET_CHANCE}><b className="num">{pct}</b> <span className="muted">Yes, by the market</span></span>
       )}
       <span className="buy yes" title="Price to buy Yes">Yes <b className="num">{cents(ask)}</b></span>
       <span className="buy no" title="Price to buy No">No <b className="num">{cents(no)}</b></span>
+      {label == null && est.length > 0 && <Estimates est={est} chance={chance} slots={slots} />}
       <Holders m={m} slots={slots} />
+    </div>
+  );
+}
+
+/** "82%", or "78–84%" when the estimates differ. */
+const spread = (ps: number[]): string => {
+  const lo = Math.round(Math.min(...ps) * 100), hi = Math.round(Math.max(...ps) * 100);
+  return lo === hi ? `${lo}%` : `${lo}–${hi}%`;
+};
+
+/** What each strategy's model thinks, with strategies that agree (to the percent) on one line. */
+function Estimates({ est, chance, slots }: { est: [string, number][]; chance: number | null; slots: Record<string, number> }) {
+  const groups = new Map<number, string[]>();
+  for (const [iid, p] of est) groups.set(Math.round(p * 100), [...(groups.get(Math.round(p * 100)) ?? []), iid]);
+  return (
+    <div className="estimates">
+      {[...groups.entries()].sort(([a], [b]) => b - a).map(([p, who]) => {
+        const diff = chance == null ? null : p - Math.round(chance * 100);
+        return (
+          <span key={p} className="estimate" title={`${who.join(", ")}: ${p}% Yes, from ${who.length > 1 ? "their models" : "its model"} (ctx.estimate)`}>
+            {who.map((w) => <i key={w} className="swatch" style={{ ["--c" as string]: `var(--series-${slots[w] ?? 1})` }} />)}
+            {who.length > 2 ? `${who.length} strategies` : who.join(", ")} {who.length > 1 ? "think" : "thinks"} <b className="num">{p}%</b>
+            {diff != null && <span className="muted">{diff === 0 ? ", same as the market" : `, ${Math.abs(diff)} ${diff > 0 ? "above" : "below"} the market`}</span>}
+          </span>
+        );
+      })}
     </div>
   );
 }

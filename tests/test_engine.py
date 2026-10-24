@@ -229,3 +229,17 @@ def test_entry_price_is_the_average_cost_held() -> None:
     make(s, fees={"t": CentEach()}).run([*opened(), book(1, [(0.55, 50)], [(0.60, 10), (0.70, 10)])])
     assert seen[0] is None and len(s.fills()) == 2
     assert seen[1] == pytest.approx(0.61) and seen[2] == pytest.approx(0.66)  # (6.10 + 7.10) / 20, fees in
+
+
+def test_estimates_are_kept_until_the_market_closes() -> None:
+    from quanty.core import MarketClose
+
+    s = Hooks(book=lambda ctx, b: ctx.estimate(M.id, 0.8))
+    e = make(s)
+    e.run([*opened(), book(1, [(0.55, 50)], [(0.60, 10)])])
+    assert e.estimates[M.id] == {"s0": 0.8}
+    e.process(MarketClose(ts=2, market_id=M.id))
+    assert M.id not in e.estimates
+    bad = Hooks(book=lambda ctx, b: ctx.estimate(M.id, 1.5))
+    with pytest.raises(ValueError, match="not a probability"):
+        make(bad).run([*opened(), book(1, [(0.55, 50)], [(0.60, 10)])])

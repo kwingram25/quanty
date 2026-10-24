@@ -155,6 +155,14 @@ class Context:
     def log(self, msg: str, **fields: object) -> None:
         self._e.ledger.log(self._e.now, self._i.id, msg, fields)
 
+    def estimate(self, market_id: str, yes: float) -> None:
+        """Report this strategy's own probability that the market settles YES (its model's view), for
+        the dashboard to show beside the market's price. Display only: nothing trades on it, and it's
+        kept until the market closes (the latest one wins)."""
+        if not 0.0 <= yes <= 1.0:
+            raise ValueError(f"estimate for {market_id}: {yes} is not a probability between 0 and 1")
+        self._e.estimates[market_id][self._i.id] = yes
+
 
 class Engine:
     def __init__(
@@ -186,6 +194,7 @@ class Engine:
         self.risk = Risk(self.portfolio, self.live, self.markets)
         self.halted: set[str] = set()
         self.blocked: dict[str, int] = defaultdict(int)  # buys refused while halted, per instance
+        self.estimates: dict[str, dict[str, float]] = defaultdict(dict)  # market -> instance -> P(YES)
         self.signals = {s.name: s for s in signals}
         if len(self.signals) != len(signals):
             raise ValueError("signal names must be unique")
@@ -419,6 +428,7 @@ class Engine:
 
     def _close(self, ev: MarketClose) -> None:
         m = self.open_markets.pop(ev.market_id, None)
+        self.estimates.pop(ev.market_id, None)
         self._to_brokers(ev)
         if m is not None:
             self._each(m.id, lambda s, c: s.on_market_close(c, m))

@@ -372,6 +372,7 @@ class Controller:
                     "bid": book.bids[0][0] if book and book.bids else None,
                     "ask": book.asks[0][0] if book and book.asks else None,
                     "held": held,
+                    "estimates": {i: round(p, 4) for i, p in t.estimates.get(m.id, {}).items()},
                 }
             )
         return out

@@ -92,6 +92,7 @@ order, with receive timestamps.
 | `ctx.sell(...)` | sell contracts you hold (no shorting: to bet against YES, buy NO) |
 | `ctx.cancel(order)`, `ctx.cancel_all(id=None)` | |
 | `ctx.log(msg, **fields)` | into the ledger, shown in the dashboard |
+| `ctx.estimate(id, yes)` | your model's probability of YES, shown on the market's card beside the market's own chance (display only) |
 
 Prices are always in the terms of the side you name: buying NO at 0.97 means paying 97¢ for a
 contract that pays $1 if NO wins. Venues that quote everything in YES terms are converted for you.

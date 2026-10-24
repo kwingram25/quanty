@@ -59,6 +59,8 @@ export interface OpenMarket {
   bid: number | null;
   ask: number | null;
   held: Held[];
+  /** each strategy's own probability of YES (`ctx.estimate`), where it reports one */
+  estimates?: Record<string, number>;
 }
 
 export interface Broker { kind: "sim" | "shadow" | "live"; armed?: boolean; disabled?: string }

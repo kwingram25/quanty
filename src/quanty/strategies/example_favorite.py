@@ -37,6 +37,8 @@ class FavoriteLate(Strategy[FavoriteParams]):
         p = self.params
         mid = book.market_id
         left = ctx.seconds_left(mid)
+        if left > 0 and (fair := self.fair_yes(ctx, mid, left)) is not None:
+            ctx.estimate(mid, fair)  # the model's view, shown beside the price in the dashboard
         if mid in self.stopped or self.stop(ctx, mid, left):
             return
         if not 0 < left <= p.enter_last_s or ctx.orders(mid):
