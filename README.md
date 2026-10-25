@@ -18,7 +18,7 @@ One strategy file runs unchanged in four modes. Only the broker behind it change
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/images/dashboard-dark.png">
-  <img alt="The quanty dashboard during a paper session: strategies with halt controls on the left, cumulative realized P&L with a hover tooltip and the event feed on the right" src="docs/images/dashboard-light.png">
+  <img alt="The quanty dashboard during a paper session: strategies with paper badges and halt controls on the left, cumulative realized P&L per strategy with a hover tooltip in the middle, open markets with the market's chance and the strategies' own estimates, and the event feed on the right" src="docs/images/dashboard-light.png">
 </picture>
 
 ## Try it
@@ -36,7 +36,7 @@ files to deploy it:
 ```sh
 uv run quanty init my-quanty          # a few questions; --yes for the defaults
 cd my-quanty && uv run quanty list    # works there too: the first run sets everything up
-docker compose up -d --build          # on a server: trader + dashboard, restarted on failure
+uv run quanty deploy root@your-server # to a server with Docker: trader + dashboard, restarted on failure
 ```
 
 [Getting started](docs/getting-started.md) goes step by step from experiments to recording real data,
@@ -56,13 +56,23 @@ paper trading, shadow trading and live trading; [Deploying](docs/deploying.md) c
   conservative.
 - **Risk in the core.** Order size, position, open risk, risk per correlated group, daily loss,
   halts: checked before any broker sees an order.
+- **From paper to live, one strategy at a time.** Run many variants on paper (a `grid` in the
+  experiment makes one per combination), rank them by what they likely make per trade at worst,
+  and switch the ones you pick to real money while the session runs: from the dashboard or
+  `quanty promote --now`. Each keeps a paper twin beside it, so live fills can be compared with
+  simulated ones on the same markets; every order records whether it was real money, so the two are
+  never added together. `quanty reload` starts and retires variants without a restart, and
+  restarts restore what each strategy holds.
 - **Live trading that stops rather than guesses.** Required size caps, `--arm`, self-disabling on
   repeated rejections or unknown order outcomes, an order journal that cleans up after a crash
   without touching anything else on the account. A fake exchange with fault injection for tests.
-- **A dashboard.** P&L over time per strategy, every trade and order of a run (filtered, paged,
-  downloadable as CSV), notable events and feed health, each platform's connection and your account balances, with controls for running sessions:
-  halt, resume, disarm, kill switch, and editing a strategy's params (its size, say) while it runs.
-  Optional password login for reaching it over HTTPS.
+- **A dashboard.** P&L over time per strategy, real money and simulated apart; every trade and
+  order of a run (filtered, paged, downloadable as CSV); open markets with each strategy's own
+  estimate beside the market's; stop losses, the variant ranking and live-vs-twin comparison; feed
+  health, each platform's connection and your balances. Controls for running sessions: halt,
+  resume, disarm, kill switch, go live or back to paper, reload, and editing a strategy's params
+  while it runs (saved to the file, or brought home from a server with `quanty pull`). Optional
+  password login for reaching it over HTTPS.
 - **Private strategies.** Strategies load from folders in your own config, so your edge never has
   to live in this repo.
 
@@ -71,7 +81,8 @@ paper trading, shadow trading and live trading; [Deploying](docs/deploying.md) c
 - [Getting started](docs/getting-started.md): install to live, step by step
 - [Writing strategies](docs/strategies.md): hooks, context, orders, signals, testing
 - [Architecture](docs/architecture.md): how the pieces fit, and why one file runs everywhere
-- [Live trading](docs/live-trading.md): the safety layers, and what to do before `--arm`
+- [Live trading](docs/live-trading.md): the safety layers, restarts, and what to do before `--arm`
+- [Deploying](docs/deploying.md): servers (DigitalOcean, AWS, Fly.io), the dashboard over HTTPS, editing on a server
 
 ## Commands
 
@@ -85,9 +96,10 @@ paper trading, shadow trading and live trading; [Deploying](docs/deploying.md) c
 | `quanty promote` | move an instance between paper, shadow and live in its experiment file (`--now`: while running) |
 | `quanty pull`, `changes` | bring a server's dashboard changes into your experiment files; list what a server holds |
 | `quanty reload` | have a running session pick up its experiment file: new variants start, removed ones retire |
-| `quanty init`, `deploy` | create a project; copy it to a Docker server, check it there and start it |
+| `quanty init`, `deploy` | create a project; copy it to a Docker server (bringing its dashboard changes home first), check it there and start it |
 | `quanty doctor` | check a project before trading: config, keys, clock, venues, leftovers (read-only) |
 | `quanty list`, `params` | strategies quanty can find, and their parameters |
+| `quanty password` | set the dashboard's login (a salted hash in `.env`) |
 
 ## Layout
 

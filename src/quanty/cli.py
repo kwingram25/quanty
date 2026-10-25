@@ -252,7 +252,9 @@ def paper(
 ) -> None:
     """Paper trade: run an experiment's strategies on live feeds with simulated fills (no orders).
 
-    Brokers with kind = "shadow" also check every order with the venue (nothing is placed).
+    Brokers with kind = "shadow" also check every order with the venue (nothing is placed). Records
+    into the experiment's run (<data>/session/<name>.sqlite), continuing it: positions are restored,
+    and warmup_s in the experiment replays recent recordings first.
     """
     with _dashboard(data, ui_host, ui_port) if ui else contextlib.nullcontext():
         _session("paper", path, feeds, data, ledger, duration, window, armed=False)
@@ -273,7 +275,11 @@ def live(
     ui_host: UiHostOpt = "127.0.0.1",
     ui_port: UiPortOpt = 8765,
 ) -> None:
-    """Trade for real: kind = "live" brokers place orders on the venues. Needs --arm."""
+    """Trade for real: kind = "live" brokers place orders on the venues. Needs --arm.
+
+    Instances on sim or shadow brokers paper trade in the same session, and a live broker no instance
+    uses yet lets you switch them on while it runs (the dashboard's Go live, quanty promote --now).
+    """
     if not arm:
         raise _fail(ValueError("quanty live places real orders: pass --arm to confirm"))
     with _dashboard(data, ui_host, ui_port) if ui else contextlib.nullcontext():
@@ -360,7 +366,8 @@ def promote(
     ] = False,
 ) -> None:
     """Move an instance to another kind of broker (paper → shadow → live, or back) by editing its
-    experiment file. Carries its dashboard edits along. Starts nothing: run paper or live after."""
+    experiment file, keeping a paper twin beside it when it goes live. Carries its dashboard edits
+    along. Starts nothing: restart, reload, or --now to switch it in the running session."""
     from quanty import promote as pm
 
     if now:
@@ -588,7 +595,8 @@ def ui(
     port: Annotated[int, typer.Option(help="Port")] = 8765,
     refresh: Annotated[int, typer.Option(help="Seconds between page refreshes")] = 5,
 ) -> None:
-    """Dashboard of runs (ledgers under <data>/{live,paper,backtest}) and feed health.
+    """Dashboard of runs (ledgers under <data>/session for paper and live sessions, <data>/backtest)
+    and feed health.
 
     With QUANTY_UI_PASSWORD set (`quanty password`), it asks for a password first."""
     import uvicorn

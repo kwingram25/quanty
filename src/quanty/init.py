@@ -257,7 +257,8 @@ placed) and live. Run everything through `uv run quanty …`; the first run sets
   strategies from folders in the user's `~/.config/quanty/config.toml`; leave those alone and don't
   reuse their names.
 - `experiments/main.toml`: which strategies run (`[[instances]]`), their params, their broker
-  (`kind = "sim"`, `"shadow"` or `"live"`) and risk limits.
+  (`kind = "sim"`, `"shadow"` or `"live"`) and risk limits. A `grid = {{ param = [values] }}` in an
+  entry makes one instance per combination (`id = "name_{{param}}"` names them).
 - `feeds.toml`: the venues and series to connect to. `.env`: API keys.
 
 ## Rules
@@ -265,6 +266,8 @@ placed) and live. Run everything through `uv run quanty …`; the first run sets
 - **Never run `quanty live`, never set `kind = "live"` or `QUANTY_MODE=live`, and never raise
   `max_qty`, `max_notional` or `[limits]`, unless the user explicitly asks.** These place or permit
   real orders with real money.
+- Don't move a strategy toward live (`quanty promote --to live`, the dashboard's Go live) unless the
+  user asks; `--to shadow` is safe (orders checked by the venue, never placed).
 - **Never read, print or edit `.env`** (API keys). `uv run quanty doctor` checks it without showing it.
 - A strategy only reads events and acts through `ctx`: no network calls, files, clocks
   (`time.time()`) or randomness of its own, so backtests replay exactly what live would do. State on
@@ -406,9 +409,15 @@ A quanty project: your strategy, its configuration, and what's needed to deploy 
 3. **Backtest** on what you recorded: `uv run quanty backtest experiments/main.toml --data data`.
 4. **Paper trade** live markets with simulated fills, with the dashboard alongside:
    `uv run quanty paper experiments/main.toml --feeds feeds.toml --data data --ui`.
-5. **Shadow, then live**: set `kind = "shadow"` in `experiments/main.toml` to have every order checked
-   by the venue; for real orders, `kind = "live"` with `max_qty` and `max_notional`, and
-   `uv run quanty live experiments/main.toml --feeds feeds.toml --data data --arm`.
+   Many variants: a `grid` in an `[[instances]]` entry makes one per combination
+   (`grid = {{ min_conf = [0.9, 0.95] }}`); after editing the file, `uv run quanty reload` starts and
+   retires them without a restart. The dashboard's **Variants** tab ranks them for promotion.
+5. **Shadow, then live**: `uv run quanty promote <id> --to shadow` has every order checked by the
+   venue; `--to live` adds a live broker (asking for `max_qty` and `max_notional`) and keeps a paper
+   twin beside it, for the dashboard's **Compare**. Then
+   `uv run quanty live experiments/main.toml --feeds feeds.toml --data data --arm`. In a session
+   started that way, **Go live** on the dashboard (or `quanty promote --now`) switches strategies
+   without a restart.
 
 ## Deploy
 
@@ -422,6 +431,10 @@ and starts the trader (paper by default; `QUANTY_MODE=live` in `.env` trades for
 dashboard, both restarted on failure and on reboot. Run it again after every change. The dashboard
 listens on the server's 127.0.0.1:8765: `ssh -N -L 8765:127.0.0.1:8765 root@your-server`, then open
 http://127.0.0.1:8765.
+
+This folder stays the source of truth. Dashboard changes on the server (param edits, going live or
+back to paper) are kept there with the run, and `quanty deploy` first writes them into these files;
+`uv run quanty pull root@your-server` does that on its own. Review and commit them.
 
 On Fly.io, `fly.toml` runs the same project on one machine with a volume for `data/`. Managed container
 services that wipe the disk on redeploy (App Platform, ECS/Fargate, Cloud Run, Render) don't fit:

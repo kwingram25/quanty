@@ -27,9 +27,10 @@ change to `web/`.
 | `src/quanty/brokers/` | `sim` (simulated fills), `shadow` (orders checked by the venue, not placed), `live` |
 | `src/quanty/venues/` | Kalshi and Polymarket US: market data, order APIs, signing; `fake.py` is a fake exchange |
 | `src/quanty/feeds/` | recording, replay, feed health |
-| `src/quanty/control.py` | dashboard commands to running sessions (halt, arm, edit params, …) |
+| `src/quanty/control.py` | dashboard commands to running sessions (halt, arm, edit params, switch live, reload, …) |
+| `src/quanty/promote.py`, `pull.py` | experiment-file edits: moving an instance between brokers (with its paper twin); bringing a server's dashboard changes home |
 | `src/quanty/ui/` | FastAPI back end (`api.py`, `queries.py`, `auth.py`); `web/` is its React front end |
-| `src/quanty/cli.py` | the `quanty` command; `init.py`, `deploy.py`, `doctor.py` behind its subcommands |
+| `src/quanty/cli.py` | the `quanty` command; `init.py`, `deploy.py`, `doctor.py` behind its subcommands; `engine_tools.py` (paper twins in a running session) |
 | `src/quanty/strategies/` | example strategies; `strategies/_template.py` is the template |
 | `src/quanty/db/migrations/` | Alembic migrations for the ledger |
 

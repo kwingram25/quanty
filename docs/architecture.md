@@ -104,8 +104,8 @@ last push. The React app in `web/` (built into `ui/dist`) renders it: open marke
 their close, the P&L chart, a tape of fills, settlements and alerts, and toasts for anything that
 needs attention. Every database is opened read-only. Controls go through `control.py`: the
 dashboard writes commands to `data/control.sqlite`; each running session polls for its own, applies
-them (halt, resume, disarm, arm, kill, and param changes, which it also saves per run so a restart
-keeps them), records the outcome and publishes a heartbeat with its state,
+them (halt, resume, disarm, arm, kill; param changes and switching an instance live or back to
+paper, both saved per run so a restart keeps them; reloading the experiment file), records the outcome and publishes a heartbeat with its state,
 including its open markets and the event clock (so countdowns stay right in sped-up demos).
 
 ## Determinism
