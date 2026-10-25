@@ -21,6 +21,7 @@ Example (TOML)::
     max_order_qty = 10
 """
 
+import itertools
 import tomllib
 from collections.abc import Mapping
 from pathlib import Path
@@ -103,6 +104,34 @@ class Experiment(ConfigModel):
     brokers: dict[str, BrokerConfig] = Field(default_factory=_default_brokers, min_length=1)
     instances: list[InstanceSpec] = Field(min_length=1)
     signals: list[AnySignalConfig] = Field(default_factory=list)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _expand_grids(cls, raw: Any) -> Any:
+        """An [[instances]] entry with a `grid` ({param: [values]}) becomes one instance per
+        combination, its params merged in. The id can name them ("fav_{min_conf}_{last_s}"); without
+        placeholders the values are appended ("fav" -> "fav_0.995_420")."""
+        if not isinstance(raw, dict) or not isinstance(raw.get("instances"), list):
+            return raw
+        out = []
+        for entry in raw["instances"]:
+            grid = entry.get("grid") if isinstance(entry, dict) else None
+            if not grid:
+                out.append(entry)
+                continue
+            if not isinstance(grid, dict) or not all(isinstance(v, list) and v for v in grid.values()):
+                raise ValueError(f"instance {entry.get('id')}: grid is {{param: [values, ...]}}")
+            base = {k: v for k, v in entry.items() if k != "grid"}
+            names = list(grid)
+            for combo in itertools.product(*(grid[n] for n in names)):
+                values = dict(zip(names, combo, strict=True))
+                template = str(base.get("id", ""))
+                if "{" in template:
+                    iid = template.format(**values)
+                else:
+                    iid = "_".join([template, *(f"{v}" for v in combo)])
+                out.append({**base, "id": iid, "params": {**base.get("params", {}), **values}})
+        return {**raw, "instances": out}
 
     @model_validator(mode="after")
     def _brokers_resolve(self) -> Self:

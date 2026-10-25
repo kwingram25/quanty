@@ -53,6 +53,7 @@ def test_actions_apply_to_the_session(tmp_path: Path) -> None:
         "broker": "sim",
         "blocked": 0,
         "params": {},
+        "retired": False,
         "edited": [],
     }
 
@@ -408,3 +409,32 @@ def test_a_switch_the_file_cant_hold_is_kept_for_the_next_session(
     assert c.store.switches("session/main") == {"fav": ("real", "fav_paper")}
     _, engine2 = _switching(tmp_path, armed=True)  # the next session, from the same file
     assert engine2.instances["fav"].broker.name == "real" and "fav_paper" in engine2.instances
+
+
+def test_reloading_the_experiment_while_running(tmp_path: Path) -> None:
+    from quanty import experiment
+
+    exp = tmp_path / "main.toml"
+    first = '[[instances]]\nid = "s"\nstrategy = "sized"\nbroker = "sim"\n[brokers.sim]\nkind = "sim"\n'
+    exp.write_text(first)
+    c, store, engine = sized(tmp_path)
+    c.rebuild = lambda: (experiment.load(exp), {"sized": __import__(__name__)})
+    params_cmd(c, store, "params", {"side": "no"})  # a dashboard edit, kept through reloads
+    exp.write_text(
+        first.replace('broker = "sim"\n', 'broker = "sim"\n[instances.params]\nsize = 7\n')
+        + '[[instances]]\nid = "t_{size}"\nstrategy = "sized"\ngrid = { size = [2, 3] }\n'
+    )
+    r = params_cmd(c, store, "reload")
+    assert r["status"] == "done", r
+    assert {"t_2", "t_3"} <= set(engine.instances) and engine.instances["t_3"].strategy.params.size == 3
+    s = engine.instances["s"].strategy.params
+    assert s.size == 7 and s.side == "no"  # the file's change, and the dashboard edit on top
+    exp.write_text(first)  # t_2, t_3 removed
+    assert "t_2: retired" in str(params_cmd(c, store, "reload")["result"])
+    assert "t_2" in engine.halted and "t_2" in c.retired
+    store.submit("paper/acct", "resume", "")  # resume all: skips what was retired
+    c.tick()
+    assert "t_2" in engine.halted
+    cid = store.submit("paper/acct", "resume", "t_2")
+    c.tick()
+    assert next(x for x in store.history("paper/acct") if x["id"] == cid)["status"] == "failed"

@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useParams } from "react-router-dom";
 import { historyQuery, useHistory, usePoll, useRunStream, type ActivityRow, type NewRows, type OrderStats, type Snapshot, type Trade, type TradeSummary } from "../api";
 import { AnimatedNumber } from "../components/AnimatedNumber";
+import { Id } from "../components/Id";
 import { Markets } from "../components/Markets";
 import { PnlChart } from "../components/PnlChart";
 import { DemoClock, NewDay, SpeedToggle } from "../components/SpeedToggle";
@@ -181,12 +182,14 @@ function LoadingDay({ progress }: { progress: number }) {
 }
 
 const hasTwins = (snap: Snapshot) => Object.keys(snap.twins ?? {}).length > 0;
+const shown = (t: string, snap: Snapshot) =>
+  t === "compare" ? hasTwins(snap) : t === "variants" ? snap.strategies.length > 1 : true;
 
 /** "live" when the run has real money, else "paper" (or its mode, for a backtest). */
 export const runLabel = (snap: Snapshot): string =>
   snap.run.mode === "backtest" ? "backtest" : snap.real || snap.run.mode === "live" ? "live" : "paper";
 
-const TABS = ["chart", "trades", "orders", "commands", "compare"] as const;
+const TABS = ["chart", "trades", "orders", "variants", "compare", "commands"] as const;
 type Tab = (typeof TABS)[number];
 
 const RANGES: Record<string, number | null> = { "1h": 3_600_000, "6h": 21_600_000, "24h": 86_400_000, All: null };
@@ -199,16 +202,16 @@ function Center({ snap, slots, halted, chart }: {
   const [tab, setTab] = useState<Tab>(() => {
     try {
       const t = sessionStorage.getItem("tab:run") as Tab;
-      return TABS.includes(t) && (t !== "compare" || hasTwins(snap)) ? t : "chart";
+      return TABS.includes(t) && shown(t, snap) ? t : "chart";
     } catch { return "chart"; }
   });
   const pick = (t: Tab) => { setTab(t); try { sessionStorage.setItem("tab:run", t); } catch { /* private mode */ } };
-  // Compare only when a live strategy has a paper twin to compare with
-  const tabs = TABS.filter((t) => t !== "compare" || hasTwins(snap));
+  // Compare only when a live strategy has a paper twin; Variants with two strategies or more
+  const tabs = TABS.filter((t) => shown(t, snap));
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.target instanceof HTMLInputElement || e.target instanceof HTMLSelectElement || e.metaKey || e.ctrlKey || e.altKey) return;
-      const i = ["1", "2", "3", "4", "5"].indexOf(e.key);
+      const i = ["1", "2", "3", "4", "5", "6"].indexOf(e.key);
       if (i >= 0 && i < tabs.length) pick(tabs[i]);
     };
     addEventListener("keydown", onKey);
@@ -217,7 +220,7 @@ function Center({ snap, slots, halted, chart }: {
   useEffect(() => { if (!tabs.includes(tab)) pick("chart"); }, [tabs.length]);
   const counts: Record<Tab, number | null> = {
     chart: null, trades: snap.trade_total ?? snap.trades?.length ?? 0, orders: needsLook(snap.order_stats) ?? snap.activity.length,
-    commands: snap.commands.length, compare: null,
+    commands: snap.commands.length, compare: null, variants: null,
   };
   const label = (t: Tab) => (t === "chart" ? "P&L" : t[0].toUpperCase() + t.slice(1));
   const [range, setRange] = useState<string>(() => {
@@ -251,6 +254,7 @@ function Center({ snap, slots, halted, chart }: {
         {tab === "orders" && <Orders snap={snap} slots={slots} />}
         {tab === "commands" && <Commands snap={snap} />}
         {tab === "compare" && hasTwins(snap) && <Compare snap={snap} />}
+        {tab === "variants" && <Variants snap={snap} slots={slots} />}
       </div>
     </section>
   );
@@ -475,6 +479,68 @@ function Compare({ snap }: { snap: Snapshot }) {
           </tbody>
         </table>
       ))}
+    </>
+  );
+}
+
+interface VariantRow {
+  instance: string; trades: number; pnl: number; per_trade: number | null; range: number | null; lower: number | null;
+  win_rate: number | null; stop_rate: number | null; filled_pct: number | null;
+}
+const VCOLS: { key: keyof VariantRow; label: string; hint: string }[] = [
+  { key: "trades", label: "Trades", hint: "Positions closed (settled, sold or stopped)" },
+  { key: "win_rate", label: "Won", hint: "Win rate, of the positions that settled" },
+  { key: "stop_rate", label: "Stopped", hint: "Share of positions sold by a stop loss" },
+  { key: "filled_pct", label: "Filled", hint: "Share of orders filled in full" },
+  { key: "pnl", label: "P&L", hint: "Realized, after fees" },
+  { key: "per_trade", label: "Per trade", hint: "Mean P&L per closed position, ± about two standard errors" },
+  { key: "lower", label: "At worst", hint: "What it likely makes per trade at worst: its win rate's lower ~95% bound times its average win, the rest times its average loss (or, before any loss, a position's whole cost). A run of wins can't rule out a rare loss; more trades narrow it" },
+];
+
+/** Every strategy ranked for promotion, by its per-trade P&L's lower bound. */
+function Variants({ snap, slots }: { snap: Snapshot; slots: Record<string, number> }) {
+  const { data, error } = usePoll<VariantRow[]>(`/api/runs/${snap.run.name}/variants`, 5000);
+  const [sort, setSort] = useState<{ key: keyof VariantRow; desc: boolean }>({ key: "lower", desc: true });
+  if (error) return <p className="empty" style={{ padding: 16 }}>Couldn't rank: {error}</p>;
+  if (!data) return <p className="empty" style={{ padding: 16 }}>Loading…</p>;
+  if (!data.length) return <p className="empty" style={{ padding: 16 }}>No closed positions yet to rank by.</p>;
+  const rows = [...data].sort((a, b) => {
+    const x = a[sort.key], y = b[sort.key];
+    if (x == null) return 1;
+    if (y == null) return -1;
+    return (x < y ? -1 : x > y ? 1 : 0) * (sort.desc ? -1 : 1);
+  });
+  const pct = (v: number | null) => (v == null ? "–" : `${Math.round(v * 100)}%`);
+  return (
+    <>
+      <p className="trades-summary">Ranked by what each strategy likely makes per trade at worst: its win rate's lower bound
+        times its average win, the rest at its average loss, or a position's whole cost before any loss (the risk in
+        near-certain bets is the rare loss a run of wins can't rule out). More trades narrow it; under 5 is too few to rank.</p>
+      <table className="trades variants">
+        <thead><tr><th>Strategy</th>
+          {VCOLS.map((c) => (
+            <th key={c.key} className="r sortable" title={c.hint} aria-sort={sort.key === c.key ? (sort.desc ? "descending" : "ascending") : "none"}
+              onClick={() => setSort({ key: c.key, desc: sort.key === c.key ? !sort.desc : true })}>
+              {c.label}{sort.key === c.key ? (sort.desc ? " ↓" : " ↑") : ""}</th>
+          ))}</tr></thead>
+        <tbody>
+          {rows.map((v) => (
+            <tr key={v.instance}>
+              <td className="name-cell"><span className="who"><i className="swatch" style={{ ["--c" as string]: `var(--series-${slots[v.instance] ?? 0})` }} />
+                <span><Id name={v.instance} />{snap.kinds?.[v.instance] === "live" && <span className="kind-badge live">LIVE</span>}</span></span></td>
+              <td className="r num">{v.trades}</td>
+              <td className="r num">{pct(v.win_rate)}</td>
+              <td className="r num">{pct(v.stop_rate)}</td>
+              <td className="r num">{pct(v.filled_pct)}</td>
+              <td className={`r num ${tone(v.pnl)}`}>{money(v.pnl, true)}</td>
+              <td className="r num">{v.per_trade == null ? "–" : money(v.per_trade, true)}
+                {v.range != null && <span className="muted cost">± {money(v.range)}</span>}</td>
+              <td className={`r num pnl ${tone(v.lower ?? 0)}`} title={v.lower == null ? "Fewer than 5 closed trades: too few to say" : undefined}>
+                {v.lower == null ? <span className="muted">too few</span> : money(v.lower, true)}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
     </>
   );
 }

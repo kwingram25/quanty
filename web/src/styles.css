@@ -554,3 +554,9 @@ a.pill.link:hover { border-color: var(--axis); }
 .switch-broker .row-actions { display: flex; gap: 6px; flex-wrap: wrap; }
 .btn.danger-outline { border-color: color-mix(in srgb, var(--critical) 55%, var(--border)); color: var(--critical); }
 .btn.danger-outline:hover { background: var(--down-wash); }
+.panel.side > header { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+th.sortable { cursor: pointer; user-select: none; }
+th.sortable:hover { color: var(--ink); }
+table.variants .name-cell { white-space: normal; min-width: 150px; max-width: 220px; }
+table.variants td, table.variants th { padding-left: 8px; padding-right: 8px; }
+table.variants .cost { display: block; font-size: 11px; }

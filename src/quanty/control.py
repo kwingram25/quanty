@@ -59,6 +59,7 @@ ACTIONS = (
     "reset_params",
     "save_params",
     "switch",
+    "reload",
 )
 ALIVE_S = 10  # a session whose heartbeat is older than this is not running
 
@@ -268,6 +269,9 @@ class Controller:
         self.playback = playback
         self.feeds: Callable[[], Mapping[str, str]] | None = None  # feed -> health, set by a live session
         self.experiment: Path | None = None  # the experiment file, set by a live session (not a demo)
+        # (experiment, strategies) read afresh, for "reload"; set by a live session
+        self.rebuild: Callable[[], tuple[Any, Mapping[str, Any]]] | None = None
+        self.retired: set[str] = set()  # instances the experiment no longer has: exits only
         self.started_ts = now_ms()
         self.attach(trader)
 
@@ -342,6 +346,56 @@ class Controller:
                 {**describe(inst), "params_set": sorted(self.file_set[iid]), "edited": []},
             )
         return f"{iid}: saved {', '.join(f'{k} = {v}' for k, v in edited.items())} to {self.experiment.name}"
+
+    def _reload(self) -> str:
+        """Bring the running session in line with its experiment file: start instances it added,
+        retire ones it dropped (no new entries; what they hold finishes), apply changed params
+        (dashboard edits still on top) and brokers. New brokers, limits or feeds need a restart."""
+        from quanty.core.engine import Instance
+        from quanty.experiment import strategy_class
+
+        if self.rebuild is None:
+            raise ValueError("this session has no experiment file to reload (a demo?)")
+        exp, strategies = self.rebuild()
+        t, done = self.trader, []
+        specs = {s.id: s for s in exp.instances}
+        for iid, spec in specs.items():
+            if spec.strategy not in strategies:
+                done.append(f"{iid}: no strategy {spec.strategy!r}, skipped")
+                continue
+            cls = strategy_class(strategies[spec.strategy])
+            params = cls.params_type.from_config(spec.params, where=f"{iid}.params")
+            want = t.brokers.get(exp.broker_of(spec))
+            if want is None:
+                done.append(f"{iid}: broker {exp.broker_of(spec)!r} is new; restart to use it")
+                continue
+            if iid not in t.instances:
+                if want.kind == "live" and not self.can_arm:
+                    done.append(f"{iid}: on a live broker, but this session isn't armed; skipped")
+                    continue
+                strategy = cls(params)
+                if spec.series is not None:
+                    strategy.series = tuple(spec.series)
+                t.add_instance(Instance(iid, strategy, want, spec.limits, spec.twin_of))
+                self.file_params[iid], self.file_set[iid] = params, set(params.model_fields_set)
+                done.append(f"{iid}: started")
+                continue
+            if iid in self.retired:  # back in the file
+                self.retired.discard(iid)
+                t.resume(iid)
+                done.append(f"{iid}: back")
+            if params.model_dump(mode="json") != self.file_params[iid].model_dump(mode="json"):
+                edits = self.edited(iid)
+                self.file_params[iid], self.file_set[iid] = params, set(params.model_fields_set)
+                self._set_params(iid, {**params.model_dump(mode="json"), **edits})
+                done.append(f"{iid}: params from the file")
+            if t.instances[iid].broker is not want:
+                done.append(self._switch(iid, want.name, twin=False, persist=False))
+        for iid in [i for i in t.instances if i not in specs and i not in self.retired]:
+            t.halt(iid, "removed from the experiment")
+            self.retired.add(iid)
+            done.append(f"{iid}: retired (no new entries; what it holds finishes)")
+        return "; ".join(done) or "nothing changed"
 
     def _switch(self, iid: str, broker_name: str, twin: bool, persist: bool = True) -> str:
         """Move an instance onto another broker for the markets it enters from now on (the ones it's
@@ -420,6 +474,7 @@ class Controller:
                 "broker": inst.broker.name,
                 "blocked": self.trader.blocked.get(iid, 0),
                 "params": inst.strategy.params.model_dump(mode="json"),
+                "retired": iid in self.retired,
                 "edited": sorted(self.edited(iid)),
             }
             for iid, inst in self.trader.instances.items()
@@ -427,6 +482,7 @@ class Controller:
         return {
             "actions": list(ACTIONS),  # what this session's quanty can do (the dashboard may be newer)
             "save": self.save_mode,
+            "reload": self.rebuild is not None,
             "instances": instances,
             "brokers": brokers,
             "now": t.now,
@@ -521,6 +577,8 @@ class Controller:
 
     def apply(self, action: str, target: str, value: Any = None) -> str:
         t = self.trader
+        if action == "reload":
+            return self._reload()
         if action == "switch":
             if target not in t.instances:
                 raise ValueError(f"no instance {target!r}")
@@ -563,9 +621,13 @@ class Controller:
         if action in ("halt", "resume"):
             if target and target not in t.instances:
                 raise ValueError(f"no instance {target!r}")
-            (t.halt if action == "halt" else t.resume)(
-                target or None, *(["from the UI"] if action == "halt" else [])
-            )
+            if action == "resume" and target in self.retired:
+                raise ValueError(f"{target} was removed from the experiment: add it back and reload")
+            if action == "halt":
+                t.halt(target or None, "from the UI")
+            else:  # every instance, but never the retired ones
+                for iid in [target] if target else [i for i in t.instances if i not in self.retired]:
+                    t.resume(iid)
             return f"{'halted' if action == 'halt' else 'resumed'} {target or 'all instances'}"
         if action == "kill":
             t.halt(None, "kill switch")

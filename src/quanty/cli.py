@@ -430,6 +430,38 @@ def _switch_now(instance: str, to: str, broker: str | None, twin: bool, run: str
 
 
 @app.command()
+def reload(
+    path: Annotated[Path, typer.Option("--experiment", help="Experiment file")] = Path(
+        "experiments/main.toml"
+    ),
+    data: DataOpt = Path("data"),
+) -> None:
+    """Make the running session of an experiment pick up its file: new instances start, removed ones
+    retire (no new entries), changed params and brokers apply. No restart."""
+    from quanty import promote as pm
+
+    try:
+        experiment.load(path)  # a valid file first: a broken one would only fail in the session
+    except ValueError as exc:
+        raise _fail(exc) from None
+    run = pm.run_name(path)
+    store = ControlStore(data / "control.sqlite") if (data / "control.sqlite").exists() else None
+    if store is None or store.session(run) is None:
+        raise _fail(ValueError(f"no running session of {run} here: start it with quanty paper or live"))
+    cid = store.submit(run, "reload")
+    for _ in range(100):
+        row = next((c for c in store.history(run) if c["id"] == cid), None)
+        if row is not None and row["status"] != "pending":
+            if row["status"] != "done":
+                raise _fail(ValueError(row["result"]))
+            for part in str(row["result"]).split("; "):
+                typer.echo(f"  {part}")
+            return
+        time.sleep(0.1)
+    typer.echo(f"sent; {run} hasn't answered yet (see the dashboard's Commands tab)", err=True)
+
+
+@app.command()
 def deploy(
     host: Annotated[
         str, typer.Argument(help="The server, as you'd give ssh: user@host or a ~/.ssh/config name")
@@ -568,6 +600,7 @@ def _session(
     store = ControlStore(data / "control.sqlite")
     controller = Controller(store, run_name, trader, can_arm=armed)
     controller.experiment = path.resolve()  # the dashboard's "Save to file" writes edits here
+    controller.rebuild = lambda: (experiment.load(path), _strategies())  # "reload"
     session = RecordSession(
         feed_objs, data, data / "quanty.sqlite", window_s=window, trader=trader, controller=controller
     )

@@ -462,3 +462,28 @@ def test_ledgers_from_before_kinds_still_open(tmp_path: Path) -> None:
         assert c.get(f"/api/runs/{run}").status_code == 200, run
         for what in ("trades", "orders", "trades?money=real", "orders?view=look"):
             assert c.get(f"/api/runs/{run}/{what}").status_code == 200, (run, what)
+
+
+def test_variants_are_ranked_by_their_worst_likely_case(tmp_path: Path) -> None:
+    from quanty import experiment, plugins, synthetic
+    from quanty.core import Engine, Ledger
+
+    (tmp_path / "backtest").mkdir()
+    grid = {"id": "fav_{min_conf}", "strategy": "example_favorite", "grid": {"min_conf": [0.9, 0.97]}}
+    raw = {"instances": [grid]}
+    exp = experiment.parse(raw)
+    ledger = Ledger(tmp_path / "backtest" / "grid.sqlite")
+    Engine(experiment.build(exp, plugins.discover([], local=None), synthetic.FEES), ledger=ledger).run(
+        synthetic.events(synthetic.Spec(hours=24, seed=1))
+    )
+    ledger.close()
+    c = TestClient(create_app(tmp_path))
+    rows = c.get("/api/runs/backtest/grid/variants").json()
+    assert [r["instance"] for r in rows] and {r["instance"] for r in rows} == {"fav_0.9", "fav_0.97"}
+    for r in rows:
+        assert r["per_trade"] == pytest.approx(r["pnl"] / r["trades"]) and r["range"] > 0
+        assert r["lower"] < r["per_trade"]  # what it makes at worst is less than what it made
+    assert rows[0]["lower"] >= rows[1]["lower"]
+    from quanty.ui.queries import _wilson_low
+
+    assert 0.7 < _wilson_low(11, 11) < 0.75 and _wilson_low(110, 110) > 0.96  # more wins, a tighter bound

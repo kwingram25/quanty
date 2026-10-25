@@ -76,11 +76,15 @@ export interface SessionState {
   /** how dashboard edits reach the experiment file: written by the session, or copied by you (a
    *  session in a container image, whose copy a redeploy replaces); null in a demo */
   save?: "file" | "copy" | null;
+  /** whether the session can reload its experiment file (start, retire and update instances) */
+  reload?: boolean;
   pid: number;
   heartbeat_ts: number;
   can_arm: boolean;
   instances: Record<string, {
     halted: boolean; broker: string; blocked?: number;
+    /** removed from the experiment and reloaded: no new entries, what it holds finishes */
+    retired?: boolean;
     /** current params, and the names changed from the dashboard */
     params?: Record<string, unknown>; edited?: string[];
   }>;

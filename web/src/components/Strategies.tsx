@@ -44,7 +44,13 @@ export function Strategies({ snap, slots, onHover, focus }: {
 
   return (
     <aside className="panel side fill">
-      <header><h2>Strategies</h2></header>
+      <header><h2>Strategies</h2>
+        {s?.reload && s.actions?.includes("reload") && (
+          <button className="btn mini" onClick={() => act("reload", "", "Reloaded the experiment")}
+            title="Pick up the experiment file without a restart: new instances start, removed ones retire (no new entries), changed params and brokers apply">
+            Reload experiment</button>
+        )}
+      </header>
       <div className="panel-body scroll">
         {snap.strategies.length === 0 && <p className="empty">No strategies have traded yet.</p>}
         {[...snap.strategies].sort((a, b) => Number(snap.kinds?.[b.instance] === "live") - Number(snap.kinds?.[a.instance] === "live")).map((st) => {
@@ -147,10 +153,13 @@ function Row({ st, slot, kind, onHover, byKind, session, halted, blocked, stops,
               {" "}· real {money(byKind.live, true)}</span>
           )}
           {halted && blocked > 0 && <span className="blocked" title="buys refused while halted"> · {blocked} blocked</span>}</span>
-        {session && session.instances[st.instance] && <>
+        {session && session.instances[st.instance] && (session.instances[st.instance].retired ? (
+          <span className="pill halted" title="Removed from the experiment: no new entries; what it holds finishes. Gone after a restart">
+            <span className="dot" />retired</span>
+        ) : <>
           <span className={`pill ${halted ? "halted" : "trading"}`}><span className="dot" />{halted ? "halted" : "trading"}</span>
           <button className="btn" onClick={onToggle}>{halted ? "Resume" : "Halt"}</button>
-        </>}
+        </>)}
       </div>
       <AnimatePresence initial={false}>
         {open && (

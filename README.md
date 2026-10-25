@@ -82,7 +82,8 @@ paper trading, shadow trading and live trading; [Deploying](docs/deploying.md) c
 | `quanty record`, `replay`, `feeds` | record venues and feeds; parse recordings back; feed kinds and health |
 | `quanty paper`, `live` | run an experiment in real time (`live` needs `--arm`; `--ui` adds the dashboard) |
 | `quanty ui` | the dashboard |
-| `quanty promote` | move an instance between paper, shadow and live in its experiment file |
+| `quanty promote` | move an instance between paper, shadow and live in its experiment file (`--now`: while running) |
+| `quanty reload` | have a running session pick up its experiment file: new variants start, removed ones retire |
 | `quanty init`, `deploy` | create a project; copy it to a Docker server, check it there and start it |
 | `quanty doctor` | check a project before trading: config, keys, clock, venues, leftovers (read-only) |
 | `quanty list`, `params` | strategies quanty can find, and their parameters |

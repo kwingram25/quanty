@@ -165,6 +165,23 @@ the experiment file is updated (in a container, where the image's copy is replac
 switch is kept with the run instead and reapplied when the session restarts). **Back to paper**
 works the same way.
 
+**Many variants.** A `grid` in an `[[instances]]` entry makes one instance per combination:
+
+```toml
+[[instances]]
+id = "fav_{min_conf}_{enter_last_s}"     # placeholders name each one; without them, values are appended
+strategy = "example_favorite"
+grid = { min_conf = [0.9, 0.95, 0.97], enter_last_s = [30, 60] }   # six instances
+```
+
+Add, change or remove variants in the file while a session runs, then `uv run quanty reload` (or
+**Reload experiment** on the dashboard): new instances start, removed ones retire (no new entries;
+what they hold finishes), changed params and brokers apply. New brokers, limits and feeds, and
+edited strategy code, take a restart. The **Variants** tab ranks every strategy for promotion by what
+it likely makes per trade at worst: the win rate's lower ~95% bound times its average win, the
+rest at its average loss, or a position's whole cost before any loss. A run of wins on near-certain
+bets can't rule out the rare loss, so few trades rank low however well they went.
+
 **Runs.** Each experiment records into one run, *session/main* for `experiments/main.toml`, whether
 started with `quanty paper` or `quanty live`: the command only decides whether live brokers may be
 armed. Every order, fill and settlement records whether it was real money, so a strategy keeps one

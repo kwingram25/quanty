@@ -3,6 +3,7 @@
 Everything opens databases read-only, so the UI is safe to run beside paper and live sessions.
 """
 
+import math
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -778,3 +779,79 @@ def pnl_by_kind(run: Run) -> dict[str, dict[str, float]]:
     finally:
         engine.dispose()
     return out
+
+
+MIN_RANKED = 5  # closed trades before a variant is ranked at all
+Z = 1.96  # ~95%
+
+
+def _wilson_low(wins: int, n: int) -> float:
+    """The lower end of a ~95% range for a win rate seen as wins/n (Wilson): with 11 wins in 11, the
+    true rate could still be as low as ~74%."""
+    p = wins / n
+    centre = p + Z * Z / (2 * n)
+    margin = Z * math.sqrt((p * (1 - p) + Z * Z / (4 * n)) / n)
+    return (centre - margin) / (1 + Z * Z / n)
+
+
+def variants(run: Run) -> list[dict[str, Any]]:
+    """Every instance ranked for promotion by what it likely makes per trade at worst: its win rate's
+    lower ~95% bound times its average win, plus the rest times its average loss (or, before any
+    loss, a position's whole cost: what a favorite loses when it goes to zero). Rare losses are the
+    risk in near-certain bets, and a run of wins alone can't rule them out. With the plain mean
+    ± 1.96·sd/√n, and win, stop and fill rates."""
+    t = _positions(None, None, None, None, kinds_recorded(run))
+    pnl = func.coalesce(t.c.realized, 0) + func.coalesce(t.c.settle_pnl, 0)
+    win = pnl > 0
+    q = (
+        select(
+            t.c.instance,
+            func.count().label("trades"),
+            func.avg(pnl).label("mean"),
+            func.avg(pnl * pnl).label("mean_sq"),
+            func.sum(pnl).label("pnl"),
+            func.sum(case((win, 1), else_=0)).label("profitable"),
+            func.sum(case((win, pnl), else_=0)).label("win_pnl"),
+            func.sum(case((~win, pnl), else_=0)).label("loss_pnl"),
+            func.avg(t.c.cost + func.coalesce(t.c.fees, 0)).label("avg_cost"),
+            *(
+                func.sum(case((t.c.outcome == o, 1), else_=0)).label(o)
+                for o in ("won", "lost", "stopped", "sold")
+            ),
+        )
+        .where(t.c.outcome != "open")
+        .group_by(t.c.instance)
+    )
+    engine = _open(run.path)
+    try:
+        with Session(engine) as conn:
+            rows = conn.execute(q).all()
+    finally:
+        engine.dispose()
+    fills = order_stats(run)
+    out = []
+    for r in rows:
+        n, wins = r.trades, r.profitable or 0
+        var = max(0.0, (r.mean_sq or 0.0) - (r.mean or 0.0) ** 2) * (n / (n - 1) if n > 1 else 0.0)
+        half = Z * (var / n) ** 0.5 if n > 1 else None
+        lower = None
+        if n >= MIN_RANKED:
+            avg_win = r.win_pnl / wins if wins else 0.0
+            avg_loss = r.loss_pnl / (n - wins) if n > wins else -(r.avg_cost or 0.0)
+            p = _wilson_low(wins, n)
+            lower = p * avg_win + (1 - p) * avg_loss
+        o = fills.get(r.instance, {})
+        out.append(
+            {
+                "instance": r.instance,
+                "trades": n,
+                "pnl": r.pnl or 0.0,
+                "per_trade": r.mean,
+                "range": half or None,  # ± around per_trade (none when every trade was alike)
+                "lower": lower,  # None with fewer than MIN_RANKED trades
+                "win_rate": r.won / (r.won + r.lost) if r.won + r.lost else None,
+                "stop_rate": r.stopped / n if n else None,
+                "filled_pct": o["filled"] / o["orders"] if o.get("orders") else None,
+            }
+        )
+    return sorted(out, key=lambda v: (v["lower"] is None, -(v["lower"] or 0.0)))

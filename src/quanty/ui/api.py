@@ -233,19 +233,19 @@ class Api:
             "tape": queries.tape(r),
             "session": None
             if session is None
-            else {
+            else {  # everything the session reports, so a field it adds reaches the page
+                "instances": {},
+                "brokers": {},
+                "now": None,
+                "markets": [],
+                "exposure": {},
+                "speed": None,
+                "platforms": [],
+                **state,
+                "actions": state.get("actions", list(BEFORE_ACTIONS_LISTED)),
                 "pid": session["pid"],
                 "heartbeat_ts": session["heartbeat_ts"],
                 "can_arm": session["can_arm"],
-                "actions": state.get("actions", list(BEFORE_ACTIONS_LISTED)),
-                "save": state.get("save"),
-                "instances": state.get("instances", {}),
-                "brokers": state.get("brokers", {}),
-                "now": state.get("now"),
-                "markets": state.get("markets", []),
-                "exposure": state.get("exposure", {}),
-                "speed": state.get("speed"),
-                "platforms": state.get("platforms", []),
             },
             "commands": history,
         }
@@ -521,6 +521,11 @@ def router(api: Api) -> APIRouter:
             }
         except ValueError as exc:
             raise HTTPException(400, str(exc)) from None
+
+    @r.get("/runs/{mode}/{name}/variants")
+    def variants(mode: str, name: str) -> list[dict[str, Any]]:
+        """Every strategy in the run, ranked for promotion."""
+        return queries.variants(api.run_or_404(mode, name))
 
     @r.get("/runs/{mode}/{name}/compare")
     def compare(mode: str, name: str) -> dict[str, Any]:

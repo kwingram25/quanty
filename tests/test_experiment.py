@@ -84,3 +84,32 @@ def test_an_instance_can_trade_other_series(strategies: dict[str, ModuleType]) -
     a, b = experiment.build(experiment.parse(raw), strategies)
     assert a.strategy.series == ("synthetic:updown_5m",)
     assert b.strategy.series == type(b.strategy).series and len(b.strategy.series) == 3  # the file's own
+
+
+def test_grids_expand_into_one_instance_per_combination(strategies: dict[str, ModuleType]) -> None:
+    raw = {
+        "instances": [
+            {
+                "id": "fav_{min_conf}_{enter_last_s}",
+                "strategy": "example_favorite",
+                "params": {"size": 5},
+                "grid": {"min_conf": [0.9, 0.95], "enter_last_s": [30, 60]},
+            },
+            {"id": "plain", "strategy": "example_favorite", "grid": {"min_conf": [0.97]}},
+        ]
+    }
+    exp = experiment.parse(raw)
+    assert [i.id for i in exp.instances] == [
+        "fav_0.9_30",
+        "fav_0.9_60",
+        "fav_0.95_30",
+        "fav_0.95_60",
+        "plain_0.97",
+    ]
+    assert exp.instances[1].params == {"size": 5, "min_conf": 0.9, "enter_last_s": 60}
+    built = experiment.build(exp, strategies)
+    assert built[2].strategy.params.min_conf == 0.95 and built[2].strategy.params.size == 5
+    with pytest.raises(ValueError, match="grid is"):
+        experiment.parse(
+            {"instances": [{"id": "x", "strategy": "example_favorite", "grid": {"min_conf": []}}]}
+        )
