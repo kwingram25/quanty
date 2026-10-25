@@ -439,3 +439,17 @@ def test_reloading_the_experiment_while_running(tmp_path: Path) -> None:
     cid = store.submit("paper/acct", "resume", "t_2")
     c.tick()
     assert next(x for x in store.history("paper/acct") if x["id"] == cid)["status"] == "failed"
+
+
+def test_a_paper_session_can_prepare_a_live_broker(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from quanty import experiment
+
+    monkeypatch.delenv("QUANTY_IN_IMAGE", raising=False)
+    exp = tmp_path / "main.toml"
+    exp.write_text('[[instances]]\nid = "s"\nstrategy = "sized"\n')
+    c, store, _ = sized(tmp_path)
+    c.experiment = exp
+    r = params_cmd(c, store, "add_live_broker", {"max_qty": 3, "max_notional": 2})
+    assert r["status"] == "done" and "quanty live --arm" in str(r["result"])
+    assert experiment.load(exp).brokers["live"].kind == "live"
+    assert params_cmd(c, store, "add_live_broker", {"max_qty": 3})["status"] == "failed"

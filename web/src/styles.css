@@ -565,3 +565,8 @@ table.variants .name-cell { white-space: normal; min-width: 150px; max-width: 22
 table.variants td, table.variants th { padding-left: 8px; padding-right: 8px; }
 table.variants .cost { display: block; font-size: 11px; }
 .switch-broker .held { margin: 0 0 6px; }
+.switch-broker .prepare { display: grid; gap: 6px; margin-top: 8px; }
+.switch-broker .prepare label { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+.switch-broker .prepare input { width: 90px; height: 26px; padding: 0 8px; border-radius: 6px; border: 1px solid var(--border);
+  background: var(--page); color: var(--ink); font: inherit; text-align: right; }
+.switch-broker .prepare .actions { display: flex; justify-content: flex-end; gap: 6px; }

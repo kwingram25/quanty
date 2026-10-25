@@ -190,3 +190,34 @@ def needs_caps(path: Path, to: str, broker: str | None) -> bool:
     if broker is not None:
         return broker not in exp.brokers
     return not any(b.kind == "live" for b in exp.brokers.values())
+
+
+def add_live_broker(path: Path, max_qty: float, max_notional: float, name: str = "live") -> str:
+    """Add an unused live broker to the experiment (no instance moves onto it): a session started
+    with `quanty live --arm` can then switch instances onto it while running. Returns its name."""
+    if max_qty <= 0 or max_notional <= 0:
+        raise ValueError("max_qty and max_notional must be above 0")
+    exp = experiment.load(path)
+    if any(b.kind == "live" for b in exp.brokers.values()):
+        raise ValueError(f"{path.name} already has a live broker")
+    name = _free(name, exp)
+    doc = tomlkit.parse(path.read_text())
+    if "brokers" not in doc:  # the implicit default becomes explicit, so instances keep it
+        brokers = tomlkit.table(is_super_table=True)
+        only = next(iter(exp.brokers))
+        brokers[only] = {"kind": exp.brokers[only].kind}
+        doc["brokers"] = brokers
+        for e in doc.get("instances", []):
+            e.setdefault("broker", only)
+    new = tomlkit.table()
+    new["kind"] = "live"
+    new["max_qty"] = max_qty
+    new["max_notional"] = max_notional
+    new.add(tomlkit.nl())
+    doc["brokers"][name] = new
+    text = tomlkit.dumps(doc)
+    experiment.parse(tomllib.loads(text), source=path.name)  # still loads, or nothing is written
+    tmp = path.with_name(f".{path.name}.tmp")
+    tmp.write_text(text)
+    tmp.replace(path)
+    return name

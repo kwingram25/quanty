@@ -82,3 +82,20 @@ def test_promote_command_carries_dashboard_edits(tmp_path: Path, monkeypatch: py
     back = CliRunner().invoke(cli.app, ["promote", "a", "--to", "sim", "--no-check"])
     assert back.exit_code == 0 and "removed its paper twin a_paper" in back.output
     assert [i["id"] for i in tomllib.loads(exp.read_text())["instances"]] == ["a", "b"]
+
+
+def test_adding_a_parked_live_broker(tmp_path: Path) -> None:
+    from quanty.promote import add_live_broker
+
+    exp = tmp_path / "main.toml"
+    exp.write_text(TWO)  # one implicit broker
+    assert add_live_broker(exp, 5, 4) == "live"
+    loaded = experiment.load(exp)
+    assert (
+        loaded.brokers["live"].kind == "live" and experiment.live_brokers(loaded) == []
+    )  # parked: nothing on it
+    assert experiment.parked_live_brokers(loaded) == ["live"]
+    assert all(i.broker == "sim" for i in loaded.instances)  # they keep the broker they had
+    assert "# stays on paper" in exp.read_text()
+    with pytest.raises(ValueError, match="already has a live broker"):
+        add_live_broker(exp, 5, 4)

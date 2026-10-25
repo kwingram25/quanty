@@ -60,6 +60,7 @@ ACTIONS = (
     "save_params",
     "switch",
     "reload",
+    "add_live_broker",
 )
 ALIVE_S = 10  # a session whose heartbeat is older than this is not running
 DEPLOYED_MARK = ".quanty-deployed"  # left by `quanty deploy` in a server's project folder
@@ -601,6 +602,22 @@ class Controller:
         t = self.trader
         if action == "reload":
             return self._reload()
+        if action == "add_live_broker":
+            from quanty import promote
+
+            v = value if isinstance(value, dict) else {}
+            if self.save_mode != "file" or self.experiment is None:
+                raise ValueError("this session can't write its experiment file: add the broker there by hand")
+            try:
+                qty, notional = float(v["max_qty"]), float(v["max_notional"])
+            except (KeyError, TypeError, ValueError):
+                raise ValueError("add_live_broker needs max_qty and max_notional") from None
+            added = promote.add_live_broker(self.experiment, qty, notional)
+            caps = f"max_qty {qty:g}, max_notional {notional:g}"
+            return (
+                f"added [brokers.{added}] ({caps}) to {self.experiment.name}; "
+                "restart with quanty live --arm to switch strategies onto it"
+            )
         if action == "switch":
             if target not in t.instances:
                 raise ValueError(f"no instance {target!r}")
