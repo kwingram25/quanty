@@ -540,7 +540,8 @@ a.pill.link:hover { border-color: var(--axis); }
 .legend .more { border: 1px dashed var(--border); border-radius: 999px; padding: 0 8px; background: none; font: inherit;
   font-size: 12px; color: var(--ink-2); cursor: pointer; }
 /* long strategy names: shorten, keep the badge and P&L in view */
-.strategy .top .name { min-width: 0; flex: 1 1 auto; }
+.strategy .top .name { min-width: 0; flex: 0 1 auto; }  /* the badge follows the name */
+.strategy .top .pnl { margin-left: auto; }  /* the P&L at the right edge */
 .strategy .top .name .label { min-width: 0; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; line-height: 1.25; }
 .strategy .top .kind-badge, .strategy .top .pnl { flex: none; }
 .tape .what { min-width: 0; overflow-wrap: anywhere; }
