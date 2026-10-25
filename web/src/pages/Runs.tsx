@@ -26,9 +26,11 @@ export function RunsPage() {
                 </span>
               </div>
               {r.pnl_real != null ? (
-                <div className="split"><span><span className="muted small">Real money</span>
-                  <b className={`big ${tone(r.pnl_real)}`}>{money(r.pnl_real)}</b></span>
-                  <span><span className="muted small">Simulated</span> <b className={tone(r.pnl_simulated)}>{money(r.pnl_simulated ?? 0)}</b></span></div>
+                <div className="split">
+                  <span className="label real">Real money</span><span className="label">Simulated</span>
+                  <b className={`big ${tone(r.pnl_real)}`}>{money(r.pnl_real)}</b>
+                  <b className={`mid ${tone(r.pnl_simulated)}`}>{money(r.pnl_simulated ?? 0)}</b>
+                </div>
               ) : <div className={`big ${tone(r.pnl)}`}>{money(r.pnl)}</div>}
               <div className="meta">{r.strategies} strategies · {r.fills} fills
                 {r.errors ? ` · ${r.errors} errors` : ""} · {ago(r.last_ts)}</div>

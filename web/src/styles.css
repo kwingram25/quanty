@@ -547,8 +547,12 @@ a.pill.link:hover { border-color: var(--axis); }
 .tape .what { min-width: 0; overflow-wrap: anywhere; }
 
 .strategy .real-part { color: var(--critical); }
-.run-card .split { display: flex; align-items: baseline; gap: 16px; }
-.run-card .split > span { display: grid; }
+.run-card .split { display: grid; grid-template-columns: auto auto; justify-content: start; column-gap: 24px;
+  align-items: baseline; margin: 6px 0 4px; }
+.run-card .split .label { font-size: 12px; color: var(--muted); }
+.run-card .split .label.real { color: var(--critical); font-weight: 600; }
+.run-card .split .big { margin: 0; }
+.run-card .split .mid { font-size: 20px; font-weight: 600; font-variant-numeric: tabular-nums; }
 .pill.session .dot { background: var(--series-1); }
 
 .switch-broker .row-actions { display: flex; gap: 6px; flex-wrap: wrap; }
