@@ -270,6 +270,9 @@ class Api:
             snap["stats"]["pnl_real"] = real_pnl
             snap["stats"]["pnl_simulated"] = sim_pnl
         snap["real"] = has_real
+        # the server's rule for actions (a session with a live broker, armed or spare): the page asks for
+        # the run's name by the same one
+        snap["needs_confirm"] = has_real or self.is_real(r)
         snap["twins"] = self.twins(r, info)
         shown |= {t["market_id"] for t in snap["trades"]}
         snap["names"] = queries.names(r, shown)

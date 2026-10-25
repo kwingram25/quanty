@@ -8,6 +8,7 @@ Events scheduled for the same ts as the next input are processed before it.
 """
 
 import contextlib
+import functools
 import heapq
 import itertools
 import sys
@@ -181,6 +182,10 @@ class Context:
         self._e.estimates[market_id][self._i.id] = yes
 
 
+def _open_hook(market: Market, strategy: Strategy[Any], ctx: Context) -> None:
+    strategy.on_market_open(ctx, market)
+
+
 class Engine:
     def __init__(
         self,
@@ -191,6 +196,7 @@ class Engine:
         clock_ms: int | None = 1000,
         strict: bool = True,
         signals: Sequence["Signal"] = (),
+        spare_brokers: Sequence[Broker] = (),
     ) -> None:
         """strict re-raises strategy errors (backtests); otherwise the instance is logged and halted."""
         self.instances = {i.id: i for i in instances}
@@ -223,11 +229,16 @@ class Engine:
         for inst in instances:  # what each instance is, so a ledger can say what was run
             self.ledger.log(self.now, inst.id, "strategy", describe(inst))
         self._brokers: dict[str, Broker] = {}
-        for inst in instances:
-            if self._brokers.setdefault(inst.broker.name, inst.broker) is not inst.broker:
-                raise ValueError(f"two different brokers are named {inst.broker.name!r}")
+        for b in [*(i.broker for i in instances), *spare_brokers]:  # spares: to switch instances onto
+            if self._brokers.setdefault(b.name, b) is not b:
+                raise ValueError(f"two different brokers are named {b.name!r}")
         for broker in self._brokers.values():
             broker.attach(self)
+        # (instance, market) -> the broker its position and orders there belong to, where that isn't
+        # its broker now: an instance switched (or restored) keeps each market it's in on the broker
+        # it entered with until that market settles. None: that broker isn't in this session.
+        self._held_by: dict[tuple[str, str], Broker | None] = {}
+        self._order_broker: dict[str, Broker] = {}
         self._queue: list[tuple[int, int, Event]] = []
         self._seq = itertools.count()
         # continue a run's numbering: a restarted session must not reuse (and overwrite) its orders
@@ -357,6 +368,15 @@ class Engine:
             tag=tag,
             created_ts=self.now,
         )
+        broker = self._held_by.get((inst.id, market_id), inst.broker)
+        if broker is None:
+            order.status, order.reason = (
+                OrderStatus.REJECTED,
+                "it holds this market on a live broker this session doesn't have",
+            )
+            self.orders[order.id] = order
+            self.ledger.order(order, kind="live")
+            return order
         reason = self._invalid(order) or self._risk(inst, order)
         if reason == "halted":  # expected while halted: counted, not recorded order by order
             order.status, order.reason = OrderStatus.REJECTED, reason
@@ -365,17 +385,18 @@ class Engine:
         self.orders[order.id] = order
         if reason:
             order.status, order.reason = OrderStatus.REJECTED, reason
-            self.ledger.order(order)
+            self.ledger.order(order, kind=broker.kind)
             return order
         self.live[order.id] = order
-        self.ledger.order(order)
-        inst.broker.submit(order)
+        self._order_broker[order.id] = broker
+        self.ledger.order(order, kind=broker.kind)
+        broker.submit(order)
         return order
 
     def cancel(self, order_id: str) -> None:
         order = self.live.get(order_id)
         if order is not None:
-            self.instances[order.instance].broker.cancel(order)
+            self._order_broker.get(order.id, self.instances[order.instance].broker).cancel(order)
 
     @contextlib.contextmanager
     def warming(self) -> Iterator[None]:
@@ -423,8 +444,65 @@ class Engine:
                 self.portfolio.apply(r.instance, fill)
             except ValueError:  # a sell without its buy (a partial history): nothing to restore
                 skipped += 1
+        bought_as = {
+            (r.instance, r.market_id): r.kind for _, k, r in rows if k == 0 and r.action == Action.BUY
+        }
+        by_kind = {b.kind: b for b in self._brokers.values()}  # the first of each kind
+        unplaceable = 0
+        for iid, mid, _, p in list(self.portfolio.open_positions()):
+            kind = bought_as.get((iid, mid), self.instances[iid].broker.kind)
+            if p.qty > 1e-9 and kind != self.instances[iid].broker.kind:
+                broker = by_kind.get(kind) or (None if kind == "live" else by_kind.get("sim"))
+                self._held_by[(iid, mid)] = broker
+                unplaceable += broker is None
         open_ = sum(1 for *_, p in self.portfolio.open_positions() if p.qty > 1e-9)
-        return {"fills": sum(1 for _, k, _ in rows if k == 0), "open": open_, "skipped": skipped}
+        return {
+            "fills": sum(1 for _, k, _ in rows if k == 0),
+            "open": open_,
+            "skipped": skipped,
+            "live_without_broker": unplaceable,
+        }
+
+    @property
+    def brokers(self) -> dict[str, Broker]:
+        """Every broker of this session, by name: the instances' and the spares."""
+        return dict(self._brokers)
+
+    def switch(self, instance_id: str, broker_name: str) -> list[str]:
+        """Move an instance onto another of this session's brokers for every market it enters from
+        now on. Markets where it holds a position or has orders stay on the broker they're on until
+        they settle (a simulated position is never sold for real, nor a real one in simulation).
+        Returns those markets."""
+        inst = self.instances[instance_id]
+        new = self._brokers.get(broker_name)
+        if new is None:
+            raise ValueError(f"no broker {broker_name!r} in this session (have: {', '.join(self._brokers)})")
+        if new is inst.broker:
+            raise ValueError(f"{instance_id} already runs on {broker_name}")
+        busy = {m for i, m, _, p in self.portfolio.open_positions(instance_id) if p.qty > 1e-9}
+        busy |= {o.market_id for o in self.live.values() if o.instance == instance_id}
+        for m in busy:
+            self._held_by.setdefault((instance_id, m), inst.broker)
+        inst.broker = new
+        self.ledger.kinds[instance_id] = new.kind
+        self.ledger.log(self.now, instance_id, "strategy", describe(inst))  # the dashboard: its kind now
+        return sorted(busy)
+
+    def add_instance(self, inst: Instance) -> None:
+        """Start another instance in a running session (a paper twin, a new variant). It sees the
+        markets already open; its broker must be one of this session's."""
+        if inst.id in self.instances:
+            raise ValueError(f"there is already an instance {inst.id!r}")
+        if self._brokers.get(inst.broker.name) is not inst.broker:
+            raise ValueError(f"{inst.id}: broker {inst.broker.name!r} isn't one of this session's")
+        self.instances[inst.id] = inst
+        self._ctx[inst.id] = Context(self, inst)
+        self.ledger.kinds[inst.id] = inst.broker.kind
+        self.ledger.log(self.now, inst.id, "strategy", describe(inst))
+        self._guard(inst, lambda s, c: s.on_start(c))
+        for m in list(self.open_markets.values()):
+            if inst.strategy.wants(m):
+                self._guard(inst, functools.partial(_open_hook, m))
 
     def set_params(self, instance_id: str, params: Params) -> None:
         """Swap an instance's params while running; strategies see them from the next event."""
@@ -538,7 +616,8 @@ class Engine:
         if ev.market_id in self.open_markets:
             self._close(MarketClose(ts=ev.ts, market_id=ev.market_id))
         for s in self.portfolio.settle(ev.market_id, ev.outcome, ev.ts):
-            self.ledger.settlement(s)
+            held = self._held_by.pop((s.instance, s.market_id), self.instances[s.instance].broker)
+            self.ledger.settlement(s, kind=held.kind if held is not None else "live")
         self._to_brokers(ev)
         m = self.markets.get(ev.market_id)
         if m is not None:

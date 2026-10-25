@@ -98,7 +98,7 @@ class RecordSession:
 
     def _brokers(self) -> list["Broker"]:
         assert self.trader is not None
-        return list({id(i.broker): i.broker for i in self.trader.instances.values()}.values())
+        return list(self.trader.brokers.values())  # spares too: an instance may be switched onto one
 
     async def _tick(self) -> None:
         """Advance the engine with the wall clock, so order latency and clock ticks fire on time."""

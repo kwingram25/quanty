@@ -149,6 +149,22 @@ max_notional = 10     # required: largest single order, $
 Instances left on `sim` keep paper trading in the same live session. `--to sim` steps back; the live
 broker block stays in the file, unused, for next time.
 
+**Without a restart.** Start the session armed, with the live broker defined even if nothing uses it
+yet (`quanty promote` writes one, or add it by hand): `quanty live experiments/main.toml --feeds
+feeds.toml --data data --arm`. Then switch a paper strategy live while it runs, from its details on
+the dashboard (**Go live on …**, with the run's name typed to confirm) or from a terminal on the
+same machine:
+
+```sh
+uv run quanty promote my_strategy --to live --now
+```
+
+It takes real orders from the next market it enters; markets it's already in finish on paper, so a
+simulated position is never sold for real (or the other way). Its paper twin starts beside it, and
+the experiment file is updated (in a container, where the image's copy is replaced on deploy, the
+switch is kept with the run instead and reapplied when the session restarts). **Back to paper**
+works the same way.
+
 **Runs.** Each experiment records into one run, *session/main* for `experiments/main.toml`, whether
 started with `quanty paper` or `quanty live`: the command only decides whether live brokers may be
 armed. Every order, fill and settlement records whether it was real money, so a strategy keeps one

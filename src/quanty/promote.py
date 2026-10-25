@@ -144,6 +144,7 @@ def promote(
         for k in ("params", "limits"):
             if k in entry:
                 copy[k] = tomlkit.parse(tomlkit.dumps({k: entry[k]}))[k]  # a copy, comments and all
+        entry.add(tomlkit.nl())  # a blank line between the entries, as people write them
         entries.insert(next(i for i, e in enumerate(entries) if e.get("id") == instance) + 1, copy)
         result.twin_added = name
     elif to != "live" and twins:

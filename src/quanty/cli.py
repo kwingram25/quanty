@@ -354,11 +354,17 @@ def promote(
     data: DataOpt = Path("data"),
     check: Annotated[bool, typer.Option(help="Run quanty doctor on the result")] = True,
     twin: Annotated[bool, typer.Option(help="Going live: keep a paper twin beside it, for Compare")] = True,
+    now: Annotated[
+        bool, typer.Option("--now", help="Switch it in the running session (no restart); it saves the file")
+    ] = False,
 ) -> None:
     """Move an instance to another kind of broker (paper → shadow → live, or back) by editing its
     experiment file. Carries its dashboard edits along. Starts nothing: run paper or live after."""
     from quanty import promote as pm
 
+    if now:
+        _switch_now(instance, to, broker, twin, pm.run_name(path), data)
+        return
     try:
         experiment.load(path)  # a valid file to start from
         if pm.needs_caps(path, to, broker) and (max_qty is None or max_notional is None):
@@ -401,6 +407,26 @@ def promote(
             typer.echo("fix those before starting it", err=True)
     cmd = f"quanty {'live' if live_after else 'paper'} {path} --feeds feeds.toml --data {data}"
     typer.echo(f"next: (re)start the session with `{cmd}{' --arm' if live_after else ''}`")
+
+
+def _switch_now(instance: str, to: str, broker: str | None, twin: bool, run: str, data: Path) -> None:
+    """Send the running session of `run` a switch, and wait for what it did."""
+    path = data / "control.sqlite"
+    store = ControlStore(path) if path.exists() else None
+    if store is None or store.session(run) is None:
+        raise _fail(ValueError(f"no running session of {run} here: start it, or drop --now to edit the file"))
+    if to == "live" and not store.session(run)["can_arm"]:  # type: ignore[index]
+        raise _fail(ValueError(f"{run} wasn't started with quanty live --arm: it can't switch anything live"))
+    cid = store.submit(run, "switch", instance, {"to": to, "broker": broker, "twin": twin})
+    for _ in range(100):
+        row = next((c for c in store.history(run) if c["id"] == cid), None)
+        if row is not None and row["status"] != "pending":
+            if row["status"] != "done":
+                raise _fail(ValueError(row["result"]))
+            typer.echo(f"  {row['result']}")
+            return
+        time.sleep(0.1)
+    typer.echo(f"sent; {run} hasn't answered yet (see the dashboard's Commands tab)", err=True)
 
 
 @app.command()
@@ -514,9 +540,9 @@ def _session(
             raise ValueError(
                 f'brokers {", ".join(live_names)} are live: use quanty live --arm, or kind = "shadow"'
             )
-        if mode == "live" and not live_names:
+        if mode == "live" and not live_names and not experiment.parked_live_brokers(exp):
             raise ValueError('no kind = "live" broker in this experiment: use quanty paper')
-        instances = experiment.build(exp, _strategies(), armed=armed)
+        instances, spares = experiment.build_session(exp, _strategies(), armed=armed)
         feed_objs = load_feeds(feeds, None)
     except ValueError as exc:
         raise _fail(exc) from None
@@ -524,9 +550,9 @@ def _session(
     # one run per experiment, paper or live: each order records whether it was real money
     ledger_path = ledger or data / "session" / f"{path.stem}.sqlite"
     ledger_path.parent.mkdir(parents=True, exist_ok=True)
-    for inst in instances:
-        if isinstance(inst.broker, LiveBroker):
-            inst.broker.journal = ledger_path.with_name(f"{path.stem}.{inst.broker.name}.orders.jsonl")
+    for b in [*(i.broker for i in instances), *spares]:
+        if isinstance(b, LiveBroker):
+            b.journal = ledger_path.with_name(f"{path.stem}.{b.name}.orders.jsonl")
     book = Ledger(ledger_path, durable=True)
     trader = Engine(
         instances,
@@ -535,6 +561,7 @@ def _session(
         clock_ms=exp.clock_ms,
         strict=False,
         signals=experiment.signals(exp),
+        spare_brokers=spares,
     )
     _warm_and_restore(trader, exp, feeds, data, ledger_path)
     run_name = f"session/{ledger_path.stem}"

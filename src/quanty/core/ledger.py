@@ -45,12 +45,17 @@ class Ledger:
         self._rows: dict[type[Any], list[dict[str, Any]]] = {FillRow: [], SettlementRow: [], LogRow: []}
         self._pending = 0
         # instance -> its broker's kind (live = real money), set by the engine; recorded on every
-        # order, fill and settlement, so one run can hold an instance's paper days and its live ones
+        # order, fill and settlement, so one run can hold an instance's paper days and its live ones.
+        # An order records the kind of the broker that took it (_order_kind), its fills likewise.
         self.kinds: dict[str, str] = {}
+        self._order_kind: dict[str, str] = {}
 
     # --- writes ---
 
-    def order(self, o: Order) -> None:
+    def order(self, o: Order, kind: str | None = None) -> None:
+        """kind: the broker's that took it (on placement); later updates keep it."""
+        if kind is not None:
+            self._order_kind[o.id] = kind
         self._orders[o.id] = {
             "id": o.id,
             "instance": o.instance,
@@ -66,7 +71,7 @@ class Ledger:
             "status": o.status,
             "filled": o.filled,
             "reason": o.reason,
-            "kind": self.kinds.get(o.instance, "sim"),
+            "kind": self._order_kind.get(o.id, self.kinds.get(o.instance, "sim")),
         }
         self._wrote()
 
@@ -98,10 +103,10 @@ class Ledger:
             fee=f.fee,
             liquidity=f.liquidity,
             realized=realized,
-            kind=self.kinds.get(instance, "sim"),
+            kind=self._order_kind.get(f.order_id, self.kinds.get(instance, "sim")),
         )
 
-    def settlement(self, s: Settlement) -> None:
+    def settlement(self, s: Settlement, kind: str | None = None) -> None:
         self._add(
             SettlementRow,
             ts=s.ts,
@@ -111,7 +116,7 @@ class Ledger:
             qty=s.qty,
             payout=s.payout,
             pnl=s.pnl,
-            kind=self.kinds.get(s.instance, "sim"),
+            kind=kind or self.kinds.get(s.instance, "sim"),
         )
 
     def log(

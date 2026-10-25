@@ -550,3 +550,7 @@ a.pill.link:hover { border-color: var(--axis); }
 .run-card .split { display: flex; align-items: baseline; gap: 16px; }
 .run-card .split > span { display: grid; }
 .pill.session .dot { background: var(--series-1); }
+
+.switch-broker .row-actions { display: flex; gap: 6px; flex-wrap: wrap; }
+.btn.danger-outline { border-color: color-mix(in srgb, var(--critical) 55%, var(--border)); color: var(--critical); }
+.btn.danger-outline:hover { background: var(--down-wash); }

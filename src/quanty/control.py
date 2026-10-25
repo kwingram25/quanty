@@ -58,6 +58,7 @@ ACTIONS = (
     "params",
     "reset_params",
     "save_params",
+    "switch",
 )
 ALIVE_S = 10  # a session whose heartbeat is older than this is not running
 
@@ -81,6 +82,15 @@ overrides = Table(
     Column("run", String, primary_key=True),
     Column("instance", String, primary_key=True),
     Column("params", JSON, nullable=False),  # {name: value} that differ from the experiment file
+    Column("updated_ts", Integer, nullable=False),
+)
+switches = Table(  # instances moved onto another broker while running, where the file can't say so
+    "switches",
+    meta,
+    Column("run", String, primary_key=True),
+    Column("instance", String, primary_key=True),
+    Column("broker", String, nullable=False),
+    Column("twin", String),  # the paper twin started beside it, if any
     Column("updated_ts", Integer, nullable=False),
 )
 sessions = Table(
@@ -178,6 +188,26 @@ class ControlStore:
                     insert(overrides).values(run=run, instance=instance, params=params, updated_ts=now_ms())
                 )
 
+    def switches(self, run: str) -> dict[str, tuple[str, str | None]]:
+        """instance -> (broker, twin) saved for a run."""
+        with self.engine.connect() as conn:
+            rows = conn.execute(select(switches).where(switches.c.run == run)).mappings()
+            return {r["instance"]: (r["broker"], r["twin"]) for r in rows}
+
+    def set_switch(self, run: str, instance: str, broker: str | None, twin: str | None = None) -> None:
+        """Remember (or, with broker None, forget) an instance's switch for the next session."""
+        with self.engine.begin() as conn:
+            conn.execute(delete(switches).where((switches.c.run == run) & (switches.c.instance == instance)))
+            if broker is not None:
+                row = {
+                    "run": run,
+                    "instance": instance,
+                    "broker": broker,
+                    "twin": twin,
+                    "updated_ts": now_ms(),
+                }
+                conn.execute(insert(switches).values(**row))
+
     def heartbeat(self, run: str, started_ts: int, can_arm: bool, state: dict[str, Any]) -> None:
         row = {
             "pid": os.getpid(),
@@ -245,7 +275,7 @@ class Controller:
         """Control this engine (a demo's "new day" swaps in a fresh one), with the run's saved param
         overrides applied again."""
         self.trader = trader
-        self.brokers = {i.broker.name: i.broker for i in trader.instances.values()}
+        self.brokers = trader.brokers
         self.file_params = {iid: i.strategy.params for iid, i in trader.instances.items()}
         self.file_set = {iid: set(i.strategy.params.model_fields_set) for iid, i in trader.instances.items()}
         for iid, changes in self.store.overrides(self.run).items():
@@ -257,6 +287,16 @@ class Controller:
                 self.store.set_override(self.run, iid, {})
                 result = f"dropped saved changes that no longer fit: {exc}"
             self._log("control: params restored", {"target": iid, "ok": True, "result": result})
+        for iid, (broker, twin) in self.store.switches(self.run).items():  # where the file couldn't say so
+            if iid not in trader.instances or trader.instances[iid].broker.name == broker:
+                self.store.set_switch(self.run, iid, None)  # gone, or the file says it now
+                continue
+            try:
+                result = self._switch(iid, broker, twin is not None, persist=False)
+            except ValueError as exc:
+                self.store.set_switch(self.run, iid, None)
+                result = f"dropped a saved switch that no longer fits: {exc}"
+            self._log("control: switch restored", {"target": iid, "ok": True, "result": result})
 
     def _log(self, msg: str, fields: dict[str, Any], level: str = "warning") -> None:
         if self.trader.ledger is not None:
@@ -302,6 +342,43 @@ class Controller:
                 {**describe(inst), "params_set": sorted(self.file_set[iid]), "edited": []},
             )
         return f"{iid}: saved {', '.join(f'{k} = {v}' for k, v in edited.items())} to {self.experiment.name}"
+
+    def _switch(self, iid: str, broker_name: str, twin: bool, persist: bool = True) -> str:
+        """Move an instance onto another broker for the markets it enters from now on (the ones it's
+        in finish where they are); going live, start its paper twin beside it. Saved to the
+        experiment file where this session can write it, else kept for the next session."""
+        from quanty.engine_tools import twin_of
+
+        t = self.trader
+        inst = t.instances[iid]
+        new = t.brokers.get(broker_name)
+        if new is None:
+            raise ValueError(f"no broker {broker_name!r} in this session")
+        if new.kind == "live":
+            if not self.can_arm or not isinstance(new, LiveBroker) or not new.armed:
+                raise ValueError("switching to a live broker needs a session started with quanty live --arm")
+            if new.disabled:
+                raise ValueError(f"{broker_name} disabled itself ({new.disabled}); restart after checking")
+        old = inst.broker
+        has_twin = any(i.twin_of == iid for i in t.instances.values())
+        make_twin = new.kind == "live" and old.kind != "live" and twin and not has_twin
+        to_file = persist and self.save_mode == "file" and self.experiment is not None
+        if to_file:  # first, so a file that can't take it leaves everything as it was
+            from quanty import promote
+
+            assert self.experiment is not None
+            promote.promote(self.experiment, iid, new.kind, broker=broker_name, twin=make_twin)
+        stays = t.switch(iid, broker_name)
+        made = None
+        if make_twin:
+            made = twin_of(t, inst, old)
+            self.file_params[made.id] = made.strategy.params
+            self.file_set[made.id] = set(made.strategy.params.model_fields_set)
+        if persist and not to_file:
+            self.store.set_switch(self.run, iid, broker_name, made.id if made else None)
+        where = f"; {len(stays)} market(s) it's in stay on {old.name}" if stays else ""
+        twin_note = f"; paper twin {made.id} started on {old.name}" if made else ""
+        return f"{iid}: new markets on {broker_name} ({new.kind}){where}{twin_note}"
 
     def _set_params(self, iid: str, changes: Mapping[str, Any]) -> str:
         inst = self.trader.instances[iid]
@@ -444,6 +521,17 @@ class Controller:
 
     def apply(self, action: str, target: str, value: Any = None) -> str:
         t = self.trader
+        if action == "switch":
+            if target not in t.instances:
+                raise ValueError(f"no instance {target!r}")
+            v = value if isinstance(value, dict) else {}
+            current = t.instances[target].broker
+            name = v.get("broker") or next(
+                (n for n, b in t.brokers.items() if b.kind == v.get("to") and b is not current), None
+            )
+            if name is None:
+                raise ValueError(f"this session has no {v.get('to') or 'other'} broker to switch {target} to")
+            return self._switch(target, str(name), bool(v.get("twin", True)))
         if action in ("params", "reset_params", "save_params"):
             if target not in t.instances:
                 raise ValueError(f"no instance {target!r}")

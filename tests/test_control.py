@@ -345,3 +345,66 @@ def test_a_session_with_a_live_broker_needs_the_name_typed(tmp_path: Path) -> No
         headers={"x-quanty-token": token(client)},
     )
     assert r.status_code == 400 and "type acct to confirm" in r.json()["detail"]
+
+
+def _switching(tmp: Path, armed: bool) -> tuple[Controller, Engine]:
+    sim, live = SimBroker("paper"), LiveBroker("real", armed=armed)
+    insts = [Instance("fav", Sized(SizeParams(size=5)), sim)]
+    engine = Engine(
+        insts,
+        ledger=Ledger(tmp / "l.sqlite", durable=True),
+        clock_ms=None,
+        strict=False,
+        spare_brokers=[live],
+    )
+    return Controller(ControlStore(tmp / "control.sqlite"), "session/main", engine, can_arm=armed), engine
+
+
+def test_switching_live_while_running(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    import tomllib
+
+    monkeypatch.delenv("QUANTY_IN_IMAGE", raising=False)
+    exp = tmp_path / "main.toml"
+    exp.write_text(
+        '[brokers.paper]\nkind = "sim"\n\n[brokers.real]\nkind = "live"\nmax_qty = 5\nmax_notional = 5\n\n'
+        '[[instances]]\nid = "fav"\nstrategy = "sized"\nbroker = "paper"\n'
+    )
+    c, engine = _switching(tmp_path, armed=True)
+    c.experiment = exp
+    store = c.store
+    cid = store.submit("session/main", "switch", "fav", {"to": "live"})
+    c.tick()
+    r = next(x for x in store.history("session/main") if x["id"] == cid)
+    assert (
+        r["status"] == "done" and "new markets on real (live)" in r["result"] and "fav_paper" in r["result"]
+    ), r
+    assert (
+        engine.instances["fav"].broker.name == "real" and engine.instances["fav_paper"].broker.name == "paper"
+    )
+    assert engine.instances["fav_paper"].twin_of == "fav"
+    saved = {i["id"]: i for i in tomllib.loads(exp.read_text())["instances"]}
+    assert saved["fav"]["broker"] == "real" and saved["fav_paper"]["twin_of"] == "fav"  # in the file too
+
+
+def test_switching_live_needs_an_armed_session(tmp_path: Path) -> None:
+    c, engine = _switching(tmp_path, armed=False)
+    cid = c.store.submit("session/main", "switch", "fav", {"broker": "real"})
+    c.tick()
+    r = next(x for x in c.store.history("session/main") if x["id"] == cid)
+    assert (
+        r["status"] == "failed" and "--arm" in r["result"] and engine.instances["fav"].broker.name == "paper"
+    )
+
+
+def test_a_switch_the_file_cant_hold_is_kept_for_the_next_session(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("QUANTY_IN_IMAGE", "1")  # a container: the image's file is replaced on deploy
+    c, _ = _switching(tmp_path, armed=True)
+    c.experiment = tmp_path / "main.toml"
+    c.experiment.write_text('[[instances]]\nid = "fav"\nstrategy = "sized"\n')
+    c.store.submit("session/main", "switch", "fav", {"to": "live"})
+    c.tick()
+    assert c.store.switches("session/main") == {"fav": ("real", "fav_paper")}
+    _, engine2 = _switching(tmp_path, armed=True)  # the next session, from the same file
+    assert engine2.instances["fav"].broker.name == "real" and "fav_paper" in engine2.instances

@@ -163,6 +163,8 @@ export interface Snapshot {
   twins?: Record<string, string>;
   /** whether the run has real money (its live strategies, or real orders in its history) */
   real?: boolean;
+  /** whether actions on it need the run's name typed (it has real money, or a live broker) */
+  needs_confirm?: boolean;
   /** realized P&L per instance and kind, from what each fill and settlement recorded */
   pnl_kinds?: Record<string, Record<string, number>>;
 }

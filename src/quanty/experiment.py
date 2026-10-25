@@ -190,6 +190,18 @@ def build(
     armed: bool = False,
 ) -> list[Instance]:
     """armed: let live brokers place real orders (only `quanty live --arm` passes True)."""
+    return build_session(exp, strategies, fees, armed=armed)[0]
+
+
+def build_session(
+    exp: Experiment,
+    strategies: Mapping[str, ModuleType],
+    fees: Mapping[str, FeeModel] | None = None,
+    *,
+    armed: bool = False,
+) -> tuple[list[Instance], list[Broker]]:
+    """The instances, and the experiment's other brokers (spares an instance can be switched onto
+    while running). Live spares only when armed: an unarmed session can't use them."""
     brokers = {name: make_broker(name, cfg, fees or {}, armed=armed) for name, cfg in exp.brokers.items()}
     out = []
     for spec in exp.instances:
@@ -201,7 +213,15 @@ def build(
         if spec.series is not None:
             strategy.series = tuple(spec.series)
         out.append(Instance(spec.id, strategy, brokers[exp.broker_of(spec)], spec.limits, spec.twin_of))
-    return out
+    used = {i.broker.name for i in out}
+    spares = [b for n, b in brokers.items() if n not in used and (armed or b.kind != "live")]
+    return out, spares
+
+
+def parked_live_brokers(exp: Experiment) -> list[str]:
+    """Live brokers no instance uses yet: a live session can switch instances onto them."""
+    used = set(live_brokers(exp))
+    return [n for n, c in exp.brokers.items() if isinstance(c, LiveBrokerConfig) and n not in used]
 
 
 def signals(exp: Experiment) -> list[Signal]:

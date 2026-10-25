@@ -60,8 +60,9 @@ no session ran are settled when the venue next reports their result, within its 
   holding to settlement.
 - **It does not reconcile positions with the venue on start.** A restart sees its own journal
   and ledger, not orders or positions placed elsewhere.
-- **The dashboard has no login.** It listens on localhost; reach it remotely through an SSH tunnel,
-  not by binding it to a public interface.
+- **The dashboard isn't public by default.** It listens on localhost: reach it through an SSH
+  tunnel, or set a password (`quanty password --write`) and put it behind HTTPS (see
+  [Deploying](deploying.md)).
 
 ## Venue notes
 
