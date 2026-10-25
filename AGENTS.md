@@ -28,6 +28,7 @@ change to `web/`.
 | `src/quanty/venues/` | Kalshi and Polymarket US: market data, order APIs, signing; `fake.py` is a fake exchange |
 | `src/quanty/feeds/` | recording, replay, feed health |
 | `src/quanty/control.py` | dashboard commands to running sessions (halt, arm, edit params, switch live, reload, …) |
+| `src/quanty/sweep.py` | backtests the dashboard starts: one strategy over a grid of its params, on recent recordings |
 | `src/quanty/promote.py`, `pull.py` | experiment-file edits: moving an instance between brokers (with its paper twin); bringing a server's dashboard changes home |
 | `src/quanty/ui/` | FastAPI back end (`api.py`, `queries.py`, `auth.py`); `web/` is its React front end |
 | `src/quanty/cli.py` | the `quanty` command; `init.py`, `deploy.py`, `doctor.py` behind its subcommands; `engine_tools.py` (paper twins in a running session) |
@@ -45,7 +46,8 @@ change to `web/`.
 - Strategies only see events and act through `ctx`; nothing in a strategy's path may read the wall
   clock, the network or randomness, so replays are exact.
 - Ledger schema changes need an Alembic migration in `src/quanty/db/migrations/versions/`. The
-  dashboard opens databases read-only and never creates files.
+  dashboard opens databases read-only; it writes only control commands (`data/control.sqlite`)
+  and the backtests it starts (`data/backtest/`, via `sweep.py`).
 - Venue reply fields follow the published API docs (Kalshi's OpenAPI spec, Polymarket US's
   docs); check them there before parsing a new field.
 - `scripts/check_private.py` (pre-commit) refuses names from a denylist kept outside the repo.

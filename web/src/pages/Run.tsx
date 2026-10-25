@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useParams } from "react-router-dom";
 import { historyQuery, useHistory, usePoll, useRunStream, type ActivityRow, type NewRows, type OrderStats, type Snapshot, type Trade, type TradeSummary } from "../api";
 import { AnimatedNumber } from "../components/AnimatedNumber";
+import { BacktestForm } from "../components/Backtest";
 import { Id } from "../components/Id";
 import { Markets } from "../components/Markets";
 import { PnlChart } from "../components/PnlChart";
@@ -183,7 +184,7 @@ function LoadingDay({ progress }: { progress: number }) {
 
 const hasTwins = (snap: Snapshot) => Object.keys(snap.twins ?? {}).length > 0;
 const shown = (t: string, snap: Snapshot) =>
-  t === "compare" ? hasTwins(snap) : t === "variants" ? snap.strategies.length > 1 : true;
+  t === "compare" ? hasTwins(snap) : t === "variants" ? snap.strategies.length > 1 || snap.run.mode !== "backtest" : true;
 
 /** "live" when the run has real money, else "paper" (or its mode, for a backtest). */
 export const runLabel = (snap: Snapshot): string =>
@@ -501,9 +502,11 @@ const VCOLS: { key: keyof VariantRow; label: string; hint: string }[] = [
 function Variants({ snap, slots }: { snap: Snapshot; slots: Record<string, number> }) {
   const { data, error } = usePoll<VariantRow[]>(`/api/runs/${snap.run.name}/variants`, 5000);
   const [sort, setSort] = useState<{ key: keyof VariantRow; desc: boolean }>({ key: "lower", desc: true });
+  // backtest variants of a strategy from a paper or live run (its experiment file is here)
+  const form = (top: string) => snap.run.mode !== "backtest" && <BacktestForm snap={snap} pick={top} />;
   if (error) return <p className="empty" style={{ padding: 16 }}>Couldn't rank: {error}</p>;
   if (!data) return <p className="empty" style={{ padding: 16 }}>Loading…</p>;
-  if (!data.length) return <p className="empty" style={{ padding: 16 }}>No closed positions yet to rank by.</p>;
+  if (!data.length) return <>{form(snap.strategies[0]?.instance ?? "")}<p className="empty" style={{ padding: 16 }}>No closed positions yet to rank by.</p></>;
   const rows = [...data].sort((a, b) => {
     const x = a[sort.key], y = b[sort.key];
     if (x == null) return 1;
@@ -516,6 +519,7 @@ function Variants({ snap, slots }: { snap: Snapshot; slots: Record<string, numbe
       <p className="trades-summary">Ranked by what each strategy likely makes per trade at worst: its win rate's lower bound
         times its average win, the rest at its average loss, or a position's whole cost before any loss (the risk in
         near-certain bets is the rare loss a run of wins can't rule out). More trades narrow it; under 5 is too few to rank.</p>
+      {form(rows[0].instance)}
       <table className="trades variants">
         <thead><tr><th>Strategy</th>
           {VCOLS.map((c) => (

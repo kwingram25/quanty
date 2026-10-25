@@ -586,3 +586,15 @@ table.variants .cost { display: block; font-size: 11px; }
 .health-section li.fail .mark { color: var(--critical); }
 .health-section li.skip .mark { color: var(--muted); }
 .health-section .fix { display: block; color: var(--muted); font-size: 12px; }
+
+/* backtest variants (Variants tab) */
+.backtest { padding: 0 16px 12px; display: grid; gap: 8px; justify-items: start; }
+.backtest-status { margin: 0; }
+.backtest-status.done { color: var(--ink); }
+.backtest-status pre { white-space: pre-wrap; font-size: 12px; color: var(--critical); margin: 4px 0 0; }
+.backtest-form { display: grid; gap: 10px; width: min(640px, 100%); padding: 12px; border: 1px solid var(--border); border-radius: 8px; }
+.backtest-form p { margin: 0; }
+.backtest-form label { display: grid; gap: 4px; font-size: 13px; }
+.backtest-form input, .backtest-form select { font: inherit; padding: 5px 8px; border: 1px solid var(--border); border-radius: 6px; background: var(--surface); color: inherit; }
+.backtest-params { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 8px 12px; }
+.backtest-actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }

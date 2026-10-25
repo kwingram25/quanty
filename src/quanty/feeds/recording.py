@@ -110,7 +110,10 @@ def read_all(root: Path, feeds: Iterable[str], start: int, end: int) -> Iterator
 
 
 def recorded_feeds(root: Path) -> list[str]:
-    return sorted(p.name for p in root.iterdir() if p.is_dir()) if root.is_dir() else []
+    """Feeds with recordings under root (its other folders, session/ and backtest/, hold ledgers)."""
+    if not root.is_dir():
+        return []
+    return sorted(p.name for p in root.iterdir() if p.is_dir() and next(p.glob("*/*.jsonl.gz"), None))
 
 
 def span(root: Path, feed: str) -> tuple[int, int] | None:

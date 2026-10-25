@@ -1,5 +1,6 @@
 """JSON API and live stream for the dashboard. Reads databases read-only; writes only control
-commands (data/control.sqlite), behind a per-server token and a same-origin check."""
+commands (data/control.sqlite) and the backtests it starts (data/backtest/), behind a per-server
+token and a same-origin check."""
 
 import asyncio
 import csv
@@ -17,6 +18,7 @@ from pydantic import BaseModel
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from quanty import sweep
 from quanty.control import ControlStore
 from quanty.core.ledger import Summary
 from quanty.db.models import FillRow, LogRow, OrderRow, SettlementRow
@@ -48,6 +50,12 @@ def _plain(v: Any) -> Any:
 
 # sessions started before they reported their actions could do these
 BEFORE_ACTIONS_LISTED = ("halt", "resume", "disarm", "arm", "kill", "speed", "new_day")
+
+
+class BacktestRequest(BaseModel):
+    instance: str
+    grid: dict[str, list[Any]]  # param -> values to try
+    hours: float = 24
 
 
 class Command(BaseModel):
@@ -102,6 +110,7 @@ class Api:
         self.apis: dict[str, OrderAPI] = default_apis()
         self._balances: dict[str, dict[str, Any]] = {}  # venue -> last answer (or error), with when
         self._balance_lock = asyncio.Lock()
+        self.backtests = sweep.Runner(Path.cwd(), data)
 
     # --- reads ---
 
@@ -406,12 +415,29 @@ class Api:
 
     # --- control ---
 
-    async def command(self, request: Request, mode: str, name: str, cmd: Command) -> dict[str, Any]:
+    def guard(self, request: Request) -> None:
+        """Writes come from this dashboard's own pages only."""
         origin = request.headers.get("origin")
         if origin is not None and origin != f"{request.url.scheme}://{request.url.netloc}":
             raise HTTPException(403, "cross-site request refused")
         if request.headers.get("x-quanty-token") != self.token:
             raise HTTPException(403, "missing or stale token: reload the page")
+
+    def backtest(self, request: Request, mode: str, name: str, req: BacktestRequest) -> dict[str, Any]:
+        """Start a backtest of one of the run's strategies over a grid of its params."""
+        self.guard(request)
+        run = f"{mode}/{name}"
+        if queries.run_by_name(self.data, run) is None:
+            raise HTTPException(404, f"no run {run}")
+        try:
+            return self.backtests.start(run, req.instance, req.grid, req.hours).public()
+        except RuntimeError as exc:
+            raise HTTPException(409, str(exc)) from None
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from None
+
+    async def command(self, request: Request, mode: str, name: str, cmd: Command) -> dict[str, Any]:
+        self.guard(request)
         run = f"{mode}/{name}"
         if queries.run_by_name(self.data, run) is None:
             raise HTTPException(404, f"no run {run}")
@@ -566,6 +592,20 @@ def router(api: Api) -> APIRouter:
     @r.post("/runs/{mode}/{name}/control")
     async def control(request: Request, mode: str, name: str, cmd: Command) -> dict[str, Any]:
         return await api.command(request, mode, name, cmd)
+
+    @r.post("/runs/{mode}/{name}/backtest")
+    def backtest(request: Request, mode: str, name: str, req: BacktestRequest) -> dict[str, Any]:
+        return api.backtest(request, mode, name, req)
+
+    @r.get("/backtest")
+    def backtest_status() -> dict[str, Any] | None:
+        """The backtest started here last: running, done (its run), or failed (why)."""
+        return api.backtests.status()
+
+    @r.post("/backtest/stop")
+    def backtest_stop(request: Request) -> dict[str, bool]:
+        api.guard(request)
+        return {"stopped": api.backtests.stop()}
 
     @r.get("/health")
     def health(fresh: bool = False) -> dict[str, Any]:

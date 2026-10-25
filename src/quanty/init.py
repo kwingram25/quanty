@@ -411,7 +411,8 @@ A quanty project: your strategy, its configuration, and what's needed to deploy 
    `uv run quanty paper experiments/main.toml --feeds feeds.toml --data data --ui`.
    Many variants: a `grid` in an `[[instances]]` entry makes one per combination
    (`grid = {{ min_conf = [0.9, 0.95] }}`); after editing the file, `uv run quanty reload` starts and
-   retires them without a restart. The dashboard's **Variants** tab ranks them for promotion.
+   retires them without a restart. The dashboard's **Variants** tab ranks them for promotion, and
+   backtests new values of a strategy's params on the recent recordings.
 5. **Shadow, then live**: `uv run quanty promote <id> --to shadow` has every order checked by the
    venue; `--to live` adds a live broker (asking for `max_qty` and `max_notional`) and keeps a paper
    twin beside it, for the dashboard's **Compare**. Then

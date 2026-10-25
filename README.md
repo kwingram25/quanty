@@ -68,8 +68,8 @@ paper trading, shadow trading and live trading; [Deploying](docs/deploying.md) c
   without touching anything else on the account. A fake exchange with fault injection for tests.
 - **A dashboard.** P&L over time per strategy, real money and simulated apart; every trade and
   order of a run (filtered, paged, downloadable as CSV); open markets with each strategy's own
-  estimate beside the market's; stop losses, the variant ranking and live-vs-twin comparison; feed
-  health, each platform's connection and your balances. Controls for running sessions: halt,
+  estimate beside the market's; stop losses, the variant ranking (and backtests of new variants from it) and live-vs-twin
+  comparison; the project's health checks; feed health, each platform's connection and your balances. Controls for running sessions: halt,
   resume, disarm, kill switch, go live or back to paper, reload, and editing a strategy's params
   while it runs (saved to the file, or brought home from a server with `quanty pull`). Optional
   password login for reaching it over HTTPS.

@@ -240,6 +240,29 @@ export async function sendCommand(run: string, action: string, target = "", conf
   return body;
 }
 
+/** A backtest the dashboard started (one at a time): running, done (its run) or failed (why). */
+export interface BacktestJob {
+  state: "running" | "done" | "failed";
+  run: string; instance: string; result: string; variants: number; hours: number;
+  started: number; finished: number | null; error: string | null;
+}
+
+async function post<T>(url: string, body?: unknown): Promise<T> {
+  const r = await fetch(url, {
+    method: "POST",
+    headers: { "content-type": "application/json", "x-quanty-token": token() },
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
+  if (r.status === 401) toLogin();
+  const out = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(out.detail ?? `HTTP ${r.status}`);
+  return out as T;
+}
+
+export const startBacktest = (run: string, instance: string, grid: Record<string, unknown[]>, hours: number) =>
+  post<BacktestJob>(`/api/runs/${run}/backtest`, { instance, grid, hours });
+export const stopBacktest = () => post<{ stopped: boolean }>("/api/backtest/stop");
+
 /** One page of a run's history (trades or orders), filtered on the server. Refetched when the
  *  filters or the page size change, and when `tick` changes (new data), at most every 2 s. */
 export function useHistory<T>(run: string, what: "trades" | "orders", params: Record<string, string | number | undefined>,

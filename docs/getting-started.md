@@ -207,7 +207,11 @@ what they hold finishes), changed params and brokers apply. New brokers, limits 
 edited strategy code, take a restart. The **Variants** tab ranks every strategy for promotion by what
 it likely makes per trade at worst: the win rate's lower ~95% bound times its average win, the
 rest at its average loss, or a position's whole cost before any loss. A run of wins on near-certain
-bets can't rule out the rare loss, so few trades rank low however well they went.
+bets can't rule out the rare loss, so few trades rank low however well they went. **Backtest
+variants** there tries values of one strategy's params before you add them: it replays the last
+hours of recordings with the strategy as it runs now and a copy per combination (simulated, in
+the background, one at a time), and the result opens as a backtest run, ranked the same way. Its
+experiment is saved beside the result (`data/backtest/<name>.toml`), so it can be rerun by hand.
 
 **Runs.** Each experiment records into one run, *session/main* for `experiments/main.toml`, whether
 started with `quanty paper` or `quanty live`: the command only decides whether live brokers may be
