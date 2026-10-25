@@ -536,6 +536,7 @@ def _session(
         strict=False,
         signals=experiment.signals(exp),
     )
+    _warm_and_restore(trader, exp, feeds, data, ledger_path)
     run_name = f"session/{ledger_path.stem}"
     store = ControlStore(data / "control.sqlite")
     controller = Controller(store, run_name, trader, can_arm=armed)
@@ -582,6 +583,32 @@ def _params(pairs: list[str]) -> dict[str, Any]:
 def _now_window_ms(window_s: int = 300) -> int:
     now = int(time.time() * 1000)
     return now - now % (window_s * 1000)
+
+
+def _warm_and_restore(
+    trader: Engine, exp: experiment.Experiment, feeds: Path, data: Path, ledger: Path
+) -> None:
+    """Before a session trades: replay the recent recordings (exp.warmup_s, orders off) so strategy
+    state is rebuilt, then restore what the run already holds from its ledger."""
+    if exp.warmup_s:
+        end = int(time.time() * 1000)
+        typer.echo(
+            f"warming up: replaying the last {exp.warmup_s / 3600:g} h of recordings in {data}/ (orders off)"
+        )
+        n = 0
+        with trader.warming():
+            for ev in Replay(load_feeds(feeds, None), data, end - exp.warmup_s * 1000, end):
+                trader.advance(ev.ts)
+                trader.process(ev)
+                n += 1
+        typer.echo(f"  warmed up on {n:,} events" + ("" if n else " (no recordings for that time yet)"))
+    got = trader.restore()
+    if got["fills"]:
+        typer.echo(
+            f"continuing {ledger.name}: {got['open']} open position(s) restored from {got['fills']:,} fills"
+        )
+        assert trader.ledger is not None
+        trader.ledger.log(trader.now, "session", "restored positions", got)
 
 
 def _demo_live(

@@ -7,11 +7,12 @@ broker; fills and order updates come back as events, so nothing re-enters a stra
 Events scheduled for the same ts as the next input are processed before it.
 """
 
+import contextlib
 import heapq
 import itertools
 import sys
 from collections import defaultdict
-from collections.abc import Callable, Iterable, Sequence
+from collections.abc import Callable, Iterable, Iterator, Sequence
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
@@ -130,21 +131,34 @@ class Context:
     def orders(self, market_id: str | None = None) -> list[Order]:
         """This instance's live orders."""
         return [
-            o for o in self._e.live.values()
-            if o.instance == self._i.id and market_id in (None, o.market_id)
-        ]  # fmt: skip
+            o for o in self._e.live.values() if o.instance == self._i.id and market_id in (None, o.market_id)
+        ]
 
     def buy(
-        self, market_id: str, side: Side, price: float, qty: float, *,
-        tif: Tif = Tif.GTC, post_only: bool = False, tag: str = "",
-    ) -> Order:  # fmt: skip
+        self,
+        market_id: str,
+        side: Side,
+        price: float,
+        qty: float,
+        *,
+        tif: Tif = Tif.GTC,
+        post_only: bool = False,
+        tag: str = "",
+    ) -> Order:
         """Place a buy; the returned order is REJECTED (with a reason) if it fails checks."""
         return self._e.place(self._i, market_id, side, Action.BUY, price, qty, tif, post_only, tag)
 
     def sell(
-        self, market_id: str, side: Side, price: float, qty: float, *,
-        tif: Tif = Tif.GTC, post_only: bool = False, tag: str = "",
-    ) -> Order:  # fmt: skip
+        self,
+        market_id: str,
+        side: Side,
+        price: float,
+        qty: float,
+        *,
+        tif: Tif = Tif.GTC,
+        post_only: bool = False,
+        tag: str = "",
+    ) -> Order:
         """Sell contracts you hold (no shorting: to bet against YES, buy NO)."""
         return self._e.place(self._i, market_id, side, Action.SELL, price, qty, tif, post_only, tag)
 
@@ -218,6 +232,7 @@ class Engine:
         self._seq = itertools.count()
         # continue a run's numbering: a restarted session must not reuse (and overwrite) its orders
         self._order_seq = itertools.count(self.ledger.last_order_number() + 1)
+        self._warming = False
         self._next_clock: int | None = None
         self._opens: list[tuple[int, str]] = []
         self._closes: list[tuple[int, str]] = []
@@ -302,14 +317,46 @@ class Engine:
     # --- orders ---
 
     def place(
-        self, inst: Instance, market_id: str, side: Side, action: Action, price: float, qty: float,
-        tif: Tif, post_only: bool, tag: str,
-    ) -> Order:  # fmt: skip
+        self,
+        inst: Instance,
+        market_id: str,
+        side: Side,
+        action: Action,
+        price: float,
+        qty: float,
+        tif: Tif,
+        post_only: bool,
+        tag: str,
+    ) -> Order:
+        if self._warming:  # replaying the recent past: decisions are rebuilt, nothing is placed
+            return Order(
+                id=f"{inst.id}-warmup",
+                instance=inst.id,
+                market_id=market_id,
+                side=side,
+                action=action,
+                price=price,
+                qty=qty,
+                tif=tif,
+                post_only=post_only,
+                tag=tag,
+                created_ts=self.now,
+                status=OrderStatus.REJECTED,
+                reason="warming up",
+            )
         order = Order(
-            id=f"{inst.id}-{next(self._order_seq)}", instance=inst.id, market_id=market_id,
-            side=side, action=action, price=round(price, 9), qty=qty, tif=tif, post_only=post_only,
-            tag=tag, created_ts=self.now,
-        )  # fmt: skip
+            id=f"{inst.id}-{next(self._order_seq)}",
+            instance=inst.id,
+            market_id=market_id,
+            side=side,
+            action=action,
+            price=round(price, 9),
+            qty=qty,
+            tif=tif,
+            post_only=post_only,
+            tag=tag,
+            created_ts=self.now,
+        )
         reason = self._invalid(order) or self._risk(inst, order)
         if reason == "halted":  # expected while halted: counted, not recorded order by order
             order.status, order.reason = OrderStatus.REJECTED, reason
@@ -329,6 +376,55 @@ class Engine:
         order = self.live.get(order_id)
         if order is not None:
             self.instances[order.instance].broker.cancel(order)
+
+    @contextlib.contextmanager
+    def warming(self) -> Iterator[None]:
+        """Within: replay recent events so strategies, models and signals rebuild their state before a
+        session trades. Orders are refused (never reaching a broker) and nothing is written to the
+        run's ledger. Do it before restore(), so replayed settlements find no positions to pay."""
+        real, self.ledger = self.ledger, Ledger()
+        self.ledger.kinds = dict(real.kinds)
+        self._warming = True
+        try:
+            yield
+        finally:
+            self._warming = False
+            self.ledger.close()
+            self.ledger = real
+
+    def restore(self) -> dict[str, int]:
+        """Rebuild positions and realized (and daily) P&L from the run's recorded fills and
+        settlements: a restarted session knows what its instances hold. Returns what it found."""
+        from sqlalchemy import select
+
+        from quanty.db.models import FillRow, SettlementRow
+
+        rows: list[tuple[int, int, Any]] = []
+        for model in (FillRow, SettlementRow):
+            q = select(model).where(model.instance.in_(list(self.instances)))
+            rows += [(r.ts, 0 if model is FillRow else 1, r) for r in self.ledger.execute(q).scalars()]
+        skipped = 0
+        for _, kind, r in sorted(rows, key=lambda x: (x[0], x[1], x[2].id)):
+            if kind == 1:
+                self.portfolio.restore_settlement(r.instance, r.market_id, r.side, r.pnl, r.ts)
+                continue
+            fill = Fill(
+                ts=r.ts,
+                order_id=r.order_id,
+                market_id=r.market_id,
+                side=r.side,
+                action=r.action,
+                price=r.price,
+                qty=r.qty,
+                fee=r.fee,
+                liquidity=r.liquidity,
+            )
+            try:
+                self.portfolio.apply(r.instance, fill)
+            except ValueError:  # a sell without its buy (a partial history): nothing to restore
+                skipped += 1
+        open_ = sum(1 for *_, p in self.portfolio.open_positions() if p.qty > 1e-9)
+        return {"fills": sum(1 for _, k, _ in rows if k == 0), "open": open_, "skipped": skipped}
 
     def set_params(self, instance_id: str, params: Params) -> None:
         """Swap an instance's params while running; strategies see them from the next event."""

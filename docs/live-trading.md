@@ -32,6 +32,27 @@ need several things to go wrong at once. This page is what to know before `--arm
 A disabled broker cannot be re-armed from the dashboard: something unexpected happened, so check
 the venue and restart the session.
 
+## Restarts
+
+A session can be stopped and started again (a deploy, a crash, a change to the experiment) and
+carry on its run:
+
+- **Positions are restored.** On start, each strategy's open positions and realized P&L (the
+  daily loss limit included) are rebuilt from the run's recorded fills and settlements, so a
+  strategy that held 100 contracts before the restart knows it still does and doesn't buy again.
+- **Order history continues.** Order numbers carry on from the run's last, so nothing earlier is
+  overwritten.
+- **Resting orders are resolved.** Live brokers read their order journal and cancel what a previous
+  session left resting on the venue.
+- **Warm-up, if the experiment asks.** With `warmup_s = 14400` at the top of the experiment, a
+  session first replays the last four hours of its own recordings with orders off, so models and
+  signals that need history start warm. It takes a while for long warm-ups (the replay runs
+  through every book update), and it rebuilds what strategies learn from the markets, not what
+  they learned from their own fills.
+
+Not yet: comparing restored live positions with what the venue holds. Markets that settled while
+no session ran are settled when the venue next reports their result, within its results window.
+
 ## What quanty does not do
 
 - **It does not sell your positions in an emergency.** The kill switch halts buying; positions

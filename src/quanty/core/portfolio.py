@@ -82,6 +82,11 @@ class Portfolio:
             out.append(Settlement(instance, market_id, side, pos.qty, payout, pnl, ts))
         return out
 
+    def restore_settlement(self, instance: str, market_id: str, side: Side, pnl: float, ts: int) -> None:
+        """Replay a recorded settlement: the position is gone, its P&L booked (rebuilding from a ledger)."""
+        self._pos.pop((instance, market_id, side), None)
+        self._book(instance, ts, pnl)
+
     def daily_pnl(self, instance: str | None, ts: int) -> float:
         """Realized P&L on the UTC day of `ts`, for one instance or all."""
         day = ts // DAY_MS

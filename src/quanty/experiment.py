@@ -96,6 +96,9 @@ def _default_brokers() -> dict[str, BrokerConfig]:
 
 class Experiment(ConfigModel):
     clock_ms: PositiveInt | None = 1000
+    # paper/live sessions: replay this much of the recent recordings first (orders off), so models
+    # and signals that need history (an index's last hours) start warm instead of cold
+    warmup_s: NonNegativeInt = 0
     limits: Limits = Limits()
     brokers: dict[str, BrokerConfig] = Field(default_factory=_default_brokers, min_length=1)
     instances: list[InstanceSpec] = Field(min_length=1)
