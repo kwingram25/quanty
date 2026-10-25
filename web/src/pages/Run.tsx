@@ -1,7 +1,7 @@
 import { motion } from "motion/react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useParams } from "react-router-dom";
-import { historyQuery, useHistory, useRunStream, type ActivityRow, type NewRows, type OrderStats, type Snapshot, type Trade, type TradeSummary } from "../api";
+import { Link, useParams } from "react-router-dom";
+import { historyQuery, useHistory, usePoll, useRunStream, type ActivityRow, type NewRows, type OrderStats, type Snapshot, type Trade, type TradeSummary } from "../api";
 import { AnimatedNumber } from "../components/AnimatedNumber";
 import { Markets } from "../components/Markets";
 import { PnlChart } from "../components/PnlChart";
@@ -33,7 +33,8 @@ export function RunPage() {
   if (state === "missing") return <div className="page"><p className="empty">No run named {run}.</p></div>;
   if (!snap) return <div className="page"><p className="empty">Loading {run}…</p></div>;
   // a demo's new day is a new run: start the page afresh (no "changes" animated from the old day)
-  return <Run key={snap.session?.speed?.seed ?? "run"} snap={snap} live={state === "open"} />;
+  if (snap.run.name !== run) return <div className="page"><p className="empty">Loading {run}…</p></div>;
+  return <Run key={`${run}:${snap.session?.speed?.seed ?? ""}`} snap={snap} live={state === "open"} />;
 }
 
 function Run({ snap, live }: { snap: Snapshot; live: boolean }) {
@@ -60,6 +61,9 @@ function Run({ snap, live }: { snap: Snapshot; live: boolean }) {
         <div className="run-title">
           <h1>{snap.run.name.split("/")[1]}
             <span className={`pill ${snap.run.mode}`}><span className="dot" />{snap.run.mode}</span>
+            {snap.counterpart && <Link className="pill link" to={`/runs/${snap.counterpart}`}
+              title={`The same experiment's ${snap.counterpart.split("/")[0]} run (the Compare tab puts them side by side)`}>
+              ↔ {snap.counterpart}</Link>}
             {snap.session && <span className="pill running" title={live ? "updates pushed live" : "reconnecting"}>
               <span className="dot" />running</span>}
             {snap.session?.platforms?.map((p) => (
@@ -153,7 +157,7 @@ function LoadingDay({ progress }: { progress: number }) {
   );
 }
 
-const TABS = ["chart", "trades", "orders", "commands"] as const;
+const TABS = ["chart", "trades", "orders", "commands", "compare"] as const;
 type Tab = (typeof TABS)[number];
 
 const RANGES: Record<string, number | null> = { "1h": 3_600_000, "6h": 21_600_000, "24h": 86_400_000, All: null };
@@ -163,22 +167,25 @@ function Center({ snap, slots, halted }: { snap: Snapshot; slots: Record<string,
   const [tab, setTab] = useState<Tab>(() => {
     try {
       const t = sessionStorage.getItem("tab:run") as Tab;
-      return TABS.includes(t) ? t : "chart";
+      return TABS.includes(t) && (t !== "compare" || !!snap.counterpart) ? t : "chart";
     } catch { return "chart"; }
   });
   const pick = (t: Tab) => { setTab(t); try { sessionStorage.setItem("tab:run", t); } catch { /* private mode */ } };
+  // Compare only for a paper or live run whose other half exists
+  const tabs = TABS.filter((t) => t !== "compare" || !!snap.counterpart);
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.target instanceof HTMLInputElement || e.metaKey || e.ctrlKey || e.altKey) return;
-      const i = ["1", "2", "3", "4"].indexOf(e.key);
-      if (i >= 0) pick(TABS[i]);
+      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLSelectElement || e.metaKey || e.ctrlKey || e.altKey) return;
+      const i = ["1", "2", "3", "4", "5"].indexOf(e.key);
+      if (i >= 0 && i < tabs.length) pick(tabs[i]);
     };
     addEventListener("keydown", onKey);
     return () => removeEventListener("keydown", onKey);
-  }, []);
+  }, [tabs.length]);
+  useEffect(() => { if (!tabs.includes(tab)) pick("chart"); }, [tabs.length]);
   const counts: Record<Tab, number | null> = {
     chart: null, trades: snap.trade_total ?? snap.trades?.length ?? 0, orders: needsLook(snap.order_stats) ?? snap.activity.length,
-    commands: snap.commands.length,
+    commands: snap.commands.length, compare: null,
   };
   const label = (t: Tab) => (t === "chart" ? "P&L" : t[0].toUpperCase() + t.slice(1));
   const [range, setRange] = useState<string>(() => {
@@ -188,7 +195,7 @@ function Center({ snap, slots, halted }: { snap: Snapshot; slots: Record<string,
   return (
     <section className="panel center">
       <div className="tabbar" role="tablist">
-        {TABS.map((t, i) => (
+        {tabs.map((t, i) => (
           <button key={t} role="tab" aria-selected={tab === t} onClick={() => pick(t)} title={`Press ${i + 1}`}>
             {label(t)}{counts[t] != null && <span className="count">{counts[t]}</span>}
             {tab === t && <motion.span className="underline" layoutId="tab-underline" />}
@@ -211,6 +218,7 @@ function Center({ snap, slots, halted }: { snap: Snapshot; slots: Record<string,
         {tab === "trades" && <Trades snap={snap} slots={slots} />}
         {tab === "orders" && <Orders snap={snap} slots={slots} />}
         {tab === "commands" && <Commands snap={snap} />}
+        {tab === "compare" && snap.counterpart && <Compare snap={snap} />}
       </div>
     </section>
   );
@@ -354,6 +362,77 @@ function Orders({ snap, slots }: { snap: Snapshot; slots: Record<string, number>
         </table>
       )}
       <LoadMore shown={rows.length} total={matching} loading={loading} onMore={() => setLimit((l) => l + PAGE)} />
+    </>
+  );
+}
+
+interface Side {
+  orders: number; filled_pct: number | null; missed_pct: number | null; rejected: number; trades: number;
+  win_rate: number | null; stops: number; pnl: number; pnl_per_trade: number | null;
+  avg_paid: number | null; vs_limit: number | null; fees_per_contract: number | null; contracts: number;
+}
+interface Comparison { paper: string; live: string; since: number | null; instances: Record<string, { paper: Side; live: Side }> }
+
+const pctv = (v: number | null) => (v == null ? "–" : `${Math.round(v * 100)}%`);
+const signedCents = (v: number | null) => (v == null ? "–" : `${v > 0 ? "+" : v < 0 ? "−" : ""}${cents(Math.abs(v))}`);
+const METRICS: { key: keyof Side; label: string; hint: string; fmt: (v: number | null) => string; diff?: "pct" | "cents" | "money" | "count" }[] = [
+  { key: "orders", label: "Orders", hint: "Orders sent", fmt: (v) => String(v ?? 0), diff: "count" },
+  { key: "filled_pct", label: "Filled in full", hint: "Share of orders that filled completely", fmt: pctv, diff: "pct" },
+  { key: "missed_pct", label: "Missed", hint: "Share of orders (IOC) that found nothing at their price", fmt: pctv, diff: "pct" },
+  { key: "rejected", label: "Rejected", hint: "Orders refused, by quanty's checks or the venue", fmt: (v) => String(v ?? 0), diff: "count" },
+  { key: "vs_limit", label: "Fills vs limit", hint: "Per contract bought: the price paid minus the limit asked (negative: better than asked)", fmt: signedCents, diff: "cents" },
+  { key: "avg_paid", label: "Avg price paid", hint: "Per contract bought", fmt: (v) => (v == null ? "–" : cents(v)), diff: "cents" },
+  { key: "fees_per_contract", label: "Fees per contract", hint: "Fees on buys, per contract", fmt: (v) => (v == null ? "–" : cents(v)), diff: "cents" },
+  { key: "trades", label: "Trades", hint: "Positions taken", fmt: (v) => String(v ?? 0), diff: "count" },
+  { key: "win_rate", label: "Win rate", hint: "Of the positions that settled", fmt: pctv, diff: "pct" },
+  { key: "stops", label: "Stopped out", hint: "Positions sold by a stop loss", fmt: (v) => String(v ?? 0), diff: "count" },
+  { key: "pnl_per_trade", label: "P&L per trade", hint: "Realized, after fees, per position closed", fmt: (v) => (v == null ? "–" : money(v, true)), diff: "money" },
+  { key: "pnl", label: "P&L", hint: "Realized, after fees", fmt: (v) => money(v ?? 0, true), diff: "money" },
+];
+
+function delta(m: (typeof METRICS)[number], a: number | null, b: number | null): string {
+  if (a == null || b == null || !m.diff) return "";
+  const d = b - a;
+  if (Math.abs(d) < 1e-9) return "same";
+  const sign = d > 0 ? "+" : "−";
+  if (m.diff === "pct") return `${sign}${Math.abs(Math.round(d * 100))} pts`;
+  if (m.diff === "cents") return `${sign}${cents(Math.abs(d))}`;
+  if (m.diff === "money") return `${sign}${money(Math.abs(d))}`;
+  return `${sign}${Math.abs(d)}`;
+}
+
+/** Paper and live side by side, per strategy, over the time both ran: is live doing what paper did? */
+function Compare({ snap }: { snap: Snapshot }) {
+  const { data, error } = usePoll<Comparison>(`/api/runs/${snap.run.name}/compare`, 5000);
+  if (error) return <p className="empty" style={{ padding: 16 }}>Couldn't compare: {error}</p>;
+  if (!data) return <p className="empty" style={{ padding: 16 }}>Loading…</p>;
+  const ids = Object.keys(data.instances);
+  const ref = snap.session?.now ?? snap.run.last_ts ?? Date.now();
+  return (
+    <>
+      <p className="trades-summary compare-note">
+        <Link to={`/runs/${data.paper}`}>{data.paper}</Link> beside <Link to={`/runs/${data.live}`}>{data.live}</Link>
+        {data.since != null && <>, over the time both ran: since {when(data.since, ref)}</>}.
+        {" "}Differences in fill rate and fills vs limit show how far paper's simulated fills are from the venue's.
+      </p>
+      {ids.length === 0 ? <p className="empty" style={{ padding: 16 }}>No strategy has orders in both runs yet.</p> : ids.map((iid) => {
+        const { paper, live } = data.instances[iid];
+        return (
+          <table key={iid} className="compare">
+            <thead><tr><th>{iid}</th><th className="r">Paper</th><th className="r">Live</th><th className="r">Live − paper</th></tr></thead>
+            <tbody>
+              {METRICS.map((m) => (
+                <tr key={m.key}>
+                  <td title={m.hint}>{m.label}</td>
+                  <td className="r num">{m.fmt(paper[m.key] as number | null)}</td>
+                  <td className="r num">{m.fmt(live[m.key] as number | null)}</td>
+                  <td className="r num muted">{delta(m, paper[m.key] as number | null, live[m.key] as number | null)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        );
+      })}
     </>
   );
 }

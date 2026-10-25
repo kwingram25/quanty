@@ -333,3 +333,38 @@ def test_whole_history_pages_filters_and_downloads(tmp_path: Path) -> None:
     assert c.get(f"{url}/orders?view=stops&instance=a").json()["rows"]
     assert c.get(f"{url}/trades?outcome=lucky").status_code == 400
     assert c.get(f"{url}/orders?view=lucky").status_code == 400
+
+
+def test_paper_and_live_runs_compare(tmp_path: Path) -> None:
+    from quanty import experiment, plugins, synthetic
+    from quanty.core import Engine, Ledger
+
+    def run(mode: str, latency_ms: int, hours: float) -> None:
+        (tmp_path / mode).mkdir()
+        raw = {
+            "brokers": {"b": {"kind": "sim", "latency_ms": latency_ms}},
+            "instances": [{"id": "fav", "strategy": "example_favorite"}],
+        }
+        exp = experiment.parse(raw)
+        ledger = Ledger(tmp_path / mode / "main.sqlite")
+        engine = Engine(
+            experiment.build(exp, plugins.discover([], local=None), synthetic.FEES), ledger=ledger
+        )
+        start = synthetic.Spec().start_ms + int((12 - hours) * 3_600_000) // 300_000 * 300_000
+        engine.run(synthetic.events(synthetic.Spec(hours=hours, seed=0, start_ms=start)))
+        ledger.close()
+
+    run("paper", 50, 12)  # paper ran longer
+    run("live", 3000, 6)  # "live" (slow fills) only the last 6 hours
+    c = TestClient(create_app(tmp_path))
+    snap = c.get("/api/runs/live/main").json()
+    assert snap["counterpart"] == "paper/main"
+    cmp = c.get("/api/runs/live/main/compare").json()
+    assert cmp["paper"] == "paper/main" and cmp["live"] == "live/main" and cmp["since"] is not None
+    fav = cmp["instances"]["fav"]
+    assert fav["live"]["missed_pct"] > fav["paper"]["missed_pct"]  # slow fills miss more
+    assert fav["paper"]["orders"] < 200  # only the hours both ran, not paper's whole 12
+    assert c.get("/api/runs/live/main/compare").json() == c.get("/api/runs/paper/main/compare").json()
+    (tmp_path / "backtest").mkdir()
+    Ledger(tmp_path / "backtest" / "x.sqlite").close()
+    assert c.get("/api/runs/backtest/x/compare").status_code == 404

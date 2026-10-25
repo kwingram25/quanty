@@ -15,7 +15,7 @@ import webbrowser
 from collections.abc import Iterable, Iterator
 from pathlib import Path
 from types import ModuleType
-from typing import Annotated, Any
+from typing import TYPE_CHECKING, Annotated, Any
 
 import structlog
 import typer
@@ -28,6 +28,9 @@ from quanty.feeds.cli import feeds_app, load_feeds, print_windows, record, recor
 from quanty.feeds.health import Status, Window
 from quanty.feeds.replay import Replay
 from quanty.feeds.session import RecordSession, TaskCrashed
+
+if TYPE_CHECKING:
+    from quanty.doctor import Check
 
 app = typer.Typer(help=__doc__, no_args_is_help=True, add_completion=False)
 app.command()(record)
@@ -308,9 +311,17 @@ def doctor(
 
     exps = experiment_ or sorted((path / "experiments").glob("*.toml"))
     checks = dr.run(path.resolve(), exps, feeds or path / "feeds.toml", data or path / "data", offline)
+    if _print_checks(checks):
+        raise typer.Exit(1)
+
+
+def _print_checks(checks: "list[Check]", only_problems: bool = False) -> int:
+    """Doctor's checks, by section; returns how many failed. only_problems: just warnings and failures."""
     marks = {"ok": ("✓", "green"), "warn": ("!", "yellow"), "fail": ("✗", "red"), "skip": ("–", None)}
     section = None
     for c in checks:
+        if only_problems and c.status not in ("warn", "fail"):
+            continue
         if c.section != section:
             section = c.section
             typer.echo(typer.style(f"\n{section}", bold=True))
@@ -321,8 +332,67 @@ def doctor(
     fails = sum(c.status == "fail" for c in checks)
     warns = sum(c.status == "warn" for c in checks)
     typer.echo(f"\n{fails} problem(s), {warns} warning(s)" if fails or warns else "\nall good")
-    if fails:
-        raise typer.Exit(1)
+    return fails
+
+
+@app.command()
+def promote(
+    instance: Annotated[str, typer.Argument(help="Instance id, from the experiment's [[instances]]")],
+    to: Annotated[str, typer.Option("--to", help="sim (paper), shadow (checked by the venue) or live")],
+    path: Annotated[Path, typer.Option("--experiment", help="Experiment file")] = Path(
+        "experiments/main.toml"
+    ),
+    broker: Annotated[
+        str | None, typer.Option(help="Broker to use or create (default: the first of that kind)")
+    ] = None,
+    max_qty: Annotated[
+        float | None, typer.Option(help="New live broker: largest single order, contracts")
+    ] = None,
+    max_notional: Annotated[
+        float | None, typer.Option(help="New live broker: largest single order, $")
+    ] = None,
+    data: DataOpt = Path("data"),
+    check: Annotated[bool, typer.Option(help="Run quanty doctor on the result")] = True,
+) -> None:
+    """Move an instance to another kind of broker (paper → shadow → live, or back) by editing its
+    experiment file. Carries its dashboard edits along. Starts nothing: run paper or live after."""
+    from quanty import promote as pm
+
+    try:
+        before = experiment.load(path)
+        if pm.needs_caps(path, to, broker) and (max_qty is None or max_notional is None):
+            typer.echo("A new live broker caps every single order (a fat-finger guard):")
+            max_qty = max_qty if max_qty is not None else typer.prompt("  max_qty (contracts)", type=float)
+            max_notional = (
+                max_notional if max_notional is not None else typer.prompt("  max_notional ($)", type=float)
+            )
+        old_run = pm.run_name(path, before)
+        store = ControlStore(data / "control.sqlite") if (data / "control.sqlite").exists() else None
+        carried = store.overrides(old_run).get(instance, {}) if store else {}
+        done = pm.promote(
+            path, instance, to, broker=broker, max_qty=max_qty, max_notional=max_notional, overrides=carried
+        )
+        if store is not None and carried:
+            store.set_override(old_run, instance, {})  # now in the file
+        new_run = pm.run_name(path, experiment.load(path))
+    except (ValueError, OSError) as exc:
+        raise _fail(exc) from None
+    for line in done.lines():
+        typer.echo(f"  {line}")
+    if new_run != old_run:
+        typer.echo(f"  its results now go to the run {new_run}; {old_run} keeps its history")
+    if done.from_kind == "live" and to != "live":
+        typer.echo("  note: what it holds on the venue stays there; the paper run doesn't know it", err=True)
+    if check:
+        from quanty import doctor as dr
+
+        project = path.resolve().parent.parent
+        checks = dr.run(project, [path], project / "feeds.toml", data, offline=to != "live")
+        if _print_checks(checks, only_problems=True):
+            typer.echo("fix those before starting it", err=True)
+    cmd = f"quanty {new_run.split('/')[0]} {path} --feeds feeds.toml --data {data}"
+    restart = "restart the running session with" if new_run == old_run else "start it with"
+    typer.echo(f"next: {restart} `{cmd}{' --arm' if new_run.startswith('live') else ''}`")
 
 
 @app.command()

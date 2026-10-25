@@ -639,3 +639,78 @@ def feed_states(data: Path, hours: float = 2.0) -> list[FeedState]:
             )
         )
     return out
+
+
+def counterpart(data: Path, run: Run) -> Run | None:
+    """The same experiment's run in the other mode (paper/<name> for live/<name>, and back)."""
+    other = {"paper": "live", "live": "paper"}.get(run.mode)
+    return run_by_name(data, f"{other}/{run.path.stem}") if other else None
+
+
+def _first_order_ts(run: Run) -> int | None:
+    engine = _open(run.path)
+    try:
+        with Session(engine) as conn:
+            return conn.execute(select(func.min(OrderRow.created_ts))).scalar()
+    finally:
+        engine.dispose()
+
+
+def _execution(run: Run, instance: str, since: int | None) -> dict[str, float | None]:
+    """How an instance's buys filled: average price paid, and how far fills landed from the limit
+    asked (negative: better than asked), contract-weighted; fees per contract."""
+    buy = (FillRow.action == Action.BUY) & (FillRow.instance == instance)
+    if since is not None:
+        buy &= FillRow.ts >= since
+    engine = _open(run.path)
+    try:
+        with Session(engine) as conn:
+            r = conn.execute(
+                select(
+                    func.sum(FillRow.qty).label("qty"),
+                    func.sum(FillRow.qty * FillRow.price).label("paid"),
+                    func.sum(FillRow.qty * (FillRow.price - OrderRow.price)).label("vs_limit"),
+                    func.sum(FillRow.fee).label("fees"),
+                )
+                .join(OrderRow, OrderRow.id == FillRow.order_id)
+                .where(buy)
+            ).one()
+    finally:
+        engine.dispose()
+    q = r.qty or 0.0
+    return {
+        "avg_paid": r.paid / q if q else None,
+        "vs_limit": r.vs_limit / q if q else None,
+        "fees_per_contract": (r.fees or 0.0) / q if q else None,
+        "contracts": q,
+    }
+
+
+def compare(paper: Run, live: Run) -> dict[str, Any]:
+    """The same experiment's paper and live runs side by side, per instance in both, over the time
+    both ran (from the later of their first orders): is live doing what paper did?"""
+    starts = [t for t in (_first_order_ts(paper), _first_order_ts(live)) if t is not None]
+    since = max(starts) if len(starts) == 2 else None
+    out: dict[str, Any] = {"paper": paper.name, "live": live.name, "since": since, "instances": {}}
+    stats = {"paper": order_stats(paper, since=since), "live": order_stats(live, since=since)}
+    for iid in sorted(set(stats["paper"]) & set(stats["live"])):
+        row = {}
+        for side, run in (("paper", paper), ("live", live)):
+            o = stats[side][iid]
+            t = trade_summary(run, instance=iid, since=since)
+            settled = t["won"] + t["lost"]
+            closed = settled + t["stopped"] + t["sold"]
+            row[side] = {
+                "orders": o["orders"],
+                "filled_pct": o["filled"] / o["orders"] if o["orders"] else None,
+                "missed_pct": o["missed"] / o["orders"] if o["orders"] else None,
+                "rejected": o["rejected"],
+                "trades": t["trades"],
+                "win_rate": t["won"] / settled if settled else None,
+                "stops": t["stopped"],
+                "pnl": t["pnl"],
+                "pnl_per_trade": t["pnl"] / closed if closed else None,
+                **_execution(run, iid, since),
+            }
+        out["instances"][iid] = row
+    return out

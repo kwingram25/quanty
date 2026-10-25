@@ -151,6 +151,8 @@ export interface Snapshot {
   trades: Trade[];
   /** positions over the whole run */
   trade_total?: number;
+  /** the same experiment's run in the other mode (paper/x for live/x, and back), if there is one */
+  counterpart?: string | null;
 }
 
 /** One position a strategy took: what it bought, what it cost and how it ended. */
@@ -276,6 +278,8 @@ export function useRunStream(run: string, onNew?: (n: NewRows, snap: Snapshot) =
     let ws: WebSocket | null = null;
     let retry: ReturnType<typeof setTimeout> | undefined;
     let alive = true;
+    setSnap(null); // another run: never show the previous one's numbers under this one's name
+    setState("connecting");
     getJSON<Snapshot>(`/api/runs/${run}`).then((s) => alive && setSnap(s))
       .catch(() => alive && setState("missing"));
     const connect = () => {

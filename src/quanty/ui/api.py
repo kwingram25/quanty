@@ -180,6 +180,8 @@ class Api:
         shown |= {i["market_id"] for i in snap["tape"] if "market_id" in i}
         snap["trades"] = queries.trades(r)
         snap["trade_total"] = queries.trade_summary(r)["trades"]
+        other = queries.counterpart(self.data, r)
+        snap["counterpart"] = other.name if other else None
         shown |= {t["market_id"] for t in snap["trades"]}
         snap["names"] = queries.names(r, shown)
         return snap
@@ -417,6 +419,18 @@ def router(api: Api) -> APIRouter:
             }
         except ValueError as exc:
             raise HTTPException(400, str(exc)) from None
+
+    @r.get("/runs/{mode}/{name}/compare")
+    def compare(mode: str, name: str) -> dict[str, Any]:
+        """This run beside the same experiment's run in the other mode (paper vs live)."""
+        run = api.run_or_404(mode, name)
+        other = queries.counterpart(api.data, run)
+        if other is None:
+            raise HTTPException(
+                404, f"no {'live' if mode == 'paper' else 'paper'} run of {name} to compare with"
+            )
+        paper, live = (run, other) if mode == "paper" else (other, run)
+        return queries.compare(paper, live)
 
     @r.post("/runs/{mode}/{name}/control")
     async def control(request: Request, mode: str, name: str, cmd: Command) -> dict[str, Any]:

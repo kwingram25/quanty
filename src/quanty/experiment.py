@@ -168,7 +168,9 @@ def make_broker(
 
 
 def live_brokers(exp: Experiment) -> list[str]:
-    return [name for name, cfg in exp.brokers.items() if isinstance(cfg, LiveBrokerConfig)]
+    """The live brokers some instance uses (a live broker block no instance uses is just parked)."""
+    used = {exp.broker_of(i) for i in exp.instances}
+    return [name for name, cfg in exp.brokers.items() if isinstance(cfg, LiveBrokerConfig) and name in used]
 
 
 def build(

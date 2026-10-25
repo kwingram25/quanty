@@ -5,7 +5,8 @@ need several things to go wrong at once. This page is what to know before `--arm
 
 ## Before the first live run
 
-1. **Paper trade the experiment** until its fills and P&L look like the backtest's.
+1. **Paper trade the experiment** until its fills and P&L look like the backtest's. Move an instance
+   on with `quanty promote <id> --to shadow`, then `--to live`.
 2. **Shadow trade it** (`kind = "shadow"`) so every order is checked by the venue, or built and
    signed locally for Kalshi: tick sizes, quantity steps and permissions are confirmed before
    money is involved.

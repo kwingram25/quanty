@@ -125,16 +125,32 @@ catches tick, size and permission problems, and measures real round trips, with 
 
 ## 7. Trade live
 
-Read [Live trading](live-trading.md) first. Then:
+Read [Live trading](live-trading.md) first.
+
+Paper or live is a property of each instance's broker (`kind = "sim"`, `"shadow"` or `"live"`), so
+the same experiment file goes from paper to live one instance at a time. `quanty promote` makes the
+edit for you, keeping the file's comments and carrying any dashboard edits to the instance's params:
+
+```sh
+uv run quanty promote my_strategy --to shadow     # orders checked by the venue, still simulated fills
+uv run quanty promote my_strategy --to live       # asks for max_qty and max_notional, runs doctor
+uv run quanty live experiments/main.toml --feeds feeds.toml --data data --arm
+```
+
+That adds a broker like this (written by hand, it works the same):
 
 ```toml
-[brokers.real]
+[brokers.live]
 kind = "live"
 max_qty = 10          # required: largest single order, contracts
 max_notional = 10     # required: largest single order, $
 ```
 
-```sh
-uv run quanty doctor     # config, keys, clock, each venue: fix anything marked ✗ first
-uv run quanty live experiment.toml --feeds feeds.toml --data data --arm
-```
+Instances left on `sim` keep paper trading in the same live session. `--to sim` steps back; the live
+broker block stays in the file, unused, for next time.
+
+**Runs.** Each experiment records into one run per mode: `quanty paper experiments/main.toml` into
+*paper/main*, `quanty live …` into *live/main*, so real and simulated results never mix. Their
+pages link to each other, and the **Compare** tab puts the same strategies side by side over the
+time both ran: fill rate, misses, fills against the limit asked, price paid and P&L per trade. A
+live fill rate well below paper's means paper's simulated fills are optimistic for that strategy.
