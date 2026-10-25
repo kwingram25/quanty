@@ -136,7 +136,10 @@ export interface CommandRow {
 
 export interface Snapshot {
   run: { name: string; mode: Mode; file: string; last_ts: number | null };
-  stats: { pnl: number; fills: number; errors: number };
+  /** pnl_real / pnl_simulated: only when some instances trade real money (never one total then) */
+  stats: { pnl: number; fills: number; errors: number; pnl_real?: number; pnl_simulated?: number };
+  /** each instance's broker kind: live = real money, shadow, sim */
+  kinds?: Record<string, "live" | "shadow" | "sim" | string>;
   strategies: Strategy[];
   curves: Record<string, [number, number][]>;
   positions: Position[];

@@ -19,6 +19,7 @@ MAX_IN_FLIGHT = 5  # well under Polymarket US's 20 requests/s per key
 
 
 class ShadowBroker(SimBroker):
+    kind = "shadow"
     """Fills exactly like SimBroker; each submitted order is also turned into the venue's real
     request and previewed (OrderAPI.preview), with the result and round trip in the ledger's logs
     ("shadow preview"). Previews need a running event loop (paper/live sessions); in a backtest

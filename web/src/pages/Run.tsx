@@ -79,8 +79,17 @@ function Run({ snap, live }: { snap: Snapshot; live: boolean }) {
           <p>{snap.run.file} · last activity {ago(snap.run.last_ts)}</p>
         </div>
         {loading == null && <div className="kpis">
-          <div className="kpi hero"><div className="label">Realized P&L</div>
-            <AnimatedNumber className={`value ${tone(snap.stats.pnl)}`} value={snap.stats.pnl} format={(v) => money(v)} /></div>
+          {snap.stats.pnl_real != null ? <>
+            <div className="kpi hero real" title="Realized P&L of the strategies on live brokers: real money">
+              <div className="label">Real money</div>
+              <AnimatedNumber className={`value ${tone(snap.stats.pnl_real)}`} value={snap.stats.pnl_real} format={(v) => money(v)} /></div>
+            <div className="kpi" title="Realized P&L of the strategies on paper or shadow brokers: simulated">
+              <div className="label">Simulated</div>
+              <AnimatedNumber className={`value ${tone(snap.stats.pnl_simulated ?? 0)}`} value={snap.stats.pnl_simulated ?? 0} format={(v) => money(v)} /></div>
+          </> : (
+            <div className="kpi hero"><div className="label">Realized P&L</div>
+              <AnimatedNumber className={`value ${tone(snap.stats.pnl)}`} value={snap.stats.pnl} format={(v) => money(v)} /></div>
+          )}
           <div className="kpi"><div className="label">Fills</div><div className="value">{snap.stats.fills}</div></div>
           <div className="kpi"><div className="label">Open positions</div><div className="value">{open}</div></div>
           <div className="kpi"><div className="label">Errors</div>
@@ -213,7 +222,7 @@ function Center({ snap, slots, halted }: { snap: Snapshot; slots: Record<string,
         )}
       </div>
       <div className={tab === "chart" ? "chart-pane" : "table-wrap"} role="tabpanel">
-        {tab === "chart" && <PnlChart curves={snap.curves} slots={slots} halted={halted} range={RANGES[range]}
+        {tab === "chart" && <PnlChart curves={snap.curves} slots={slots} halted={halted} range={RANGES[range]} kinds={snap.kinds}
           now={snap.session?.now ?? null} />}
         {tab === "trades" && <Trades snap={snap} slots={slots} />}
         {tab === "orders" && <Orders snap={snap} slots={slots} />}
@@ -249,8 +258,9 @@ const RANGE_MS: Record<string, number | undefined> = { "All time": undefined, "L
 const PAGE = 200;
 
 /** Strategy, a view, a time range and a CSV download: the controls above Trades and Orders. */
-function HistoryBar({ snap, instance, setInstance, view, setView, views, range, setRange, csv, children }: {
-  snap: Snapshot; instance: string; setInstance: (v: string) => void; view: string; setView: (v: string) => void;
+function HistoryBar({ snap, instance, setInstance, money: kind, setMoney, view, setView, views, range, setRange, csv, children }: {
+  snap: Snapshot; instance: string; setInstance: (v: string) => void; money: string; setMoney: (v: string) => void;
+  view: string; setView: (v: string) => void;
   views: [string, string][]; range: string; setRange: (v: string) => void; csv: string; children: React.ReactNode;
 }) {
   return (
@@ -261,6 +271,11 @@ function HistoryBar({ snap, instance, setInstance, view, setView, views, range, 
           <option value="">All strategies</option>
           {snap.strategies.map((st) => <option key={st.instance} value={st.instance}>{st.instance}</option>)}
         </select>
+        {mixed(snap) && (
+          <select value={kind} onChange={(e) => setMoney(e.target.value)} aria-label="Money">
+            <option value="">Real and simulated</option><option value="real">Real money</option><option value="simulated">Simulated</option>
+          </select>
+        )}
         <select value={view} onChange={(e) => setView(e.target.value)} aria-label="Show">
           {views.map(([v, label]) => <option key={v} value={v}>{label}</option>)}
         </select>
@@ -273,10 +288,16 @@ function HistoryBar({ snap, instance, setInstance, view, setView, views, range, 
   );
 }
 
+/** Whether this run has both real-money and simulated strategies. */
+const mixed = (snap: Snapshot) => {
+  const ks = Object.values(snap.kinds ?? {});
+  return ks.includes("live") && ks.some((k) => k !== "live");
+};
+
 /** Filters kept per browser, and the time they start from (the run's own clock, so a demo's too). */
 function useFilters(key: string, snap: Snapshot, defaultView: string) {
   const load = () => { try { return JSON.parse(localStorage.getItem(key) ?? "{}"); } catch { return {}; } };
-  const [f, setF] = useState<{ instance: string; view: string; range: string }>(() => ({ instance: "", view: defaultView, range: "All time", ...load() }));
+  const [f, setF] = useState<{ instance: string; money: string; view: string; range: string }>(() => ({ instance: "", money: "", view: defaultView, range: "All time", ...load() }));
   const set = (patch: Partial<typeof f>) => setF((cur) => {
     const next = { ...cur, ...patch };
     try { localStorage.setItem(key, JSON.stringify(next)); } catch { /* private mode */ }
@@ -309,8 +330,8 @@ const ORDER_VIEWS: [string, string][] = [
 function Orders({ snap, slots }: { snap: Snapshot; slots: Record<string, number> }) {
   const { f, set, since } = useFilters("history:orders", snap, "look");
   const [limit, setLimit] = useState(PAGE);
-  useEffect(() => setLimit(PAGE), [f.instance, f.view, f.range]);
-  const params = { instance: f.instance, view: f.view, since };
+  useEffect(() => setLimit(PAGE), [f.instance, f.money, f.view, f.range]);
+  const params = { instance: f.instance, money: mixed(snap) ? f.money : "", view: f.view, since };
   const { data, loading } = useHistory<{ rows: ActivityRow[]; stats: OrderStats; names: Snapshot["names"] }>(
     snap.run.name, "orders", params, limit, `${snap.stats.fills}:${snap.run.last_ts}:${snap.order_stats ? needsLook(snap.order_stats) : ""}`);
   const rows = data?.rows ?? [];
@@ -325,7 +346,7 @@ function Orders({ snap, slots }: { snap: Snapshot; slots: Record<string, number>
   const csv = `/api/runs/${snap.run.name}/orders?${historyQuery({ ...params, format: "csv" })}`;
   return (
     <>
-      <HistoryBar snap={snap} instance={f.instance} setInstance={(v) => set({ instance: v })} view={f.view}
+      <HistoryBar snap={snap} instance={f.instance} setInstance={(v) => set({ instance: v })} money={f.money} setMoney={(v) => set({ money: v })} view={f.view}
         setView={(v) => set({ view: v })} views={ORDER_VIEWS} range={f.range} setRange={(v) => set({ range: v })} csv={csv}>
         {(total.orders ?? 0).toLocaleString()} orders · <b>{total.orders ? Math.round((100 * (total.filled ?? 0)) / total.orders) : 0}%</b> filled in full
         {parts.length > 0 && <> · {parts.join(" · ")}</>}
@@ -465,8 +486,8 @@ const TRADE_VIEWS: [string, string][] = [
 function Trades({ snap, slots }: { snap: Snapshot; slots: Record<string, number> }) {
   const { f, set, since } = useFilters("history:trades", snap, "");
   const [limit, setLimit] = useState(PAGE);
-  useEffect(() => setLimit(PAGE), [f.instance, f.view, f.range]);
-  const params = { instance: f.instance, outcome: f.view, since };
+  useEffect(() => setLimit(PAGE), [f.instance, f.money, f.view, f.range]);
+  const params = { instance: f.instance, money: mixed(snap) ? f.money : "", outcome: f.view, since };
   const { data, loading } = useHistory<{ rows: Trade[]; summary: TradeSummary; names: Snapshot["names"] }>(
     snap.run.name, "trades", params, limit, `${snap.stats.fills}:${snap.run.last_ts}`);
   const rows = data?.rows ?? [];
@@ -476,7 +497,7 @@ function Trades({ snap, slots }: { snap: Snapshot; slots: Record<string, number>
   const csv = `/api/runs/${snap.run.name}/trades?${historyQuery({ ...params, format: "csv" })}`;
   return (
     <>
-      <HistoryBar snap={snap} instance={f.instance} setInstance={(v) => set({ instance: v })} view={f.view}
+      <HistoryBar snap={snap} instance={f.instance} setInstance={(v) => set({ instance: v })} money={f.money} setMoney={(v) => set({ money: v })} view={f.view}
         setView={(v) => set({ view: v })} views={TRADE_VIEWS} range={f.range} setRange={(v) => set({ range: v })} csv={csv}>
         {sum ? <>
           {sum.trades.toLocaleString()} trades · <span className="up">{sum.won} won</span> · <span className="down">{sum.lost} lost</span>

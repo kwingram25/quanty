@@ -45,6 +45,8 @@ def now_ms() -> int:
 
 
 class LiveBroker(Broker):
+    kind = "live"
+
     def __init__(
         self,
         name: str = "live",

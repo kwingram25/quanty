@@ -42,9 +42,10 @@ export function Strategies({ snap, slots }: { snap: Snapshot; slots: Record<stri
       <header><h2>Strategies</h2></header>
       <div className="panel-body scroll">
         {snap.strategies.length === 0 && <p className="empty">No strategies have traded yet.</p>}
-        {snap.strategies.map((st) => {
+        {[...snap.strategies].sort((a, b) => Number(snap.kinds?.[b.instance] === "live") - Number(snap.kinds?.[a.instance] === "live")).map((st) => {
           const halted = pending[st.instance] ?? s?.instances[st.instance]?.halted ?? false;
           return <Row key={st.instance} st={st} slot={slots[st.instance] ?? 1} session={s} halted={halted}
+            kind={snap.kinds?.[st.instance] ?? "sim"}
             blocked={s?.instances[st.instance]?.blocked ?? 0} stops={snap.order_stats?.[st.instance]?.stops ?? 0}
             onToggle={() => act(halted ? "resume" : "halt", st.instance, `${halted ? "Resumed" : "Halted"} ${st.instance}`)}
             onEdit={(value) => act("params", st.instance, `Changed ${st.instance}`, "", value)}
@@ -68,10 +69,19 @@ export function Strategies({ snap, slots }: { snap: Snapshot; slots: Record<stri
   );
 }
 
+/** Real money or not, on every strategy: LIVE (real orders), shadow (checked by the venue, fills
+ * simulated) or paper (simulated). */
+export function KindBadge({ kind }: { kind: string }) {
+  const [label, title] = kind === "live" ? ["LIVE", "Real orders, real money"]
+    : kind === "shadow" ? ["shadow", "Orders checked by the venue but not placed; fills simulated"]
+    : ["paper", "Simulated fills; no orders reach the venue"];
+  return <span className={`kind-badge ${kind}`} title={title}>{label}</span>;
+}
+
 type Edit = (value: Record<string, unknown>) => Promise<boolean | null>;
 
-function Row({ st, slot, session, halted, blocked, stops, onToggle, onEdit, onReset, onSave }: {
-  st: Strategy; slot: number; session: SessionState | null; halted: boolean; blocked: number; stops: number;
+function Row({ st, slot, kind, session, halted, blocked, stops, onToggle, onEdit, onReset, onSave }: {
+  st: Strategy; slot: number; kind: string; session: SessionState | null; halted: boolean; blocked: number; stops: number;
   onToggle: () => void;
   onEdit: Edit; onReset: () => Promise<boolean | null>; onSave: () => Promise<boolean | null>;
 }) {
@@ -98,13 +108,14 @@ function Row({ st, slot, session, halted, blocked, stops, onToggle, onEdit, onRe
     }
   }, [st.pnl, flash, reduce]);
   return (
-    <motion.div className={`strategy ${halted ? "halted" : ""}`} animate={flash} style={{ borderRadius: 8 }}>
+    <motion.div className={`strategy ${halted ? "halted" : ""} ${kind === "live" ? "real" : ""}`} animate={flash} style={{ borderRadius: 8 }}>
       <div className="top">
         <button className="name expander" aria-expanded={open} onClick={() => setOpen(!open)}
           title={open ? "Hide details" : st.info?.description || "Show details"}>
           <motion.span className="chev" animate={{ rotate: open ? 90 : 0 }} transition={{ duration: 0.15 }}>›</motion.span>
           <i className="swatch" style={{ ["--c" as string]: `var(--series-${slot})` }} />{st.instance}
         </button>
+        <KindBadge kind={kind} />
         <AnimatedNumber className={`pnl ${tone(st.pnl)}`} value={st.pnl} format={(v) => money(v)} />
         <AnimatePresence>
           {delta && (

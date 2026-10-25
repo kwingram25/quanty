@@ -40,8 +40,9 @@ function windowed(all: Curves, range: number | null, now: number | null): { curv
   return { curves, t0, t1 };
 }
 
-export function PnlChart({ curves: all, slots, halted, range = null, now = null }: {
+export function PnlChart({ curves: all, slots, halted, range = null, now = null, kinds }: {
   curves: Curves; slots: Record<string, number>; halted: Set<string>; range?: number | null; now?: number | null;
+  kinds?: Record<string, string>;
 }) {
   const view = useMemo(() => windowed(all, range, now), [all, range, now]);
   const curves = view.curves;
@@ -96,6 +97,7 @@ export function PnlChart({ curves: all, slots, halted, range = null, now = null 
           {names.map((n) => (
             <span key={n} style={{ opacity: halted.has(n) ? 0.5 : 1 }}>
               <i className="swatch" style={{ ["--c" as string]: `var(--series-${slots[n] ?? 1})` }} />{n}
+              {kinds?.[n] === "live" && <span className="kind-badge live" title="Real orders, real money">LIVE</span>}
             </span>
           ))}
         </div>

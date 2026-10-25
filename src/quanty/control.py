@@ -40,7 +40,7 @@ from sqlalchemy import (
 )
 
 from quanty.brokers.live import LiveBroker
-from quanty.brokers.shadow import ShadowBroker
+from quanty.core.broker import Broker
 from quanty.core.engine import Engine as Trader
 from quanty.core.engine import describe
 from quanty.core.portfolio import Position
@@ -216,10 +216,8 @@ class Playback:
             await asyncio.sleep(delay)
 
 
-def broker_kind(broker: object) -> str:
-    return (
-        "live" if isinstance(broker, LiveBroker) else "shadow" if isinstance(broker, ShadowBroker) else "sim"
-    )
+def broker_kind(broker: Broker) -> str:
+    return broker.kind
 
 
 class Controller:

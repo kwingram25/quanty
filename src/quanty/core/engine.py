@@ -67,6 +67,7 @@ def describe(inst: Instance) -> dict[str, object]:
         "params_set": sorted(params.model_fields_set),
         "param_help": {k: f.description or "" for k, f in type(params).model_fields.items()},
         "broker": inst.broker.name,
+        "broker_kind": inst.broker.kind,  # live = real money
         "limits": inst.limits.model_dump(exclude_none=True),
     }
 

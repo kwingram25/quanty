@@ -138,6 +138,34 @@ class Api:
             raise HTTPException(404, f"no run {mode}/{name}")
         return r
 
+    def kinds(
+        self, r: queries.Run, info: dict[str, Any] | None = None, state: dict[str, Any] | None = None
+    ) -> dict[str, str]:
+        """Each instance's broker kind (live = real money): as recorded when the run started, else as
+        the running session reports it; in a live run of a ledger too old to say, assumed live."""
+        info = queries.strategy_info(r) if info is None else info
+        if state is None:
+            session, _ = self.control(r.name)
+            state = (session or {}).get("state", {})
+        brokers = state.get("brokers", {})
+        out = {}
+        for iid in set(info) | set(state.get("instances", {})):
+            k = info.get(iid, {}).get("broker_kind")
+            if k is None:
+                b = state.get("instances", {}).get(iid, {}).get("broker")
+                k = brokers.get(b, {}).get("kind") if b else None
+            out[iid] = str(k or ("live" if r.mode == "live" else "sim"))
+        return out
+
+    def money(self, r: queries.Run, money: str | None, instance: str | None) -> str | list[str] | None:
+        """The instance filter for a history query: one instance, or the real-money (or simulated) ones."""
+        if not money:
+            return instance
+        if money not in ("real", "simulated"):
+            raise ValueError("money is real or simulated")
+        ids = [i for i, k in self.kinds(r).items() if (k == "live") == (money == "real")]
+        return [i for i in ids if i == instance] if instance else ids
+
     def snapshot(self, mode: str, name: str) -> dict[str, Any]:
         r = self.run_or_404(mode, name)
         v = queries.view(r)
@@ -180,6 +208,14 @@ class Api:
         shown |= {i["market_id"] for i in snap["tape"] if "market_id" in i}
         snap["trades"] = queries.trades(r)
         snap["trade_total"] = queries.trade_summary(r)["trades"]
+        kinds = self.kinds(r, info, state)
+        snap["kinds"] = kinds
+        real = [s for k, s in summaries.items() if kinds.get(k) == "live"]
+        if real:  # real money and simulated, never one total
+            snap["stats"]["pnl_real"] = sum(s.pnl for s in real)
+            snap["stats"]["pnl_simulated"] = sum(
+                s.pnl for k, s in summaries.items() if kinds.get(k) != "live"
+            )
         other = queries.counterpart(self.data, r)
         snap["counterpart"] = other.name if other else None
         shown |= {t["market_id"] for t in snap["trades"]}
@@ -368,6 +404,7 @@ def router(api: Api) -> APIRouter:
         offset: int = 0,
         limit: int = Query(100, le=5000),
         instance: str | None = None,
+        money: str | None = None,
         outcome: str | None = None,
         since: int | None = None,
         until: int | None = None,
@@ -375,8 +412,9 @@ def router(api: Api) -> APIRouter:
     ) -> Any:
         """The run's whole trade history, filtered and paged; format=csv downloads every match."""
         run = api.run_or_404(mode, name)
-        f: dict[str, Any] = {"instance": instance, "outcome": outcome or None, "since": since, "until": until}
         try:
+            who = api.money(run, money, instance)
+            f: dict[str, Any] = {"instance": who, "outcome": outcome or None, "since": since, "until": until}
             if format == "csv":
                 rows = queries.trades(run, limit=10**9, **f)
                 return _csv(f"{name}-trades.csv", rows, queries.names(run, {t["market_id"] for t in rows}))
@@ -396,6 +434,7 @@ def router(api: Api) -> APIRouter:
         offset: int = 0,
         limit: int = Query(100, le=5000),
         instance: str | None = None,
+        money: str | None = None,
         view: str | None = None,
         since: int | None = None,
         until: int | None = None,
@@ -403,8 +442,9 @@ def router(api: Api) -> APIRouter:
     ) -> Any:
         """The run's whole order history, filtered (view: look, stops, or one result) and paged."""
         run = api.run_or_404(mode, name)
-        f: dict[str, Any] = {"instance": instance, "since": since, "until": until}
         try:
+            who = api.money(run, money, instance)
+            f: dict[str, Any] = {"instance": who, "since": since, "until": until}
             if format == "csv":
                 rows = [_activity(a) for a in queries.activity(run, limit=10**9, view=view or None, **f)]
                 return _csv(f"{name}-orders.csv", rows, queries.names(run, {a["market_id"] for a in rows}))

@@ -519,3 +519,12 @@ table.compare th:first-child { font-size: 13px; color: var(--ink); }
 .compare-note a { color: var(--focus); }
 a.pill.link { text-decoration: none; color: var(--ink-2); }
 a.pill.link:hover { border-color: var(--axis); }
+
+/* real money vs simulated */
+.kind-badge { display: inline-block; margin-left: 6px; padding: 0 5px; border-radius: 4px; font-size: 10px; font-weight: 700;
+  letter-spacing: 0.02em; line-height: 16px; vertical-align: 1px; color: var(--muted); border: 1px solid var(--border); }
+.kind-badge.live { color: #fff; background: var(--critical); border-color: var(--critical); }
+.kind-badge.shadow { color: var(--ink-2); border-style: dashed; }
+.strategy.real { position: relative; }
+.strategy.real::before { content: ""; position: absolute; left: -10px; top: 6px; bottom: 6px; width: 3px; border-radius: 2px; background: var(--critical); }
+.kpi.real .label { color: var(--critical); font-weight: 600; }

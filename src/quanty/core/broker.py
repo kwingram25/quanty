@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, ClassVar
 
 from quanty.core.events import BrokerEvent, Event
 from quanty.core.orders import Order
@@ -15,6 +15,8 @@ class Broker(ABC):
     mutates an Order; the engine does, from those events. Fills for an order are emitted before
     the OrderUpdate that reports it done.
     """
+
+    kind: ClassVar[str] = "sim"  # "sim", "shadow" or "live": whether its orders are real money
 
     def __init__(self, name: str) -> None:
         self.name = name

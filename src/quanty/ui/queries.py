@@ -232,9 +232,14 @@ ORDER_VIEWS: dict[str, ColumnElement[bool]] = {
 }
 
 
-def _order_filter(instance: str | None, since: int | None, until: int | None) -> list[ColumnElement[bool]]:
-    out = []
-    if instance:
+Instances = str | list[str] | None  # one instance, several (e.g. the real-money ones), or all
+
+
+def _order_filter(instance: Instances, since: int | None, until: int | None) -> list[ColumnElement[bool]]:
+    out: list[ColumnElement[bool]] = []
+    if isinstance(instance, list):
+        out.append(OrderRow.instance.in_(instance))
+    elif instance:
         out.append(OrderRow.instance == instance)
     if since is not None:
         out.append(OrderRow.created_ts >= since)
@@ -244,7 +249,7 @@ def _order_filter(instance: str | None, since: int | None, until: int | None) ->
 
 
 def order_stats(
-    run: Run, instance: str | None = None, since: int | None = None, until: int | None = None
+    run: Run, instance: Instances = None, since: int | None = None, until: int | None = None
 ) -> dict[str, dict[str, int]]:
     """Per instance, over every order (or those filtered): how many there were and how each kind of
     result ended (filled ... resting add up to orders), plus look (what the Orders view shows by
@@ -282,7 +287,7 @@ def activity(
     *,
     offset: int = 0,
     view: str | None = None,
-    instance: str | None = None,
+    instance: Instances = None,
     since: int | None = None,
     until: int | None = None,
 ) -> list[Activity]:
@@ -334,7 +339,7 @@ def activity(
 TRADE_OUTCOMES = ("won", "lost", "stopped", "sold", "open")
 
 
-def _positions(instance: str | None, since: int | None, until: int | None) -> Any:
+def _positions(instance: Instances, since: int | None, until: int | None) -> Any:
     """Every position (instance, market, side) with what it bought and sold, its settlement and how
     it ended, as a subquery to filter, page and total."""
     key = (FillRow.instance, FillRow.market_id, FillRow.side)
@@ -355,7 +360,9 @@ def _positions(instance: str | None, since: int | None, until: int | None) -> An
         .join(OrderRow, OrderRow.id == FillRow.order_id, isouter=True)
         .group_by(*key)
     )
-    if instance:
+    if isinstance(instance, list):
+        q = q.where(FillRow.instance.in_(instance))
+    elif instance:
         q = q.where(FillRow.instance == instance)
     pos = q.subquery()
     st = SettlementRow
@@ -387,7 +394,7 @@ def trades(
     limit: int = 100,
     *,
     offset: int = 0,
-    instance: str | None = None,
+    instance: Instances = None,
     outcome: str | None = None,
     since: int | None = None,
     until: int | None = None,
@@ -439,7 +446,7 @@ def trades(
 def trade_summary(
     run: Run,
     *,
-    instance: str | None = None,
+    instance: Instances = None,
     outcome: str | None = None,
     since: int | None = None,
     until: int | None = None,

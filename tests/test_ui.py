@@ -368,3 +368,37 @@ def test_paper_and_live_runs_compare(tmp_path: Path) -> None:
     (tmp_path / "backtest").mkdir()
     Ledger(tmp_path / "backtest" / "x.sqlite").close()
     assert c.get("/api/runs/backtest/x/compare").status_code == 404
+
+
+def test_real_money_and_simulated_are_never_one_total(tmp_path: Path) -> None:
+    from quanty import experiment, plugins, synthetic
+    from quanty.brokers.sim import SimBroker
+    from quanty.core import Engine, Instance, Ledger
+
+    class LooksLive(SimBroker):  # simulated fills reported as live: what the dashboard reads
+        kind = "live"
+
+    (tmp_path / "live").mkdir()
+    cls = experiment.strategy_class(plugins.discover([], local=None)["example_favorite"])
+    paper = SimBroker("paper", fees=synthetic.FEES)
+    insts = [
+        Instance("real", cls(cls.params_type()), LooksLive("live", fees=synthetic.FEES)),
+        Instance("sim", cls(cls.params_type.from_config({"min_conf": 0.97})), paper),
+    ]
+    ledger = Ledger(tmp_path / "live" / "mixed.sqlite")
+    Engine(insts, ledger=ledger).run(synthetic.events(synthetic.Spec(hours=6)))
+    ledger.close()
+    c = TestClient(create_app(tmp_path))
+    snap = c.get("/api/runs/live/mixed").json()
+    assert snap["kinds"] == {"real": "live", "sim": "sim"}
+    by = {s["instance"]: s["pnl"] for s in snap["strategies"]}
+    assert snap["stats"]["pnl_real"] == pytest.approx(by["real"]) and snap["stats"][
+        "pnl_simulated"
+    ] == pytest.approx(by["sim"])
+    real = c.get("/api/runs/live/mixed/trades?money=real&limit=5000").json()
+    assert {t["instance"] for t in real["rows"]} == {"real"} and real["summary"]["pnl"] == pytest.approx(
+        by["real"]
+    )
+    sim = c.get("/api/runs/live/mixed/orders?money=simulated&limit=5000").json()
+    assert {a["instance"] for a in sim["rows"]} == {"sim"}
+    assert c.get("/api/runs/live/mixed/trades?money=both").status_code == 400
