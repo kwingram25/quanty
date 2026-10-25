@@ -94,6 +94,7 @@ def _activity(a: queries.Activity) -> dict[str, Any]:
 
 class Api:
     def __init__(self, data: Path, auth: "Auth | None" = None) -> None:
+        self._health: dict[str, Any] | None = None
         self.data = data
         self.auth = auth  # the dashboard login, when one is set
         self.token = secrets.token_urlsafe(24)
@@ -132,6 +133,30 @@ class Api:
                 }
             )
         return out
+
+    def health(self, fresh: bool = False) -> dict[str, Any]:
+        """`quanty doctor`'s checks, run here (the project is the folder the dashboard runs in): the
+        last result, or a fresh one on request (at most once a minute: the venue checks are real,
+        read-only, requests)."""
+        from quanty import doctor
+
+        last = self._health
+        if last is not None and (not fresh or time.time() - last["ran"] < 60):
+            return last
+        project = Path.cwd()
+        checks = doctor.run(
+            project,
+            sorted((project / "experiments").glob("*.toml")),
+            project / "feeds.toml",
+            self.data,
+            offline=False,
+        )
+        self._health = {
+            "ran": time.time(),
+            "project": str(project),
+            "checks": [dataclasses.asdict(c) for c in checks],
+        }
+        return self._health
 
     def run_or_404(self, mode: str, name: str) -> queries.Run:
         r = queries.run_by_name(self.data, f"{mode}/{name}")
@@ -541,6 +566,11 @@ def router(api: Api) -> APIRouter:
     @r.post("/runs/{mode}/{name}/control")
     async def control(request: Request, mode: str, name: str, cmd: Command) -> dict[str, Any]:
         return await api.command(request, mode, name, cmd)
+
+    @r.get("/health")
+    def health(fresh: bool = False) -> dict[str, Any]:
+        """The project's health: what `quanty doctor` checks, with the fixes."""
+        return api.health(fresh)
 
     @r.get("/accounts")
     async def accounts() -> list[dict[str, Any]]:

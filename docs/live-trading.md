@@ -13,7 +13,7 @@ need several things to go wrong at once. This page is what to know before `--arm
 3. **Place one tiny order by hand through `quanty live`** with small caps, early in a market where
    nothing else of yours trades, and watch the dashboard: placement, fill, cancel, and the
    numbers in the ledger against the venue's own.
-4. **Run `quanty doctor`** and fix anything it marks ✗: keys, clock drift, rate limits and orders
+4. **Run `quanty doctor`** (or open the dashboard's Health page) and fix anything it marks ✗: keys, clock drift, rate limits and orders
    a previous live run left unresolved.
 5. **Start small**: `max_qty` and `max_notional` at the size you would not mind getting wrong.
 

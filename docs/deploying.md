@@ -194,7 +194,9 @@ and the same with `ExecStart=/usr/local/bin/quanty ui --data data` for `quanty-u
 so a drifting clock gets orders refused); each venue is reachable, accepts the keys, and has
 rate-limit headroom (a 429 now means something else is using this account's budget); no orders
 are left unresolved by a previous live run; and there's disk space for recordings. It exits 1 if
-anything fails, so a deploy script can run it first. `--offline` skips the network checks.
+anything fails, so a deploy script can run it first. `--offline` skips the network checks. The
+dashboard's **Health** page shows the same checks, run where the dashboard runs (on the server, for
+a deployed one), and runs them again on request, at most once a minute.
 
 Read [Live trading](live-trading.md): paper first, then shadow, then one small order watched closely,
 with `max_qty` and `max_notional` set to amounts you would not mind getting wrong.

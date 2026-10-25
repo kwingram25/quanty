@@ -197,6 +197,43 @@ def test_accounts_are_cached_hide_venues_without_keys_and_back_off(
     assert asyncio.run(a.accounts())[0]["cash"] == 103.0 and k.calls == 3
 
 
+def test_health_runs_doctor_once_then_again_at_most_once_a_minute(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from quanty import doctor
+
+    runs: list[Path] = []
+
+    def fake_run(
+        project: Path, experiments: list[Path], feeds: Path | None, data: Path, offline: bool
+    ) -> list[doctor.Check]:
+        runs.append(project)
+        return [doctor.Check("Keys", "kalshi", "fail", "no key", fix="add KALSHI_KEY_ID to .env")]
+
+    monkeypatch.setattr(doctor, "run", fake_run)
+    monkeypatch.chdir(tmp_path)
+    clock = [1000.0]
+    monkeypatch.setattr("quanty.ui.api.time.time", lambda: clock[0])
+    c = TestClient(create_app(tmp_path))
+    got = c.get("/api/health").json()
+    assert got["checks"] == [
+        {
+            "section": "Keys",
+            "name": "kalshi",
+            "status": "fail",
+            "detail": "no key",
+            "fix": "add KALSHI_KEY_ID to .env",
+        }
+    ]
+    c.get("/api/health")
+    c.get("/api/health?fresh=1")
+    assert len(runs) == 1  # cached, and a fresh run waits a minute
+    clock[0] += 61
+    c.get("/api/health")
+    assert len(runs) == 1  # only a fresh request runs it again
+    assert c.get("/api/health?fresh=1").json()["ran"] == 1061.0 and len(runs) == 2
+
+
 def test_session_reports_platforms(tmp_path: Path) -> None:
     from quanty.control import Controller, ControlStore
 

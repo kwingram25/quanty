@@ -570,3 +570,19 @@ table.variants .cost { display: block; font-size: 11px; }
 .switch-broker .prepare input { width: 90px; height: 26px; padding: 0 8px; border-radius: 6px; border: 1px solid var(--border);
   background: var(--page); color: var(--ink); font: inherit; text-align: right; }
 .switch-broker .prepare .actions { display: flex; justify-content: flex-end; gap: 6px; }
+
+/* health */
+.health-page .list-head { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; }
+.health-page .list-head .btn { margin-left: auto; }
+.health-where { margin: -4px 0 8px; overflow-wrap: anywhere; }
+.health-summary { font-weight: 600; margin: 4px 0 12px; }
+.health-summary.warn { color: var(--warning); }
+.health-section { margin-bottom: 12px; }
+.health-section ul { list-style: none; margin: 0; padding: 4px 16px 12px; display: grid; gap: 8px; }
+.health-section li { display: grid; grid-template-columns: 18px 1fr; gap: 8px; align-items: baseline; }
+.health-section .mark { font-weight: 700; text-align: center; }
+.health-section li.ok .mark { color: var(--up); }
+.health-section li.warn .mark { color: var(--warning); }
+.health-section li.fail .mark { color: var(--critical); }
+.health-section li.skip .mark { color: var(--muted); }
+.health-section .fix { display: block; color: var(--muted); font-size: 12px; }

@@ -98,7 +98,7 @@ paper trading, shadow trading and live trading; [Deploying](docs/deploying.md) c
 | `quanty pull`, `changes` | bring a server's dashboard changes into your experiment files; list what a server holds |
 | `quanty reload` | have a running session pick up its experiment file: new variants start, removed ones retire |
 | `quanty init`, `deploy` | create a project; copy it to a Docker server (bringing its dashboard changes home first), check it there and start it |
-| `quanty doctor` | check a project before trading: config, keys, clock, venues, leftovers (read-only) |
+| `quanty doctor` | check a project before trading: config, keys, clock, venues, leftovers (read-only; also the dashboard's Health page) |
 | `quanty list`, `params` | strategies quanty can find, and their parameters |
 | `quanty password` | set the dashboard's login (a salted hash in `.env`) |
 

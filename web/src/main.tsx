@@ -6,6 +6,7 @@ import { Accounts } from "./components/Accounts";
 import { ToastProvider } from "./components/Toasts";
 import { FeedsPage } from "./pages/Feeds";
 import { RunPage } from "./pages/Run";
+import { HealthPage } from "./pages/Health";
 import { RunsPage } from "./pages/Runs";
 import { setZone, useZone, zoneName } from "./format";
 import "./styles.css";
@@ -70,6 +71,7 @@ function App() {
         <nav>
           <NavLink to="/" end>Runs</NavLink>
           <NavLink to="/feeds">Feeds</NavLink>
+          <NavLink to="/health">Health</NavLink>
         </nav>
         <Accounts />
         <ZoneToggle />
@@ -81,6 +83,7 @@ function App() {
       <Routes>
         <Route path="/" element={<RunsPage />} />
         <Route path="/feeds" element={<FeedsPage />} />
+        <Route path="/health" element={<HealthPage />} />
         <Route path="/runs/:mode/:name" element={<RunPage />} />
         <Route path="*" element={<div className="page"><p className="empty">Nothing here. <Link to="/">Back to runs</Link></p></div>} />
       </Routes>
