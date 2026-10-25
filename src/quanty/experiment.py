@@ -85,6 +85,9 @@ class InstanceSpec(ConfigModel):
     limits: Limits = Limits()
     # markets to trade in place of the strategy's own series (e.g. synthetic ones, to try it out)
     series: list[str] | None = None
+    # this instance is a paper copy of another (`quanty promote` keeps one beside each live
+    # instance): the dashboard compares the two
+    twin_of: str | None = None
 
 
 def _default_brokers() -> dict[str, BrokerConfig]:
@@ -103,6 +106,9 @@ class Experiment(ConfigModel):
         ids = [i.id for i in self.instances]
         if len(set(ids)) != len(ids):
             raise ValueError("instance ids must be unique")
+        for inst in self.instances:
+            if inst.twin_of is not None and inst.twin_of not in ids:
+                raise ValueError(f"instance {inst.id}: twin_of {inst.twin_of!r} is not an instance")
         for inst in self.instances:
             name = inst.broker or (next(iter(self.brokers)) if len(self.brokers) == 1 else None)
             if name not in self.brokers:
@@ -191,7 +197,7 @@ def build(
         strategy = cls(params)
         if spec.series is not None:
             strategy.series = tuple(spec.series)
-        out.append(Instance(spec.id, strategy, brokers[exp.broker_of(spec)], spec.limits))
+        out.append(Instance(spec.id, strategy, brokers[exp.broker_of(spec)], spec.limits, spec.twin_of))
     return out
 
 

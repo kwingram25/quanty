@@ -89,6 +89,13 @@ always be rebuilt from the record. `core/ledger.py` writes orders, fills, settle
 to SQLite (write-ahead logging, so the dashboard reads while a session writes). Schemas are
 SQLAlchemy models with Alembic migrations, applied automatically when a file is opened.
 
+An experiment's paper and live sessions write one ledger, `data/session/<experiment>.sqlite`, one
+run in the dashboard. Each order, fill and settlement records its broker's kind (`live` is real
+money; `shadow`, `sim`), so one instance can be paper first and live later, and the dashboard
+totals real and simulated P&L apart by row. A restarted session continues the run's order
+numbering. Runs kept in the older `data/paper/` and `data/live/` folders still open; their kinds
+come from each instance's broker.
+
 ## Dashboard and controls
 
 `ui/` is a FastAPI app serving a JSON API and, per run, a WebSocket that pushes a fresh snapshot

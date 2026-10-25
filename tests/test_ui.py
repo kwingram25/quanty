@@ -335,36 +335,37 @@ def test_whole_history_pages_filters_and_downloads(tmp_path: Path) -> None:
     assert c.get(f"{url}/orders?view=lucky").status_code == 400
 
 
-def test_paper_and_live_runs_compare(tmp_path: Path) -> None:
+def test_live_strategies_compare_with_their_paper_twins(tmp_path: Path) -> None:
     from quanty import experiment, plugins, synthetic
-    from quanty.core import Engine, Ledger
+    from quanty.brokers.sim import SimBroker
+    from quanty.core import Engine, Instance, Ledger
 
-    def run(mode: str, latency_ms: int, hours: float) -> None:
-        (tmp_path / mode).mkdir()
-        raw = {
-            "brokers": {"b": {"kind": "sim", "latency_ms": latency_ms}},
-            "instances": [{"id": "fav", "strategy": "example_favorite"}],
-        }
-        exp = experiment.parse(raw)
-        ledger = Ledger(tmp_path / mode / "main.sqlite")
-        engine = Engine(
-            experiment.build(exp, plugins.discover([], local=None), synthetic.FEES), ledger=ledger
-        )
-        start = synthetic.Spec().start_ms + int((12 - hours) * 3_600_000) // 300_000 * 300_000
-        engine.run(synthetic.events(synthetic.Spec(hours=hours, seed=0, start_ms=start)))
-        ledger.close()
+    class LooksLive(SimBroker):  # slow simulated fills, recorded as real money
+        kind = "live"
 
-    run("paper", 50, 12)  # paper ran longer
-    run("live", 3000, 6)  # "live" (slow fills) only the last 6 hours
+    (tmp_path / "session").mkdir()
+    cls = experiment.strategy_class(plugins.discover([], local=None)["example_favorite"])
+    insts = [
+        Instance("fav", cls(cls.params_type()), LooksLive("live", latency_ms=3000, fees=synthetic.FEES)),
+        Instance(
+            "fav_paper",
+            cls(cls.params_type()),
+            SimBroker("sim", latency_ms=50, fees=synthetic.FEES),
+            twin_of="fav",
+        ),
+    ]
+    ledger = Ledger(tmp_path / "session" / "main.sqlite")
+    Engine(insts, ledger=ledger).run(synthetic.events(synthetic.Spec(hours=6, seed=0)))
+    ledger.close()
     c = TestClient(create_app(tmp_path))
-    snap = c.get("/api/runs/live/main").json()
-    assert snap["counterpart"] == "paper/main"
-    cmp = c.get("/api/runs/live/main/compare").json()
-    assert cmp["paper"] == "paper/main" and cmp["live"] == "live/main" and cmp["since"] is not None
-    fav = cmp["instances"]["fav"]
-    assert fav["live"]["missed_pct"] > fav["paper"]["missed_pct"]  # slow fills miss more
-    assert fav["paper"]["orders"] < 200  # only the hours both ran, not paper's whole 12
-    assert c.get("/api/runs/live/main/compare").json() == c.get("/api/runs/paper/main/compare").json()
+    snap = c.get("/api/runs/session/main").json()
+    assert snap["twins"] == {"fav": "fav_paper"} and snap["real"] is True
+    assert snap["stats"]["pnl_real"] == pytest.approx(
+        snap["pnl_kinds"]["fav"]["live"]
+    )  # by what each fill was
+    pair = c.get("/api/runs/session/main/compare").json()["pairs"]["fav"]
+    assert pair["twin"] == "fav_paper" and pair["since"] is not None
+    assert pair["live"]["missed_pct"] > pair["paper"]["missed_pct"]  # slow fills miss more
     (tmp_path / "backtest").mkdir()
     Ledger(tmp_path / "backtest" / "x.sqlite").close()
     assert c.get("/api/runs/backtest/x/compare").status_code == 404
@@ -402,3 +403,62 @@ def test_real_money_and_simulated_are_never_one_total(tmp_path: Path) -> None:
     sim = c.get("/api/runs/live/mixed/orders?money=simulated&limit=5000").json()
     assert {a["instance"] for a in sim["rows"]} == {"sim"}
     assert c.get("/api/runs/live/mixed/trades?money=both").status_code == 400
+
+
+def test_an_instance_promoted_between_sessions_keeps_one_history(tmp_path: Path) -> None:
+    from quanty import experiment, plugins, synthetic
+    from quanty.brokers.sim import SimBroker
+    from quanty.core import Engine, Instance, Ledger
+    from quanty.ui import queries
+
+    class LooksLive(SimBroker):
+        kind = "live"
+
+    (tmp_path / "session").mkdir()
+    cls = experiment.strategy_class(plugins.discover([], local=None)["example_favorite"])
+    path = tmp_path / "session" / "main.sqlite"
+    for broker, start in (
+        (SimBroker("sim", fees=synthetic.FEES), 0),
+        (LooksLive("live", fees=synthetic.FEES), 1),
+    ):
+        spec = synthetic.Spec(hours=6, seed=start, start_ms=synthetic.Spec().start_ms + start * 6 * 3_600_000)
+        ledger = Ledger(path)  # the same run, a later session
+        Engine([Instance("fav", cls(cls.params_type()), broker)], ledger=ledger).run(synthetic.events(spec))
+        ledger.close()
+    run = queries.run_by_name(tmp_path, "session/main")
+    assert run is not None
+    by_kind = queries.pnl_by_kind(run)["fav"]
+    assert set(by_kind) == {"sim", "live"}  # its paper days and its live ones, told apart
+    snap = TestClient(create_app(tmp_path)).get("/api/runs/session/main").json()
+    assert snap["stats"]["pnl_real"] == pytest.approx(by_kind["live"])
+    assert snap["stats"]["pnl_simulated"] == pytest.approx(by_kind["sim"])
+    assert snap["kinds"]["fav"] == "live"  # what it is now
+    real = queries.trades(run, limit=5000, real=True)
+    assert real and all(t["opened"] >= synthetic.Spec().start_ms + 6 * 3_600_000 for t in real)
+
+
+def test_ledgers_from_before_kinds_still_open(tmp_path: Path) -> None:
+    import sqlite3
+
+    from quanty import experiment, plugins, synthetic
+    from quanty.brokers.sim import SimBroker
+    from quanty.core import Engine, Instance, Ledger
+
+    for mode in ("live", "backtest"):  # an old live run, and an old backtest
+        (tmp_path / mode).mkdir()
+        cls = experiment.strategy_class(plugins.discover([], local=None)["example_favorite"])
+        path = tmp_path / mode / "old.sqlite"
+        ledger = Ledger(path)
+        Engine([Instance("fav", cls(cls.params_type()), SimBroker(fees=synthetic.FEES))], ledger=ledger).run(
+            synthetic.events(synthetic.Spec(hours=2))
+        )
+        ledger.close()
+        with sqlite3.connect(path) as db:  # as a ledger written before kinds were recorded
+            for table in ("orders", "fills", "settlements"):
+                db.execute(f"ALTER TABLE {table} DROP COLUMN kind")
+    c = TestClient(create_app(tmp_path))
+    assert c.get("/api/runs").status_code == 200
+    for run in ("live/old", "backtest/old"):
+        assert c.get(f"/api/runs/{run}").status_code == 200, run
+        for what in ("trades", "orders", "trades?money=real", "orders?view=look"):
+            assert c.get(f"/api/runs/{run}/{what}").status_code == 200, (run, what)

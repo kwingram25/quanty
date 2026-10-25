@@ -112,7 +112,7 @@ uv run quanty paper experiment.toml --feeds feeds.toml --data data
 
 Strategies run in real time on live feeds; fills are simulated by the same broker model as
 backtests. Recording continues alongside, and the ledger is written as it goes
-(`data/paper/<experiment>.sqlite`). The dashboard shows it live and adds controls (halt, resume,
+(`data/session/<experiment>.sqlite`). The dashboard shows it live and adds controls (halt, resume,
 kill switch), and a strategy's params, such as its size, can be edited from its details without a
 restart.
 
@@ -149,8 +149,16 @@ max_notional = 10     # required: largest single order, $
 Instances left on `sim` keep paper trading in the same live session. `--to sim` steps back; the live
 broker block stays in the file, unused, for next time.
 
-**Runs.** Each experiment records into one run per mode: `quanty paper experiments/main.toml` into
-*paper/main*, `quanty live …` into *live/main*, so real and simulated results never mix. Their
-pages link to each other, and the **Compare** tab puts the same strategies side by side over the
-time both ran: fill rate, misses, fills against the limit asked, price paid and P&L per trade. A
-live fill rate well below paper's means paper's simulated fills are optimistic for that strategy.
+**Runs.** Each experiment records into one run, *session/main* for `experiments/main.toml`, whether
+started with `quanty paper` or `quanty live`: the command only decides whether live brokers may be
+armed. Every order, fill and settlement records whether it was real money, so a strategy keeps one
+history from its paper days into its live ones, and the dashboard never adds the two: real-money
+and simulated P&L are separate totals, strategies carry LIVE / shadow / paper badges, and the
+Trades and Orders tabs filter by either.
+
+Going live, `quanty promote` keeps a **paper twin** beside the strategy (`<id>_paper`, `twin_of =
+"<id>"`): the same strategy and params on the simulated broker, in the same session. The
+**Compare** tab puts the two side by side over the time both traded: fill rate, misses, fills
+against the limit asked, price paid and P&L per trade. Both saw the same markets at the same
+moments, so a live fill rate well below the twin's means paper's simulated fills are optimistic for
+that strategy. `--no-twin` skips it; stepping back to paper removes it.

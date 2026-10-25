@@ -327,3 +327,21 @@ def test_save_params_writes_the_experiment_file(tmp_path: Path, monkeypatch: pyt
     r = params_cmd(c, store, "save_params")
     assert r["status"] == "failed" and "copy the lines" in str(r["result"])
     assert tomllib.loads(exp.read_text())["instances"][0]["params"]["size"] == 25.0
+
+
+def test_a_session_with_a_live_broker_needs_the_name_typed(tmp_path: Path) -> None:
+    (tmp_path / "session").mkdir()
+    sim, live = SimBroker("sim"), LiveBroker("real", armed=True)
+    insts = [Instance("a", Hooks(), sim), Instance("b", Hooks(), live)]
+    engine = Engine(
+        insts, ledger=Ledger(tmp_path / "session" / "acct.sqlite", durable=True), clock_ms=None, strict=False
+    )
+    c = Controller(ControlStore(tmp_path / "control.sqlite"), "session/acct", engine, can_arm=True)
+    c.tick()
+    client = TestClient(create_app(tmp_path))
+    r = client.post(
+        "/api/runs/session/acct/control",
+        json={"action": "halt", "target": "a"},
+        headers={"x-quanty-token": token(client)},
+    )
+    assert r.status_code == 400 and "type acct to confirm" in r.json()["detail"]

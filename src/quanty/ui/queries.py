@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from sqlalchemy import ColumnElement, Engine, case, func, select
+from sqlalchemy import ColumnElement, Engine, case, func, literal, select
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session
 
@@ -17,7 +17,10 @@ from quanty.core.ledger import Summary, summarize
 from quanty.db.models import FeedMetricRow, FillRow, LogRow, MarketRow, OrderRow, SettlementRow
 from quanty.enums import Action, OrderStatus, Tif
 
-MODES = ("live", "paper", "backtest")
+# session: paper and live sessions of an experiment, one run each (real money told apart per order);
+# live/ and paper/ hold runs from before that, one per mode
+MODES = ("session", "live", "paper", "backtest")
+ROW_KINDS = ("session", "backtest")  # runs whose orders, fills and settlements record their kind
 STALE_S = 180  # a feed window older than this means the recorder isn't running
 
 
@@ -77,6 +80,19 @@ def run_by_name(data: Path, name: str) -> Run | None:
 
 def _open(path: Path) -> Engine:
     return db.connect_readonly(path)
+
+
+def kinds_recorded(run: Run) -> bool:
+    """Whether the run's rows record their kind (ledgers written before that don't, and the
+    dashboard, opening them read-only, can't migrate them): only then can it filter by row."""
+    if run.mode not in ROW_KINDS:
+        return False
+    engine = _open(run.path)
+    try:
+        with engine.connect() as conn:
+            return any(r[1] == "kind" for r in conn.exec_driver_sql("PRAGMA main.table_info(orders)"))
+    finally:
+        engine.dispose()
 
 
 def view(run: Run) -> RunView:
@@ -235,8 +251,13 @@ ORDER_VIEWS: dict[str, ColumnElement[bool]] = {
 Instances = str | list[str] | None  # one instance, several (e.g. the real-money ones), or all
 
 
-def _order_filter(instance: Instances, since: int | None, until: int | None) -> list[ColumnElement[bool]]:
+def _order_filter(
+    instance: Instances, since: int | None, until: int | None, real: bool | None = None
+) -> list[ColumnElement[bool]]:
+    """real: only real-money orders (True) or only simulated ones (False), by each order's kind."""
     out: list[ColumnElement[bool]] = []
+    if real is not None:
+        out.append(OrderRow.kind == "live" if real else OrderRow.kind != "live")
     if isinstance(instance, list):
         out.append(OrderRow.instance.in_(instance))
     elif instance:
@@ -249,7 +270,11 @@ def _order_filter(instance: Instances, since: int | None, until: int | None) -> 
 
 
 def order_stats(
-    run: Run, instance: Instances = None, since: int | None = None, until: int | None = None
+    run: Run,
+    instance: Instances = None,
+    since: int | None = None,
+    until: int | None = None,
+    real: bool | None = None,
 ) -> dict[str, dict[str, int]]:
     """Per instance, over every order (or those filtered): how many there were and how each kind of
     result ended (filled ... resting add up to orders), plus look (what the Orders view shows by
@@ -267,7 +292,7 @@ def order_stats(
                     func.count().label("orders"),
                     *(count(cond).label(name) for name, cond in ORDER_VIEWS.items()),
                 )
-                .where(*_order_filter(instance, since, until))
+                .where(*_order_filter(instance, since, until, real))
                 .group_by(OrderRow.instance)
             ).all()
     finally:
@@ -290,6 +315,7 @@ def activity(
     instance: Instances = None,
     since: int | None = None,
     until: int | None = None,
+    real: bool | None = None,
 ) -> list[Activity]:
     """Orders, newest first, each with what filled, at what price and cost. needs_look (or
     view="look"): only those that didn't simply fill in full, and stop losses; view can also be one
@@ -300,7 +326,7 @@ def activity(
     engine = _open(run.path)
     try:
         with Session(engine) as conn:
-            q = select(OrderRow).where(*_order_filter(instance, since, until))
+            q = select(OrderRow).where(*_order_filter(instance, since, until, real))
             if view is not None:
                 q = q.where(ORDER_VIEWS[view])
             q = q.order_by(OrderRow.created_ts.desc(), OrderRow.id.desc()).offset(offset).limit(limit)
@@ -339,7 +365,9 @@ def activity(
 TRADE_OUTCOMES = ("won", "lost", "stopped", "sold", "open")
 
 
-def _positions(instance: Instances, since: int | None, until: int | None) -> Any:
+def _positions(
+    instance: Instances, since: int | None, until: int | None, real: bool | None = None, kinds: bool = True
+) -> Any:
     """Every position (instance, market, side) with what it bought and sold, its settlement and how
     it ended, as a subquery to filter, page and total."""
     key = (FillRow.instance, FillRow.market_id, FillRow.side)
@@ -356,6 +384,7 @@ def _positions(instance: Instances, since: int | None, until: int | None) -> Any
             func.sum(FillRow.fee).label("fees"),
             func.sum(FillRow.realized).label("realized"),
             func.max(case((sell & (OrderRow.tag == STOP_TAG), 1), else_=0)).label("stopped"),
+            (func.max(case((OrderRow.kind == "live", 1), else_=0)) if kinds else literal(0)).label("real"),
         )
         .join(OrderRow, OrderRow.id == FillRow.order_id, isouter=True)
         .group_by(*key)
@@ -382,6 +411,8 @@ def _positions(instance: Instances, since: int | None, until: int | None) -> Any
         (st.instance == pos.c.instance) & (st.market_id == pos.c.market_id) & (st.side == pos.c.side),
         isouter=True,
     )
+    if real is not None:
+        q2 = q2.where(pos.c.real == (1 if real else 0))
     if since is not None:
         q2 = q2.where(pos.c.opened >= since)
     if until is not None:
@@ -398,13 +429,14 @@ def trades(
     outcome: str | None = None,
     since: int | None = None,
     until: int | None = None,
+    real: bool | None = None,
 ) -> list[dict[str, Any]]:
     """One row per position a strategy took (instance, market, side): what it bought and sold, what
     it cost, how it ended (won, lost, stopped: sold by a stop loss, sold, still open) and its P&L,
     most recently active first. Filters: instance, outcome, and when it was opened (ms)."""
     if outcome is not None and outcome not in TRADE_OUTCOMES:
         raise ValueError(f"unknown outcome {outcome!r}")
-    t = _positions(instance, since, until)
+    t = _positions(instance, since, until, real, kinds_recorded(run))
     q = select(t)
     if outcome is not None:
         q = q.where(t.c.outcome == outcome)
@@ -450,9 +482,10 @@ def trade_summary(
     outcome: str | None = None,
     since: int | None = None,
     until: int | None = None,
+    real: bool | None = None,
 ) -> dict[str, Any]:
     """Totals over every position the filters select: how many, by outcome, and net P&L."""
-    t = _positions(instance, since, until)
+    t = _positions(instance, since, until, real, kinds_recorded(run))
     q = select(
         func.count().label("trades"),
         *(func.sum(case((t.c.outcome == o, 1), else_=0)).label(o) for o in TRADE_OUTCOMES),
@@ -648,27 +681,26 @@ def feed_states(data: Path, hours: float = 2.0) -> list[FeedState]:
     return out
 
 
-def counterpart(data: Path, run: Run) -> Run | None:
-    """The same experiment's run in the other mode (paper/<name> for live/<name>, and back)."""
-    other = {"paper": "live", "live": "paper"}.get(run.mode)
-    return run_by_name(data, f"{other}/{run.path.stem}") if other else None
-
-
-def _first_order_ts(run: Run) -> int | None:
+def _first_order_ts(run: Run, instance: str, real: bool | None = None) -> int | None:
     engine = _open(run.path)
     try:
         with Session(engine) as conn:
-            return conn.execute(select(func.min(OrderRow.created_ts))).scalar()
+            q = select(func.min(OrderRow.created_ts)).where(*_order_filter(instance, None, None, real))
+            return conn.execute(q).scalar()
     finally:
         engine.dispose()
 
 
-def _execution(run: Run, instance: str, since: int | None) -> dict[str, float | None]:
+def _execution(
+    run: Run, instance: str, since: int | None, real: bool | None = None
+) -> dict[str, float | None]:
     """How an instance's buys filled: average price paid, and how far fills landed from the limit
     asked (negative: better than asked), contract-weighted; fees per contract."""
     buy = (FillRow.action == Action.BUY) & (FillRow.instance == instance)
     if since is not None:
         buy &= FillRow.ts >= since
+    if real is not None:
+        buy &= FillRow.kind == "live" if real else FillRow.kind != "live"
     engine = _open(run.path)
     try:
         with Session(engine) as conn:
@@ -693,31 +725,56 @@ def _execution(run: Run, instance: str, since: int | None) -> dict[str, float | 
     }
 
 
-def compare(paper: Run, live: Run) -> dict[str, Any]:
-    """The same experiment's paper and live runs side by side, per instance in both, over the time
-    both ran (from the later of their first orders): is live doing what paper did?"""
-    starts = [t for t in (_first_order_ts(paper), _first_order_ts(live)) if t is not None]
-    since = max(starts) if len(starts) == 2 else None
-    out: dict[str, Any] = {"paper": paper.name, "live": live.name, "since": since, "instances": {}}
-    stats = {"paper": order_stats(paper, since=since), "live": order_stats(live, since=since)}
-    for iid in sorted(set(stats["paper"]) & set(stats["live"])):
-        row = {}
-        for side, run in (("paper", paper), ("live", live)):
-            o = stats[side][iid]
-            t = trade_summary(run, instance=iid, since=since)
-            settled = t["won"] + t["lost"]
-            closed = settled + t["stopped"] + t["sold"]
-            row[side] = {
-                "orders": o["orders"],
-                "filled_pct": o["filled"] / o["orders"] if o["orders"] else None,
-                "missed_pct": o["missed"] / o["orders"] if o["orders"] else None,
-                "rejected": o["rejected"],
-                "trades": t["trades"],
-                "win_rate": t["won"] / settled if settled else None,
-                "stops": t["stopped"],
-                "pnl": t["pnl"],
-                "pnl_per_trade": t["pnl"] / closed if closed else None,
-                **_execution(run, iid, since),
-            }
-        out["instances"][iid] = row
+def _side(run: Run, iid: str, since: int | None, real: bool | None) -> dict[str, Any]:
+    o = order_stats(run, instance=iid, since=since, real=real).get(iid)
+    if o is None:
+        o = {k: 0 for k in ("orders", "filled", "missed", "rejected")}
+    t = trade_summary(run, instance=iid, since=since, real=real)
+    settled = t["won"] + t["lost"]
+    closed = settled + t["stopped"] + t["sold"]
+    return {
+        "orders": o["orders"],
+        "filled_pct": o["filled"] / o["orders"] if o["orders"] else None,
+        "missed_pct": o["missed"] / o["orders"] if o["orders"] else None,
+        "rejected": o["rejected"],
+        "trades": t["trades"],
+        "win_rate": t["won"] / settled if settled else None,
+        "stops": t["stopped"],
+        "pnl": t["pnl"],
+        "pnl_per_trade": t["pnl"] / closed if closed else None,
+        **_execution(run, iid, since, real),
+    }
+
+
+def compare_twins(run: Run, twins: dict[str, str]) -> dict[str, Any]:
+    """Each live instance beside its paper twin (twins: live id -> twin id), in the same run: the
+    live one's real-money orders against the twin's simulated ones, from when both were trading
+    (the later of the twin's first order and the live one's first real order)."""
+    out: dict[str, Any] = {"pairs": {}}
+    for live, twin in sorted(twins.items()):
+        starts = [_first_order_ts(run, live, real=True), _first_order_ts(run, twin)]
+        since = max(starts) if None not in starts else None  # type: ignore[type-var]
+        out["pairs"][live] = {
+            "twin": twin,
+            "since": since,
+            "live": _side(run, live, since, True),
+            "paper": _side(run, twin, since, None),
+        }
+    return out
+
+
+def pnl_by_kind(run: Run) -> dict[str, dict[str, float]]:
+    """Realized P&L per instance and kind (live = real money; sim, shadow), from what each fill and
+    settlement recorded: an instance promoted mid-run has both."""
+    engine = _open(run.path)
+    out: dict[str, dict[str, float]] = {}
+    try:
+        with Session(engine) as conn:
+            for model, col in ((FillRow, FillRow.realized), (SettlementRow, SettlementRow.pnl)):
+                for iid, kind, v in conn.execute(
+                    select(model.instance, model.kind, func.sum(col)).group_by(model.instance, model.kind)
+                ):
+                    out.setdefault(iid, {})[kind] = out.get(iid, {}).get(kind, 0.0) + (v or 0.0)
+    finally:
+        engine.dispose()
     return out

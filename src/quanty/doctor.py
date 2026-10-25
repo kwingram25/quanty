@@ -291,7 +291,8 @@ async def _kalshi_limits(client: httpx.AsyncClient, api: OrderAPI) -> Check:
 
 def _live(out: list[Check], data: Path) -> None:
     unresolved = 0
-    for journal in sorted((data / "live").glob("*.orders.jsonl")):
+    journals = [*(data / "session").glob("*.orders.jsonl"), *(data / "live").glob("*.orders.jsonl")]
+    for journal in sorted(journals):
         state: dict[str, dict[str, object]] = {}
         for line in journal.read_text().splitlines():
             try:

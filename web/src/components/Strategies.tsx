@@ -22,7 +22,7 @@ export function Strategies({ snap, slots, onHover, focus }: {
   /** Sends a command; true/false = its outcome, null = waiting for the live-run confirmation. */
   const act = async (action: string, target: string, label: string, confirmText = "",
     value?: Record<string, unknown>): Promise<boolean | null> => {
-    if (snap.run.mode === "live" && !confirmText) { setConfirm({ action, target, label, value }); return null; }
+    if ((snap.real || snap.run.mode === "live") && !confirmText) { setConfirm({ action, target, label, value }); return null; }
     if (action === "halt" || action === "resume") setPending((p) => ({ ...p, [target]: action === "halt" }));
     const r = await sendCommand(run, action, target, confirmText, value);
     const same = r.result.trim().toLowerCase() === label.trim().toLowerCase();
@@ -50,7 +50,7 @@ export function Strategies({ snap, slots, onHover, focus }: {
         {[...snap.strategies].sort((a, b) => Number(snap.kinds?.[b.instance] === "live") - Number(snap.kinds?.[a.instance] === "live")).map((st) => {
           const halted = pending[st.instance] ?? s?.instances[st.instance]?.halted ?? false;
           return <Row key={st.instance} st={st} slot={!focus || focus.has(st.instance) ? slots[st.instance] ?? 1 : 0} session={s} halted={halted}
-            kind={snap.kinds?.[st.instance] ?? "sim"} onHover={onHover}
+            kind={snap.kinds?.[st.instance] ?? "sim"} onHover={onHover} byKind={snap.pnl_kinds?.[st.instance]}
             blocked={s?.instances[st.instance]?.blocked ?? 0} stops={snap.order_stats?.[st.instance]?.stops ?? 0}
             onToggle={() => act(halted ? "resume" : "halt", st.instance, `${halted ? "Resumed" : "Halted"} ${st.instance}`)}
             onEdit={(value) => act("params", st.instance, `Changed ${st.instance}`, "", value)}
@@ -85,8 +85,10 @@ export function KindBadge({ kind }: { kind: string }) {
 
 type Edit = (value: Record<string, unknown>) => Promise<boolean | null>;
 
-function Row({ st, slot, kind, onHover, session, halted, blocked, stops, onToggle, onEdit, onReset, onSave }: {
-  st: Strategy; slot: number; kind: string; onHover?: (name: string | null) => void; session: SessionState | null; halted: boolean; blocked: number; stops: number;
+function Row({ st, slot, kind, onHover, byKind, session, halted, blocked, stops, onToggle, onEdit, onReset, onSave }: {
+  st: Strategy; slot: number; kind: string; onHover?: (name: string | null) => void;
+  /** its realized P&L by kind: a strategy promoted mid-run has paper and real-money parts */
+  byKind?: Record<string, number>; session: SessionState | null; halted: boolean; blocked: number; stops: number;
   onToggle: () => void;
   onEdit: Edit; onReset: () => Promise<boolean | null>; onSave: () => Promise<boolean | null>;
 }) {
@@ -137,6 +139,10 @@ function Row({ st, slot, kind, onHover, session, halted, blocked, stops, onToggl
         <span className="grow" title={`${st.wins} won, ${st.losses} lost${st.rejected ? `, ${st.rejected} orders rejected` : ""}`}>
           {st.fills} fills · {st.wins}–{st.losses}{st.rejected ? ` · ${st.rejected} rej` : ""}
           {stops > 0 && <span className="stops" title="positions sold by its stop loss"> · {stops} stop{stops > 1 ? "s" : ""}</span>}
+          {byKind && "live" in byKind && Object.keys(byKind).length > 1 && (
+            <span className="real-part" title="Of its P&L: what it made with real money, after going live (the rest was simulated)">
+              {" "}· real {money(byKind.live, true)}</span>
+          )}
           {halted && blocked > 0 && <span className="blocked" title="buys refused while halted"> · {blocked} blocked</span>}</span>
         {session && session.instances[st.instance] && <>
           <span className={`pill ${halted ? "halted" : "trading"}`}><span className="dot" />{halted ? "halted" : "trading"}</span>

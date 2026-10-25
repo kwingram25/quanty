@@ -353,34 +353,43 @@ def promote(
     ] = None,
     data: DataOpt = Path("data"),
     check: Annotated[bool, typer.Option(help="Run quanty doctor on the result")] = True,
+    twin: Annotated[bool, typer.Option(help="Going live: keep a paper twin beside it, for Compare")] = True,
 ) -> None:
     """Move an instance to another kind of broker (paper → shadow → live, or back) by editing its
     experiment file. Carries its dashboard edits along. Starts nothing: run paper or live after."""
     from quanty import promote as pm
 
     try:
-        before = experiment.load(path)
+        experiment.load(path)  # a valid file to start from
         if pm.needs_caps(path, to, broker) and (max_qty is None or max_notional is None):
             typer.echo("A new live broker caps every single order (a fat-finger guard):")
             max_qty = max_qty if max_qty is not None else typer.prompt("  max_qty (contracts)", type=float)
             max_notional = (
                 max_notional if max_notional is not None else typer.prompt("  max_notional ($)", type=float)
             )
-        old_run = pm.run_name(path, before)
+        run = pm.run_name(path)
         store = ControlStore(data / "control.sqlite") if (data / "control.sqlite").exists() else None
-        carried = store.overrides(old_run).get(instance, {}) if store else {}
+        carried = store.overrides(run).get(instance, {}) if store else {}
         done = pm.promote(
-            path, instance, to, broker=broker, max_qty=max_qty, max_notional=max_notional, overrides=carried
+            path,
+            instance,
+            to,
+            broker=broker,
+            max_qty=max_qty,
+            max_notional=max_notional,
+            overrides=carried,
+            twin=twin,
         )
         if store is not None and carried:
-            store.set_override(old_run, instance, {})  # now in the file
-        new_run = pm.run_name(path, experiment.load(path))
+            store.set_override(run, instance, {})  # now in the file
+        live_after = bool(experiment.live_brokers(experiment.load(path)))
     except (ValueError, OSError) as exc:
         raise _fail(exc) from None
     for line in done.lines():
         typer.echo(f"  {line}")
-    if new_run != old_run:
-        typer.echo(f"  its results now go to the run {new_run}; {old_run} keeps its history")
+    typer.echo(
+        f"  its history stays in the run {run}; from now on each order records whether it's real money"
+    )
     if done.from_kind == "live" and to != "live":
         typer.echo("  note: what it holds on the venue stays there; the paper run doesn't know it", err=True)
     if check:
@@ -390,9 +399,8 @@ def promote(
         checks = dr.run(project, [path], project / "feeds.toml", data, offline=to != "live")
         if _print_checks(checks, only_problems=True):
             typer.echo("fix those before starting it", err=True)
-    cmd = f"quanty {new_run.split('/')[0]} {path} --feeds feeds.toml --data {data}"
-    restart = "restart the running session with" if new_run == old_run else "start it with"
-    typer.echo(f"next: {restart} `{cmd}{' --arm' if new_run.startswith('live') else ''}`")
+    cmd = f"quanty {'live' if live_after else 'paper'} {path} --feeds feeds.toml --data {data}"
+    typer.echo(f"next: (re)start the session with `{cmd}{' --arm' if live_after else ''}`")
 
 
 @app.command()
@@ -513,7 +521,8 @@ def _session(
     except ValueError as exc:
         raise _fail(exc) from None
     structlog.configure(logger_factory=structlog.PrintLoggerFactory(sys.stderr))  # after any refusal
-    ledger_path = ledger or data / mode / f"{path.stem}.sqlite"
+    # one run per experiment, paper or live: each order records whether it was real money
+    ledger_path = ledger or data / "session" / f"{path.stem}.sqlite"
     ledger_path.parent.mkdir(parents=True, exist_ok=True)
     for inst in instances:
         if isinstance(inst.broker, LiveBroker):
@@ -527,7 +536,7 @@ def _session(
         strict=False,
         signals=experiment.signals(exp),
     )
-    run_name = f"{mode}/{ledger_path.stem}"
+    run_name = f"session/{ledger_path.stem}"
     store = ControlStore(data / "control.sqlite")
     controller = Controller(store, run_name, trader, can_arm=armed)
     controller.experiment = path.resolve()  # the dashboard's "Save to file" writes edits here
@@ -586,8 +595,8 @@ def _demo_live(
     from quanty.ui.app import create_app
 
     run = "demo-live"
-    (data / "paper").mkdir(parents=True)
-    ledger_path = data / "paper" / f"{run}.sqlite"
+    (data / "session").mkdir(parents=True)
+    ledger_path = data / "session" / f"{run}.sqlite"
     store = ControlStore(data / "control.sqlite")
     playback = Playback(speed, tuple(sorted({1.0, speed})))  # the dashboard toggles fast / real time
     server = uvicorn.Server(
@@ -607,7 +616,7 @@ def _demo_live(
 
     trader, book, day = build(spec.seed)
     playback.seed = spec.seed
-    controller = Controller(store, f"paper/{run}", trader, can_arm=False, playback=playback)
+    controller = Controller(store, f"session/{run}", trader, can_arm=False, playback=playback)
 
     async def play(trader: Engine, day: synthetic.Spec) -> None:
         # the past (before now) at once, so the dashboard opens on a run with history; then live
@@ -665,7 +674,7 @@ def _demo_live(
                 t.cancel()
             await asyncio.gather(*tasks, state["task"], return_exceptions=True)
 
-    url = f"http://127.0.0.1:{port}/runs/paper/{run}"
+    url = f"http://127.0.0.1:{port}/runs/session/{run}"
     typer.echo(f"live demo: synthetic up/down markets and a temperature ladder at {speed:g}x real time")
     typer.echo(f"dashboard: {url} (Ctrl-C to stop)")
     if browser:

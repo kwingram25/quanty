@@ -545,3 +545,8 @@ a.pill.link:hover { border-color: var(--axis); }
 .strategy .top .name .label { min-width: 0; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; line-height: 1.25; }
 .strategy .top .kind-badge, .strategy .top .pnl { flex: none; }
 .tape .what { min-width: 0; overflow-wrap: anywhere; }
+
+.strategy .real-part { color: var(--critical); }
+.run-card .split { display: flex; align-items: baseline; gap: 16px; }
+.run-card .split > span { display: grid; }
+.pill.session .dot { background: var(--series-1); }

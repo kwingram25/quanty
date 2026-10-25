@@ -61,13 +61,24 @@ def test_promote_command_carries_dashboard_edits(tmp_path: Path, monkeypatch: py
     exp = tmp_path / "experiments" / "main.toml"
     exp.write_text(TWO)
     store = ControlStore(tmp_path / "data" / "control.sqlite")
-    store.set_override("paper/main", "a", {"size": 25})  # edited in the paper run's dashboard
+    store.set_override("session/main", "a", {"size": 25})  # edited in the dashboard
     monkeypatch.chdir(tmp_path)
     res = CliRunner().invoke(cli.app, ["promote", "a", "--to", "shadow", "--no-check"])
     assert res.exit_code == 0, res.output
     assert "carried dashboard edits into the file: size = 25" in res.output
     assert tomllib.loads(exp.read_text())["instances"][0]["params"] == {"size": 25}
-    assert store.overrides("paper/main") == {}  # the file holds it now
+    assert store.overrides("session/main") == {}  # the file holds it now
     live = CliRunner().invoke(cli.app, ["promote", "a", "--to", "live", "--no-check"], input="5\n5\n")
-    assert live.exit_code == 0 and "max_qty" in live.output and "live/main" in live.output, live.output
-    assert "--arm" in live.output
+    assert live.exit_code == 0 and "max_qty" in live.output and "a_paper" in live.output, live.output
+    assert "--arm" in live.output and "session/main" in live.output  # same run: its history stays
+    by_id = {i["id"]: i for i in tomllib.loads(exp.read_text())["instances"]}
+    assert by_id["a_paper"] == {
+        "id": "a_paper",
+        "strategy": "example_favorite",
+        "broker": "shadow",
+        "twin_of": "a",
+        "params": {"size": 25},
+    }  # the twin: same strategy and params, the old broker
+    back = CliRunner().invoke(cli.app, ["promote", "a", "--to", "sim", "--no-check"])
+    assert back.exit_code == 0 and "removed its paper twin a_paper" in back.output
+    assert [i["id"] for i in tomllib.loads(exp.read_text())["instances"]] == ["a", "b"]

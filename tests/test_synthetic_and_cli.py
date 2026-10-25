@@ -114,7 +114,7 @@ def test_live_demo_plays_and_stops(tmp_path: Path, monkeypatch: pytest.MonkeyPat
     assert res.exit_code == 0, res.output
     from quanty.core import Ledger
 
-    ledger = Ledger(tmp_path / "paper" / "demo-live.sqlite")
+    ledger = Ledger(tmp_path / "session" / "demo-live.sqlite")
     assert sum(s.fills for s in ledger.summary()) > 0
     ledger.close()
 

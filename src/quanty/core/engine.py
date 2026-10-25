@@ -50,6 +50,7 @@ class Instance:
     strategy: Strategy[Any]
     broker: Broker
     limits: Limits = field(default_factory=Limits)
+    twin_of: str | None = None  # a paper copy of this live instance, for the dashboard's Compare
 
 
 def describe(inst: Instance) -> dict[str, object]:
@@ -69,6 +70,7 @@ def describe(inst: Instance) -> dict[str, object]:
         "broker": inst.broker.name,
         "broker_kind": inst.broker.kind,  # live = real money
         "limits": inst.limits.model_dump(exclude_none=True),
+        "twin_of": inst.twin_of,
     }
 
 
@@ -181,6 +183,7 @@ class Engine:
         if len(self.instances) != len(instances):
             raise ValueError("instance ids must be unique")
         self.ledger = ledger or Ledger()
+        self.ledger.kinds.update({i.id: i.broker.kind for i in instances})
         self.limits = limits or Limits()
         self.clock_ms = clock_ms
         self.strict = strict
@@ -213,7 +216,8 @@ class Engine:
             broker.attach(self)
         self._queue: list[tuple[int, int, Event]] = []
         self._seq = itertools.count()
-        self._order_seq = itertools.count(1)
+        # continue a run's numbering: a restarted session must not reuse (and overwrite) its orders
+        self._order_seq = itertools.count(self.ledger.last_order_number() + 1)
         self._next_clock: int | None = None
         self._opens: list[tuple[int, str]] = []
         self._closes: list[tuple[int, str]] = []

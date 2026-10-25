@@ -128,6 +128,7 @@ class Api:
                     "strategies": len(v.summaries),
                     "last_ts": v.last_ts,
                     "running": session is not None,
+                    **self._money_split(r, v),
                 }
             )
         return out
@@ -157,14 +158,59 @@ class Api:
             out[iid] = str(k or ("live" if r.mode == "live" else "sim"))
         return out
 
-    def money(self, r: queries.Run, money: str | None, instance: str | None) -> str | list[str] | None:
-        """The instance filter for a history query: one instance, or the real-money (or simulated) ones."""
+    def money(
+        self, r: queries.Run, money: str | None, instance: str | None
+    ) -> tuple[str | list[str] | None, bool | None]:
+        """The filters for a history query: (instances, real). Runs that record each order's kind
+        filter by it (an instance can be paper first and live later); older runs by instance."""
         if not money:
-            return instance
+            return instance, None
         if money not in ("real", "simulated"):
             raise ValueError("money is real or simulated")
+        if queries.kinds_recorded(r):
+            return instance, money == "real"
         ids = [i for i, k in self.kinds(r).items() if (k == "live") == (money == "real")]
-        return [i for i in ids if i == instance] if instance else ids
+        return ([i for i in ids if i == instance] if instance else ids), None
+
+    def _money_split(self, r: queries.Run, v: queries.RunView) -> dict[str, Any]:
+        """For the runs list: whether the run is live (has real money) and, if so, its real and
+        simulated P&L apart; a session run is "live" or "paper" by its strategies."""
+        kinds = self.kinds(r)
+        if queries.kinds_recorded(r):
+            by_kind = queries.pnl_by_kind(r)
+            real = "live" in kinds.values() or any("live" in k for k in by_kind.values())
+            split = {
+                "pnl_real": sum(k.get("live", 0.0) for k in by_kind.values()),
+                "pnl_simulated": sum(x for k in by_kind.values() for kind, x in k.items() if kind != "live"),
+            }
+        else:
+            real = r.mode == "live" or "live" in kinds.values()
+            summaries = {s.instance: s for s in v.summaries}
+            split = {
+                "pnl_real": sum(
+                    s.pnl
+                    for k, s in summaries.items()
+                    if kinds.get(k, "live" if r.mode == "live" else "sim") == "live"
+                ),
+                "pnl_simulated": sum(s.pnl for k, s in summaries.items() if kinds.get(k, "sim") != "live"),
+            }
+        label = r.mode if r.mode in ("backtest",) else ("live" if real else "paper")
+        return {"label": label, **(split if real else {})}
+
+    def twins(self, r: queries.Run, info: dict[str, Any] | None = None) -> dict[str, str]:
+        """Live id -> its paper twin's id, from the twin_of each strategy recorded."""
+        info = queries.strategy_info(r) if info is None else info
+        return {
+            str(i["twin_of"]): iid for iid, i in info.items() if i.get("twin_of") and i["twin_of"] in info
+        }
+
+    def is_real(self, r: queries.Run) -> bool:
+        """Whether a run trades real money now: actions on it need the run's name typed."""
+        if r.mode == "live":
+            return True
+        session, _ = self.control(r.name)
+        brokers = (session or {}).get("state", {}).get("brokers", {})
+        return any(b.get("kind") == "live" for b in brokers.values())
 
     def snapshot(self, mode: str, name: str) -> dict[str, Any]:
         r = self.run_or_404(mode, name)
@@ -210,14 +256,21 @@ class Api:
         snap["trade_total"] = queries.trade_summary(r)["trades"]
         kinds = self.kinds(r, info, state)
         snap["kinds"] = kinds
-        real = [s for k, s in summaries.items() if kinds.get(k) == "live"]
-        if real:  # real money and simulated, never one total
-            snap["stats"]["pnl_real"] = sum(s.pnl for s in real)
-            snap["stats"]["pnl_simulated"] = sum(
-                s.pnl for k, s in summaries.items() if kinds.get(k) != "live"
-            )
-        other = queries.counterpart(self.data, r)
-        snap["counterpart"] = other.name if other else None
+        if queries.kinds_recorded(r):  # by what each fill and settlement was
+            by_kind = queries.pnl_by_kind(r)
+            snap["pnl_kinds"] = by_kind
+            real_pnl = sum(k.get("live", 0.0) for k in by_kind.values())
+            sim_pnl = sum(v for k in by_kind.values() for kind, v in k.items() if kind != "live")
+            has_real = "live" in kinds.values() or any("live" in k for k in by_kind.values())
+        else:  # older runs: by each instance's broker
+            real_pnl = sum(s.pnl for k, s in summaries.items() if kinds.get(k) == "live")
+            sim_pnl = sum(s.pnl for k, s in summaries.items() if kinds.get(k) != "live")
+            has_real = "live" in kinds.values()
+        if has_real:  # real money and simulated, never one total
+            snap["stats"]["pnl_real"] = real_pnl
+            snap["stats"]["pnl_simulated"] = sim_pnl
+        snap["real"] = has_real
+        snap["twins"] = self.twins(r, info)
         shown |= {t["market_id"] for t in snap["trades"]}
         snap["names"] = queries.names(r, shown)
         return snap
@@ -334,7 +387,7 @@ class Api:
         run = f"{mode}/{name}"
         if queries.run_by_name(self.data, run) is None:
             raise HTTPException(404, f"no run {run}")
-        if mode == "live" and cmd.confirm != name:
+        if self.is_real(queries.run_by_name(self.data, run)) and cmd.confirm != name:  # type: ignore[arg-type]
             raise HTTPException(400, f"type {name} to confirm actions on a live run")
         store = ControlStore(self.control_path)
         try:
@@ -413,8 +466,14 @@ def router(api: Api) -> APIRouter:
         """The run's whole trade history, filtered and paged; format=csv downloads every match."""
         run = api.run_or_404(mode, name)
         try:
-            who = api.money(run, money, instance)
-            f: dict[str, Any] = {"instance": who, "outcome": outcome or None, "since": since, "until": until}
+            who, real = api.money(run, money, instance)
+            f: dict[str, Any] = {
+                "instance": who,
+                "real": real,
+                "outcome": outcome or None,
+                "since": since,
+                "until": until,
+            }
             if format == "csv":
                 rows = queries.trades(run, limit=10**9, **f)
                 return _csv(f"{name}-trades.csv", rows, queries.names(run, {t["market_id"] for t in rows}))
@@ -443,8 +502,8 @@ def router(api: Api) -> APIRouter:
         """The run's whole order history, filtered (view: look, stops, or one result) and paged."""
         run = api.run_or_404(mode, name)
         try:
-            who = api.money(run, money, instance)
-            f: dict[str, Any] = {"instance": who, "since": since, "until": until}
+            who, real = api.money(run, money, instance)
+            f: dict[str, Any] = {"instance": who, "real": real, "since": since, "until": until}
             if format == "csv":
                 rows = [_activity(a) for a in queries.activity(run, limit=10**9, view=view or None, **f)]
                 return _csv(f"{name}-orders.csv", rows, queries.names(run, {a["market_id"] for a in rows}))
@@ -462,15 +521,14 @@ def router(api: Api) -> APIRouter:
 
     @r.get("/runs/{mode}/{name}/compare")
     def compare(mode: str, name: str) -> dict[str, Any]:
-        """This run beside the same experiment's run in the other mode (paper vs live)."""
+        """Each live strategy beside its paper twin, in this run."""
         run = api.run_or_404(mode, name)
-        other = queries.counterpart(api.data, run)
-        if other is None:
+        twins = api.twins(run)
+        if not twins:
             raise HTTPException(
-                404, f"no {'live' if mode == 'paper' else 'paper'} run of {name} to compare with"
+                404, f"no live strategy in {mode}/{name} has a paper twin (quanty promote adds one)"
             )
-        paper, live = (run, other) if mode == "paper" else (other, run)
-        return queries.compare(paper, live)
+        return queries.compare_twins(run, twins)
 
     @r.post("/runs/{mode}/{name}/control")
     async def control(request: Request, mode: str, name: str, cmd: Command) -> dict[str, Any]:

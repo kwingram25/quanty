@@ -8,7 +8,7 @@ export function RunsPage() {
   const { data, error } = usePoll<RunRow[]>("/api/runs", 3000);
   return (
     <div className="page">
-      <div className="list-head"><h1>Runs</h1><span className="muted">live, paper and backtest ledgers</span></div>
+      <div className="list-head"><h1>Runs</h1><span className="muted">each experiment's sessions, and backtests</span></div>
       {error && <p className="empty">Can't reach the server: {error}</p>}
       {data && data.length === 0 && (
         <p className="empty">No runs yet. <code>quanty demo --live</code> starts one; <code>quanty paper</code> and
@@ -22,10 +22,14 @@ export function RunsPage() {
                 <h3>{r.name.split("/")[1]}</h3>
                 <span style={{ display: "flex", gap: 6 }}>
                   {r.running && <span className="pill running"><span className="dot" />running</span>}
-                  <span className={`pill ${r.mode}`}><span className="dot" />{r.mode}</span>
+                  <span className={`pill ${r.label ?? r.mode}`}><span className="dot" />{r.label ?? r.mode}</span>
                 </span>
               </div>
-              <div className={`big ${tone(r.pnl)}`}>{money(r.pnl)}</div>
+              {r.pnl_real != null ? (
+                <div className="split"><span><span className="muted small">Real money</span>
+                  <b className={`big ${tone(r.pnl_real)}`}>{money(r.pnl_real)}</b></span>
+                  <span><span className="muted small">Simulated</span> <b className={tone(r.pnl_simulated)}>{money(r.pnl_simulated ?? 0)}</b></span></div>
+              ) : <div className={`big ${tone(r.pnl)}`}>{money(r.pnl)}</div>}
               <div className="meta">{r.strategies} strategies · {r.fills} fills
                 {r.errors ? ` · ${r.errors} errors` : ""} · {ago(r.last_ts)}</div>
             </Link>

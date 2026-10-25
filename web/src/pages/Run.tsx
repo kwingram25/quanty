@@ -1,6 +1,6 @@
 import { motion } from "motion/react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Link, useParams } from "react-router-dom";
+import { useParams } from "react-router-dom";
 import { historyQuery, useHistory, usePoll, useRunStream, type ActivityRow, type NewRows, type OrderStats, type Snapshot, type Trade, type TradeSummary } from "../api";
 import { AnimatedNumber } from "../components/AnimatedNumber";
 import { Markets } from "../components/Markets";
@@ -76,10 +76,8 @@ function Run({ snap, live }: { snap: Snapshot; live: boolean }) {
       <div className="run-head">
         <div className="run-title">
           <h1>{snap.run.name.split("/")[1]}
-            <span className={`pill ${snap.run.mode}`}><span className="dot" />{snap.run.mode}</span>
-            {snap.counterpart && <Link className="pill link" to={`/runs/${snap.counterpart}`}
-              title={`The same experiment's ${snap.counterpart.split("/")[0]} run (the Compare tab puts them side by side)`}>
-              ↔ {snap.counterpart}</Link>}
+            <span className={`pill ${runLabel(snap)}`}><span className="dot" />{runLabel(snap)}</span>
+
             {snap.session && <span className="pill running" title={live ? "updates pushed live" : "reconnecting"}>
               <span className="dot" />running</span>}
             {snap.session?.platforms?.map((p) => (
@@ -182,6 +180,12 @@ function LoadingDay({ progress }: { progress: number }) {
   );
 }
 
+const hasTwins = (snap: Snapshot) => Object.keys(snap.twins ?? {}).length > 0;
+
+/** "live" when the run has real money, else "paper" (or its mode, for a backtest). */
+export const runLabel = (snap: Snapshot): string =>
+  snap.run.mode === "backtest" ? "backtest" : snap.real || snap.run.mode === "live" ? "live" : "paper";
+
 const TABS = ["chart", "trades", "orders", "commands", "compare"] as const;
 type Tab = (typeof TABS)[number];
 
@@ -195,12 +199,12 @@ function Center({ snap, slots, halted, chart }: {
   const [tab, setTab] = useState<Tab>(() => {
     try {
       const t = sessionStorage.getItem("tab:run") as Tab;
-      return TABS.includes(t) && (t !== "compare" || !!snap.counterpart) ? t : "chart";
+      return TABS.includes(t) && (t !== "compare" || hasTwins(snap)) ? t : "chart";
     } catch { return "chart"; }
   });
   const pick = (t: Tab) => { setTab(t); try { sessionStorage.setItem("tab:run", t); } catch { /* private mode */ } };
-  // Compare only for a paper or live run whose other half exists
-  const tabs = TABS.filter((t) => t !== "compare" || !!snap.counterpart);
+  // Compare only when a live strategy has a paper twin to compare with
+  const tabs = TABS.filter((t) => t !== "compare" || hasTwins(snap));
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.target instanceof HTMLInputElement || e.target instanceof HTMLSelectElement || e.metaKey || e.ctrlKey || e.altKey) return;
@@ -246,7 +250,7 @@ function Center({ snap, slots, halted, chart }: {
         {tab === "trades" && <Trades snap={snap} slots={slots} />}
         {tab === "orders" && <Orders snap={snap} slots={slots} />}
         {tab === "commands" && <Commands snap={snap} />}
-        {tab === "compare" && snap.counterpart && <Compare snap={snap} />}
+        {tab === "compare" && hasTwins(snap) && <Compare snap={snap} />}
       </div>
     </section>
   );
@@ -411,7 +415,7 @@ interface Side {
   win_rate: number | null; stops: number; pnl: number; pnl_per_trade: number | null;
   avg_paid: number | null; vs_limit: number | null; fees_per_contract: number | null; contracts: number;
 }
-interface Comparison { paper: string; live: string; since: number | null; instances: Record<string, { paper: Side; live: Side }> }
+interface Comparison { pairs: Record<string, { twin: string; since: number | null; live: Side; paper: Side }> }
 
 const pctv = (v: number | null) => (v == null ? "–" : `${Math.round(v * 100)}%`);
 const signedCents = (v: number | null) => (v == null ? "–" : `${v > 0 ? "+" : v < 0 ? "−" : ""}${cents(Math.abs(v))}`);
@@ -441,38 +445,36 @@ function delta(m: (typeof METRICS)[number], a: number | null, b: number | null):
   return `${sign}${Math.abs(d)}`;
 }
 
-/** Paper and live side by side, per strategy, over the time both ran: is live doing what paper did? */
+/** Each live strategy beside its paper twin, in the same session: the same markets at the same
+ * moments, real fills against simulated ones. */
 function Compare({ snap }: { snap: Snapshot }) {
   const { data, error } = usePoll<Comparison>(`/api/runs/${snap.run.name}/compare`, 5000);
   if (error) return <p className="empty" style={{ padding: 16 }}>Couldn't compare: {error}</p>;
   if (!data) return <p className="empty" style={{ padding: 16 }}>Loading…</p>;
-  const ids = Object.keys(data.instances);
   const ref = snap.session?.now ?? snap.run.last_ts ?? Date.now();
   return (
     <>
       <p className="trades-summary compare-note">
-        <Link to={`/runs/${data.paper}`}>{data.paper}</Link> beside <Link to={`/runs/${data.live}`}>{data.live}</Link>
-        {data.since != null && <>, over the time both ran: since {when(data.since, ref)}</>}.
-        {" "}Differences in fill rate and fills vs limit show how far paper's simulated fills are from the venue's.
+        Each live strategy beside its paper twin: the same strategy and params on a simulated broker, in the same
+        session, so both saw the same markets at the same moments. Differences in fill rate and fills vs limit show
+        how far paper's simulated fills are from the venue's.
       </p>
-      {ids.length === 0 ? <p className="empty" style={{ padding: 16 }}>No strategy has orders in both runs yet.</p> : ids.map((iid) => {
-        const { paper, live } = data.instances[iid];
-        return (
-          <table key={iid} className="compare">
-            <thead><tr><th>{iid}</th><th className="r">Paper</th><th className="r">Live</th><th className="r">Live − paper</th></tr></thead>
-            <tbody>
-              {METRICS.map((m) => (
-                <tr key={m.key}>
-                  <td title={m.hint}>{m.label}</td>
-                  <td className="r num">{m.fmt(paper[m.key] as number | null)}</td>
-                  <td className="r num">{m.fmt(live[m.key] as number | null)}</td>
-                  <td className="r num muted">{delta(m, paper[m.key] as number | null, live[m.key] as number | null)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        );
-      })}
+      {Object.entries(data.pairs).map(([iid, { twin, since, live, paper }]) => (
+        <table key={iid} className="compare">
+          <thead><tr><th>{iid} <span className="muted small">vs {twin}{since != null && <>, since {when(since, ref)}</>}</span></th>
+            <th className="r">Paper twin</th><th className="r">Live</th><th className="r">Live − paper</th></tr></thead>
+          <tbody>
+            {METRICS.map((m) => (
+              <tr key={m.key}>
+                <td title={m.hint}>{m.label}</td>
+                <td className="r num">{m.fmt(paper[m.key] as number | null)}</td>
+                <td className="r num">{m.fmt(live[m.key] as number | null)}</td>
+                <td className="r num muted">{delta(m, paper[m.key] as number | null, live[m.key] as number | null)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      ))}
     </>
   );
 }

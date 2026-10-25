@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 
-export type Mode = "live" | "paper" | "backtest";
+/** session: an experiment's paper and live sessions in one run; live and paper: older runs, one per mode */
+export type Mode = "session" | "live" | "paper" | "backtest";
 
 export interface RunRow {
   name: string;
@@ -11,6 +12,10 @@ export interface RunRow {
   strategies: number;
   last_ts: number | null;
   running: boolean;
+  /** live (has real money), paper or backtest; with pnl_real / pnl_simulated apart when live */
+  label?: string;
+  pnl_real?: number;
+  pnl_simulated?: number;
 }
 
 export interface Strategy {
@@ -154,8 +159,12 @@ export interface Snapshot {
   trades: Trade[];
   /** positions over the whole run */
   trade_total?: number;
-  /** the same experiment's run in the other mode (paper/x for live/x, and back), if there is one */
-  counterpart?: string | null;
+  /** live instance -> its paper twin (`quanty promote` keeps one), for the Compare tab */
+  twins?: Record<string, string>;
+  /** whether the run has real money (its live strategies, or real orders in its history) */
+  real?: boolean;
+  /** realized P&L per instance and kind, from what each fill and settlement recorded */
+  pnl_kinds?: Record<string, Record<string, number>>;
 }
 
 /** One position a strategy took: what it bought, what it cost and how it ended. */

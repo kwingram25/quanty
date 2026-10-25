@@ -2,9 +2,13 @@
 editing its experiment file (comments and layout kept), so paper becomes shadow becomes live, or back.
 
 It only edits the file. Nothing trades until `quanty paper` or `quanty live --arm` runs it; a
-running session keeps its brokers until restarted. Dashboard edits to the instance's params, which
-are kept per run and so would not follow it to the other run (paper/<experiment> vs
-live/<experiment>), are written into its [instances.params] first.
+running session keeps its brokers until restarted. Paper and live sessions of an experiment record
+into one run, so the instance keeps its history; each order records whether it was real money.
+
+Going live keeps a paper twin (`<id>_paper`, `twin_of = "<id>"`): the same strategy, params and
+limits on the simulated broker it came from, in the same session, so the dashboard's Compare puts
+live fills beside simulated ones on the same markets at the same moments. Stepping back removes it.
+Dashboard edits to the instance's params are written into the file first, so both start equal.
 """
 
 import tomllib
@@ -30,6 +34,8 @@ class Promotion:
     added_broker: bool = False
     carried: dict[str, Any] = field(default_factory=dict)  # dashboard edits written into the file
     pinned: list[str] = field(default_factory=list)  # other instances given their broker explicitly
+    twin_added: str | None = None
+    twin_removed: str | None = None
 
     def lines(self) -> list[str]:
         was, now = f"{self.from_broker} ({self.from_kind})", f"{self.to_broker} ({self.to_kind})"
@@ -45,6 +51,12 @@ class Promotion:
                 "carried dashboard edits into the file: "
                 + ", ".join(f"{k} = {v}" for k, v in self.carried.items())
             )
+        if self.twin_added:
+            out.append(
+                f"added its paper twin {self.twin_added} on {self.from_broker}, for the dashboard's Compare"
+            )
+        if self.twin_removed:
+            out.append(f"removed its paper twin {self.twin_removed} (its history stays in the run)")
         return out
 
 
@@ -57,10 +69,12 @@ def promote(
     max_qty: float | None = None,
     max_notional: float | None = None,
     overrides: dict[str, Any] | None = None,
+    twin: bool = True,
 ) -> Promotion:
     """Edit the experiment at `path` so `instance` runs on a `to` broker: `broker` names one (made if
     missing), else the first broker of that kind, else a new one. A new live broker needs max_qty and
-    max_notional. `overrides` (the instance's dashboard edits) are written into its params."""
+    max_notional. `overrides` (the instance's dashboard edits) are written into its params. twin:
+    going live from paper adds a paper twin; going back removes it."""
     if to not in KINDS:
         raise ValueError(f"--to must be one of {', '.join(KINDS)}")
     exp = experiment.load(path)  # a valid file to start from
@@ -117,6 +131,25 @@ def promote(
         for k, v in overrides.items():
             entry["params"][k] = v
         result.carried = dict(overrides)
+    twins = [i for i, e in enumerate(entries) if e.get("twin_of") == instance]
+    if to == "live" and from_kind != "live" and twin and not twins:
+        name = _free_id(f"{instance}_paper", exp)
+        copy = tomlkit.table()
+        copy["id"] = name
+        for k in ("strategy", "series"):
+            if k in entry:
+                copy[k] = entry[k]
+        copy["broker"] = from_name
+        copy["twin_of"] = instance
+        for k in ("params", "limits"):
+            if k in entry:
+                copy[k] = tomlkit.parse(tomlkit.dumps({k: entry[k]}))[k]  # a copy, comments and all
+        entries.insert(next(i for i, e in enumerate(entries) if e.get("id") == instance) + 1, copy)
+        result.twin_added = name
+    elif to != "live" and twins:
+        result.twin_removed = str(entries[twins[0]].get("id"))
+        for i in reversed(twins):
+            del entries[i]
     text = tomlkit.dumps(doc)
     try:
         experiment.parse(tomllib.loads(text), source=path.name)
@@ -128,6 +161,14 @@ def promote(
     return result
 
 
+def _free_id(name: str, exp: experiment.Experiment) -> str:
+    ids = {i.id for i in exp.instances}
+    n, i = name, 2
+    while n in ids:
+        n, i = f"{name}{i}", i + 1
+    return n
+
+
 def _free(name: str, exp: experiment.Experiment) -> str:
     n, i = name, 2
     while n in exp.brokers:
@@ -135,9 +176,9 @@ def _free(name: str, exp: experiment.Experiment) -> str:
     return n
 
 
-def run_name(path: Path, exp: experiment.Experiment) -> str:
-    """The dashboard run this experiment writes to: live/<name> with a live broker, else paper/<name>."""
-    return f"{'live' if experiment.live_brokers(exp) else 'paper'}/{path.stem}"
+def run_name(path: Path) -> str:
+    """The dashboard run this experiment's sessions write to, paper or live: session/<name>."""
+    return f"session/{path.stem}"
 
 
 def needs_caps(path: Path, to: str, broker: str | None) -> bool:

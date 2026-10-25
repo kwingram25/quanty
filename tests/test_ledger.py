@@ -64,3 +64,29 @@ def test_enums_are_stored_as_values(tmp_path: Path) -> None:
             "buy",
             "taker",
         )
+
+
+def test_a_restarted_session_continues_the_runs_order_numbers(tmp_path: Path) -> None:
+    from quanty import synthetic
+    from quanty.brokers.sim import SimBroker
+    from quanty.core import Engine, Instance, Ledger
+    from quanty.experiment import strategy_class
+    from quanty.plugins import discover
+
+    cls = strategy_class(discover([], local=None)["example_favorite"])
+    path = tmp_path / "run.sqlite"
+    counts = []
+    for i in range(2):  # the same run, two sessions
+        ledger = Ledger(path)
+        spec = synthetic.Spec(hours=3, seed=i, start_ms=synthetic.Spec().start_ms + i * 3 * 3_600_000)
+        Engine([Instance("s", cls(cls.params_type()), SimBroker(fees=synthetic.FEES))], ledger=ledger).run(
+            synthetic.events(spec)
+        )
+        counts.append(len(ledger.execute(select(OrderRow.id)).all()))
+        ledger.close()
+    second = synthetic.Spec().start_ms + 3 * 3_600_000
+    ledger = Ledger(path)
+    first = ledger.execute(select(OrderRow.id).where(OrderRow.created_ts < second)).all()
+    ledger.close()
+    assert counts[0] > 0 and len(first) == counts[0]  # the first session's orders all still there
+    assert counts[1] > counts[0]

@@ -44,6 +44,9 @@ class Ledger:
         self._markets: dict[str, dict[str, Any]] = {}  # latest description per market id
         self._rows: dict[type[Any], list[dict[str, Any]]] = {FillRow: [], SettlementRow: [], LogRow: []}
         self._pending = 0
+        # instance -> its broker's kind (live = real money), set by the engine; recorded on every
+        # order, fill and settlement, so one run can hold an instance's paper days and its live ones
+        self.kinds: dict[str, str] = {}
 
     # --- writes ---
 
@@ -63,6 +66,7 @@ class Ledger:
             "status": o.status,
             "filled": o.filled,
             "reason": o.reason,
+            "kind": self.kinds.get(o.instance, "sim"),
         }
         self._wrote()
 
@@ -94,6 +98,7 @@ class Ledger:
             fee=f.fee,
             liquidity=f.liquidity,
             realized=realized,
+            kind=self.kinds.get(instance, "sim"),
         )
 
     def settlement(self, s: Settlement) -> None:
@@ -106,6 +111,7 @@ class Ledger:
             qty=s.qty,
             payout=s.payout,
             pnl=s.pnl,
+            kind=self.kinds.get(s.instance, "sim"),
         )
 
     def log(
@@ -158,6 +164,12 @@ class Ledger:
         self.commit()
         with Session(self.engine) as session:
             return session.execute(stmt).freeze()()  # detached, usable after the session closes
+
+    def last_order_number(self) -> int:
+        """The highest order number this ledger holds (ids are "<instance>-<n>"), so a session
+        continuing a run numbers its orders after the previous session's instead of reusing them."""
+        ids = [*self._orders, *(r[0] for r in self.execute(select(OrderRow.id)))]
+        return max((int(i.rsplit("-", 1)[1]) for i in ids if i.rsplit("-", 1)[-1].isdigit()), default=0)
 
     def summary(self) -> list[Summary]:
         return summarize(self.execute)

@@ -53,6 +53,7 @@ class OrderRow(Base):
     status: Mapped[OrderStatus]
     filled: Mapped[float]
     reason: Mapped[str]
+    kind: Mapped[str] = mapped_column(default="sim", server_default="sim")  # its broker's: live = real money
 
 
 class FillRow(Base):
@@ -71,6 +72,7 @@ class FillRow(Base):
     fee: Mapped[float]
     liquidity: Mapped[Liquidity]
     realized: Mapped[float]
+    kind: Mapped[str] = mapped_column(default="sim", server_default="sim")
 
 
 class SettlementRow(Base):
@@ -85,6 +87,7 @@ class SettlementRow(Base):
     qty: Mapped[float]
     payout: Mapped[float]
     pnl: Mapped[float]
+    kind: Mapped[str] = mapped_column(default="sim", server_default="sim")
 
 
 class LogRow(Base):
