@@ -4,7 +4,7 @@ From a fresh clone to a strategy trading live, one step at a time. Each step is 
 stop wherever you like.
 
 **Requirements:** Python 3.12+ and [uv](https://docs.astral.sh/uv/). Recording and trading on
-Kalshi or Polymarket US need API keys; everything up to step 3 doesn't.
+Kalshi or Polymarket US need API keys; everything up to step 4 doesn't.
 
 ## 1. See it work
 
@@ -31,15 +31,36 @@ uv run quanty demo --hours 24 --seed 3 --param min_conf=0.97   # one variant, yo
 uv run quanty params example_favorite                          # what you can change
 ```
 
-## 2. Run an experiment
+## 2. Start your project
+
+Your strategies, configs and keys live in a project of your own, not in this clone:
+
+```sh
+uv run quanty init ~/code/my-quanty     # a few questions (strategy name, venues, keys); --yes for defaults
+cd ~/code/my-quanty
+git init && git add -A && git commit -m "my quanty project"   # .env and data/ are already ignored
+```
+
+It holds `strategies/<name>.py` (a skeleton aimed at your first series), `experiments/main.toml`,
+`feeds.toml`, `.env` (your keys, readable only by you) and the files to deploy it. `uv run quanty`
+works in it with nothing installed first, and every command below runs there. Keep the repo
+private and push it somewhere backed up: your strategies are your edge. quanty itself is just a
+dependency of it.
+
+## 3. Run an experiment
 
 An experiment is a TOML file: which strategies, with which parameters, on which brokers, under
 which risk limits.
 
 ```sh
-uv run quanty backtest experiments/example.toml --hours 24 --ledger data/backtest/example.sqlite
+uv run quanty backtest experiments/main.toml --ledger data/backtest/first.sqlite
 uv run quanty ui --data data           # the run is now on the dashboard
 ```
+
+Without `--data`, a backtest runs on built-in synthetic markets: 5-minute up/down windows. A
+strategy written for a venue's series doesn't trade there (the backtest says so);
+`uv run quanty demo --strategy <name>` points it at the synthetic markets to try its logic, and
+step 5 backtests on real recordings.
 
 ```toml
 clock_ms = 1000                # on_clock every second (optional)
@@ -65,21 +86,27 @@ field, never a silent default. Risk limits: `max_order_qty`, `max_position`, `ma
 (worst-case loss, netted across the outcomes of one question), `max_group_risk` (per correlation
 group, e.g. all markets on one index) and `max_daily_loss`.
 
-## 3. Write your own strategy
+## 4. Write your own strategy
+
+Your strategy is `strategies/<name>.py` in the project (fill in the TODOs; more strategies are more
+files there). See [Writing strategies](strategies.md).
 
 ```sh
-cp strategies/_template.py strategies/my_idea.py      # gitignored
+uv run quanty list                      # it's found (an import error shows here)
+uv run quanty params <name>             # and its params
+uv run quanty demo --strategy <name>    # a quick run on synthetic markets
 ```
 
-See [Writing strategies](strategies.md). Keep strategies you care about out of this repo
-entirely by pointing quanty at your own folder:
+To share one private strategy library between several projects, point quanty at its folder in your
+user config. That works on your machine; a deployed project only carries its own `strategies/`, so
+copy in what a server should run.
 
 ```toml
 # ~/.config/quanty/config.toml
 strategy_paths = ["~/code/my-strategies/strategies"]
 ```
 
-## 4. Record real data
+## 5. Record real data
 
 Public crypto feeds need no keys:
 
@@ -88,8 +115,8 @@ uv run quanty record --feed coinbase --feed binance --data data      # Ctrl-C to
 uv run quanty feeds health --data data
 ```
 
-For Kalshi and Polymarket US, copy `.env.example` to `.env`, add your keys, and copy
-`feeds.example.toml` to `feeds.toml` to choose series:
+For Kalshi and Polymarket US, your keys are in the project's `.env` (`quanty init` asked for them;
+`uv run quanty doctor` checks them) and its `feeds.toml` chooses the series:
 
 ```sh
 uv run quanty record --config feeds.toml --data data
@@ -101,13 +128,13 @@ a live run would have seen:
 
 ```sh
 uv run quanty replay --data data --show 5
-uv run quanty backtest experiment.toml --data data --start "2026-10-21 00:00" --end "2026-10-22 00:00"
+uv run quanty backtest experiments/main.toml --data data --start "2026-10-21 00:00" --end "2026-10-22 00:00"
 ```
 
-## 5. Paper trade
+## 6. Paper trade
 
 ```sh
-uv run quanty paper experiment.toml --feeds feeds.toml --data data
+uv run quanty paper experiments/main.toml --feeds feeds.toml --data data --ui
 ```
 
 Strategies run in real time on live feeds; fills are simulated by the same broker model as
@@ -116,14 +143,14 @@ backtests. Recording continues alongside, and the ledger is written as it goes
 kill switch), and a strategy's params, such as its size, can be edited from its details without a
 restart.
 
-## 6. Shadow trade
+## 7. Shadow trade
 
 Change a broker to `kind = "shadow"`. Fills are still simulated, but every order is also turned
 into the exact request the venue would receive and checked: Polymarket US validates it
 server-side without placing it; Kalshi requests are built, signed and checked locally. This
 catches tick, size and permission problems, and measures real round trips, with no risk.
 
-## 7. Trade live
+## 8. Trade live
 
 Read [Live trading](live-trading.md) first.
 

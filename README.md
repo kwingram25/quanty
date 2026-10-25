@@ -73,8 +73,9 @@ paper trading, shadow trading and live trading; [Deploying](docs/deploying.md) c
   resume, disarm, kill switch, go live or back to paper, reload, and editing a strategy's params
   while it runs (saved to the file, or brought home from a server with `quanty pull`). Optional
   password login for reaching it over HTTPS.
-- **Private strategies.** Strategies load from folders in your own config, so your edge never has
-  to live in this repo.
+- **Your strategies stay yours.** They live in your own project (`quanty init` makes one, its own
+  private repo), with quanty as a dependency; nothing of yours is ever in the framework. A
+  folder named in your user config can share a private strategy library across projects.
 
 ## Docs
 
