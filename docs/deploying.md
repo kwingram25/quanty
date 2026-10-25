@@ -100,10 +100,22 @@ is private. To update the wheel after pulling a newer quanty: `uv build --wheel 
 
 ### Editing strategies on a server
 
-Dashboard edits to a strategy's params apply at once and survive restarts (they're kept in `data/`),
-but the experiment file in the image is replaced on every deploy, so the dashboard offers **Copy for
-the file** there: paste the lines into `experiments/main.toml` on your machine and deploy, or press
-**Reset to file** to drop the edit.
+Your local project is the source of truth; a server never rewrites it. Dashboard changes on a
+server (param edits, **Go live** / **Back to paper**, paper twins) take effect at once and survive
+restarts and deploys, kept with the run in the server's `data/`. The server's own copy of the
+experiment file isn't touched: `quanty deploy` marks the folder it puts there (and a container
+says so itself), because the next deploy replaces those files.
+
+To bring the changes home:
+
+```sh
+uv run quanty pull root@203.0.113.7     # writes them into experiments/*.toml here; review and commit
+```
+
+`quanty deploy` does the same first, so a deploy never undoes what you changed on the dashboard
+(`--no-pull` skips it). Changes it can't place, for an instance or broker your local file no longer
+has, are listed rather than dropped. On the server, `quanty changes` lists what it's holding, and
+the dashboard offers **Copy for the file** for each change, the lines to paste by hand.
 
 ### API keys on a server
 

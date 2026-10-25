@@ -85,6 +85,8 @@ export interface SessionState {
     halted: boolean; broker: string; blocked?: number;
     /** removed from the experiment and reloaded: no new entries, what it holds finishes */
     retired?: boolean;
+    /** switched on this server and kept with the run, not yet in the experiment file */
+    switched?: { broker: string; kind: string; twin: string | null } | null;
     /** current params, and the names changed from the dashboard */
     params?: Record<string, unknown>; edited?: string[];
   }>;

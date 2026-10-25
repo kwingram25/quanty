@@ -209,7 +209,7 @@ function Details({ st, session, onEdit, onReset, onSave, onSwitch }: {
       {info.description && <p className="desc">{info.description}</p>}
       {info.strategy && <p className="muted small">strategy <code>{info.strategy}</code>{info.broker && <> · broker <code>{info.broker}</code></>}</p>}
 
-      {session && <SwitchBroker iid={st.instance} session={session} onSwitch={onSwitch} />}
+      {session && <SwitchBroker iid={st.instance} strategy={info.strategy} session={session} onSwitch={onSwitch} />}
 
       <h4>Markets it trades</h4>
       <div className="chips">
@@ -300,19 +300,34 @@ function Details({ st, session, onEdit, onReset, onSave, onSwitch }: {
 /** Going live or back to paper while the session runs: onto a broker the session already has (a
  * live one only in a session started with `quanty live --arm`). New markets use it; the markets the
  * strategy is in finish where they are. Going live also starts its paper twin, for Compare. */
-function SwitchBroker({ iid, session, onSwitch }: {
-  iid: string; session: SessionState; onSwitch: (broker: string, live: boolean) => Promise<boolean | null>;
+function SwitchBroker({ iid, strategy, session, onSwitch }: {
+  iid: string; strategy?: string; session: SessionState; onSwitch: (broker: string, live: boolean) => Promise<boolean | null>;
 }) {
+  const toast = useToast();
   const current = session.instances[iid]?.broker;
+  const held = session.instances[iid]?.switched;
   if (!current || !session.actions?.includes("switch")) return null;
   const kind = session.brokers[current]?.kind;
   const brokers = Object.entries(session.brokers).filter(([n]) => n !== current);
   const live = brokers.filter(([, b]) => b.kind === "live" && b.armed && !b.disabled && session.can_arm);
   const paper = brokers.filter(([, b]) => b.kind !== "live");
-  if (kind !== "live" && !live.length) return null;
+  if (kind !== "live" && !live.length && !held) return null;
+  const lines = held && [
+    `# in the [[instances]] entry with id = "${iid}"`, `broker = "${held.broker}"`,
+    ...(held.twin ? ["", "# its paper twin, a new entry", "[[instances]]", `id = "${held.twin}"`,
+      `strategy = "${strategy ?? "?"}"`, `broker = "${session.instances[held.twin]?.broker ?? "?"}"`, `twin_of = "${iid}"`] : []),
+  ].join("\n");
   return (
     <div className="switch-broker">
       <h4>Broker <span className="muted small">{current} ({kind === "live" ? "real money" : kind})</span></h4>
+      {held && (
+        <p className="muted small held">Switched on this server, not yet in your experiment file: <code>quanty pull</code> (or the
+          next <code>quanty deploy</code>) writes it there.{" "}
+          <button className="btn mini" onClick={async () => {
+            try { await navigator.clipboard.writeText(lines!); toast({ kind: "ok", title: "Copied for the experiment file" }); }
+            catch { toast({ kind: "warning", title: "Copy these lines into the experiment file", body: lines! }); }
+          }}>Copy for the file</button></p>
+      )}
       <div className="row-actions">
         {kind !== "live" ? live.map(([n]) => (
           <button key={n} className="btn danger-outline" onClick={() => onSwitch(n, true)}

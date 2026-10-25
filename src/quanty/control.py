@@ -62,6 +62,7 @@ ACTIONS = (
     "reload",
 )
 ALIVE_S = 10  # a session whose heartbeat is older than this is not running
+DEPLOYED_MARK = ".quanty-deployed"  # left by `quanty deploy` in a server's project folder
 
 meta = MetaData()
 commands = Table(
@@ -189,6 +190,19 @@ class ControlStore:
                     insert(overrides).values(run=run, instance=instance, params=params, updated_ts=now_ms())
                 )
 
+    def held_changes(self, run_prefix: str = "session/") -> dict[str, dict[str, Any]]:
+        """Dashboard changes held here, per run: what `quanty pull` brings into the experiment files."""
+        out: dict[str, dict[str, Any]] = {}
+        with self.engine.connect() as conn:
+            for r in conn.execute(select(overrides).where(overrides.c.run.startswith(run_prefix))).mappings():
+                out.setdefault(r["run"], {"params": {}, "switches": {}})["params"][r["instance"]] = dict(
+                    r["params"]
+                )
+            for r in conn.execute(select(switches).where(switches.c.run.startswith(run_prefix))).mappings():
+                entry = out.setdefault(r["run"], {"params": {}, "switches": {}})
+                entry["switches"][r["instance"]] = {"broker": r["broker"], "twin": r["twin"]}
+        return out
+
     def switches(self, run: str) -> dict[str, tuple[str, str | None]]:
         """instance -> (broker, twin) saved for a run."""
         with self.engine.connect() as conn:
@@ -272,6 +286,7 @@ class Controller:
         # (experiment, strategies) read afresh, for "reload"; set by a live session
         self.rebuild: Callable[[], tuple[Any, Mapping[str, Any]]] | None = None
         self.retired: set[str] = set()  # instances the experiment no longer has: exits only
+        self._saved_switches: dict[str, dict[str, Any]] = {}
         self.started_ts = now_ms()
         self.attach(trader)
 
@@ -297,6 +312,8 @@ class Controller:
                 continue
             try:
                 result = self._switch(iid, broker, twin is not None, persist=False)
+                kind = trader.brokers[broker].kind
+                self._saved_switches[iid] = {"broker": broker, "kind": kind, "twin": twin}
             except ValueError as exc:
                 self.store.set_switch(self.run, iid, None)
                 result = f"dropped a saved switch that no longer fits: {exc}"
@@ -314,13 +331,15 @@ class Controller:
 
     @property
     def save_mode(self) -> str | None:
-        """How edits reach the experiment file: "file" (written here), "copy" (this runs from a
-        container image, whose copy of the file a redeploy replaces: copy the lines instead), or None
-        (no file: a demo)."""
+        """How edits reach the experiment file: "file" (written here), "copy" (kept with the run; a
+        container image, or a project `quanty deploy` put on a server, whose files the next deploy
+        replaces: copy the lines, or `quanty pull` / `quanty deploy` brings them home), or None (no
+        file: a demo)."""
         if self.experiment is None:
             return None
+        deployed = any((d / DEPLOYED_MARK).exists() for d in self.experiment.resolve().parents[:3])
         writable = os.access(self.experiment, os.W_OK) and os.access(self.experiment.parent, os.W_OK)
-        return "copy" if os.environ.get("QUANTY_IN_IMAGE") or not writable else "file"
+        return "copy" if os.environ.get("QUANTY_IN_IMAGE") or deployed or not writable else "file"
 
     def _save_params(self, iid: str) -> str:
         from quanty import experiment
@@ -429,7 +448,9 @@ class Controller:
             self.file_params[made.id] = made.strategy.params
             self.file_set[made.id] = set(made.strategy.params.model_fields_set)
         if persist and not to_file:
-            self.store.set_switch(self.run, iid, broker_name, made.id if made else None)
+            twin_id = made.id if made else self._saved_switches.get(iid, {}).get("twin")
+            self.store.set_switch(self.run, iid, broker_name, twin_id)
+            self._saved_switches[iid] = {"broker": broker_name, "kind": new.kind, "twin": twin_id}
         where = f"; {len(stays)} market(s) it's in stay on {old.name}" if stays else ""
         twin_note = f"; paper twin {made.id} started on {old.name}" if made else ""
         return f"{iid}: new markets on {broker_name} ({new.kind}){where}{twin_note}"
@@ -475,6 +496,7 @@ class Controller:
                 "blocked": self.trader.blocked.get(iid, 0),
                 "params": inst.strategy.params.model_dump(mode="json"),
                 "retired": iid in self.retired,
+                "switched": self._saved_switches.get(iid),  # kept with the run, not yet in the file
                 "edited": sorted(self.edited(iid)),
             }
             for iid, inst in self.trader.instances.items()

@@ -54,6 +54,7 @@ def test_actions_apply_to_the_session(tmp_path: Path) -> None:
         "blocked": 0,
         "params": {},
         "retired": False,
+        "switched": None,
         "edited": [],
     }
 

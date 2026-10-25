@@ -3,6 +3,7 @@
 import asyncio
 import contextlib
 import dataclasses
+import json
 import random
 import shlex
 import subprocess
@@ -462,6 +463,48 @@ def reload(
 
 
 @app.command()
+def changes(
+    data: DataOpt = Path("data"),
+    as_json: Annotated[bool, typer.Option("--json", help="As JSON (what quanty pull reads)")] = False,
+) -> None:
+    """Dashboard changes this machine's sessions are holding, not yet in their experiment files."""
+    path = data / "control.sqlite"
+    held = ControlStore(path).held_changes() if path.exists() else {}
+    if as_json:
+        typer.echo(json.dumps(held))
+        return
+    if not held:
+        typer.echo("nothing held: the experiment files say it all")
+    for run, h in sorted(held.items()):
+        typer.echo(typer.style(run, bold=True))
+        for iid, params in sorted(h["params"].items()):
+            typer.echo(f"  {iid}: " + ", ".join(f"{k} = {v}" for k, v in params.items()))
+        for iid, sw in sorted(h["switches"].items()):
+            typer.echo(
+                f"  {iid}: broker {sw['broker']}" + (f" (paper twin {sw['twin']})" if sw.get("twin") else "")
+            )
+
+
+@app.command()
+def pull(
+    host: Annotated[str, typer.Argument(help="The server, as you'd give ssh")],
+    path: Annotated[Path, typer.Option(help="Project folder")] = Path("."),
+    to: Annotated[str | None, typer.Option(help="Folder on the server (default: the project's name)")] = None,
+) -> None:
+    """Bring the dashboard changes a server is holding (param edits, switches to live or paper)
+    into this project's experiment files. Review and commit them like any change."""
+    from quanty import pull as pl
+
+    try:
+        lines = pl.apply(path, pl.fetch(host, to or path.resolve().name))
+    except (ValueError, OSError) as exc:
+        raise _fail(exc) from None
+    typer.echo(
+        "\n".join(f"  {line}" for line in lines) if lines else "nothing to bring home: the files say it all"
+    )
+
+
+@app.command()
 def deploy(
     host: Annotated[
         str, typer.Argument(help="The server, as you'd give ssh: user@host or a ~/.ssh/config name")
@@ -472,10 +515,25 @@ def deploy(
     ] = None,
     check: Annotated[bool, typer.Option(help="Run `quanty doctor` on the server before starting")] = True,
     dry_run: Annotated[bool, typer.Option("--dry-run", help="Print the commands; run nothing")] = False,
+    bring_home: Annotated[
+        bool,
+        typer.Option("--pull/--no-pull", help="First bring the server's dashboard changes into the files"),
+    ] = True,
 ) -> None:
     """Copy this project to a server with Docker, check it there, and (re)start it. Run it again after
-    every change. Never sends or deletes data/."""
+    every change. Never sends or deletes data/. First brings the dashboard changes the server is
+    holding into your experiment files, so a deploy never undoes them."""
     from quanty import deploy as dp
+    from quanty import pull as pl
+
+    if bring_home and not dry_run:
+        try:
+            lines = pl.apply(path, pl.fetch(host, to or path.resolve().name))
+        except (ValueError, OSError) as exc:
+            raise _fail(exc) from None
+        if lines:
+            typer.echo("brought home from the server (now in your files; commit them):")
+            typer.echo("\n".join(f"  {line}" for line in lines))
 
     try:
         cmds = dp.commands(host, path, to or path.resolve().name, check=check)

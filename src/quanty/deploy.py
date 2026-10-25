@@ -13,7 +13,8 @@ data/ on the server (recordings, ledgers, the live order journal) is never sent 
 import shlex
 from pathlib import Path
 
-EXCLUDE = ("data/", ".venv/", ".git/", "__pycache__/", ".DS_Store")
+DEPLOYED_MARK = ".quanty-deployed"  # control.DEPLOYED_MARK
+EXCLUDE = ("data/", ".venv/", ".git/", "__pycache__/", ".DS_Store", DEPLOYED_MARK)
 
 
 def commands(host: str, project: Path, remote_dir: str, check: bool = True) -> list[list[str]]:
@@ -22,7 +23,9 @@ def commands(host: str, project: Path, remote_dir: str, check: bool = True) -> l
             raise ValueError(f"{project.resolve()} has no {need}: run this in a folder from `quanty init`")
     d = shlex.quote(remote_dir)
     rsync = ["rsync", "-az", "--delete", *(f"--exclude={x}" for x in EXCLUDE)]
-    steps = [f"cd {d}", "docker compose build"]
+    # the marker: sessions here keep dashboard changes with the run (the next deploy replaces these
+    # files); `quanty pull` and `quanty deploy` bring them into the local experiment files
+    steps = [f"cd {d}", f"touch {DEPLOYED_MARK}", "docker compose build"]
     if check:
         steps.append("docker compose run --rm --entrypoint quanty trader doctor")
     steps += ["docker compose up -d", "docker compose ps"]
