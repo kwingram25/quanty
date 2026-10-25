@@ -3,10 +3,15 @@ import { useEffect, useRef, useState } from "react";
 import { sendCommand, type SessionState, type Snapshot, type Strategy, type StrategyInfo } from "../api";
 import { cents, money, seriesName, tone } from "../format";
 import { AnimatedNumber } from "./AnimatedNumber";
+import { Id } from "./Id";
 import { useToast } from "./Toasts";
 
 /** Strategies with their P&L; for a running session, also its controls. */
-export function Strategies({ snap, slots }: { snap: Snapshot; slots: Record<string, number> }) {
+export function Strategies({ snap, slots, onHover, focus }: {
+  snap: Snapshot; slots: Record<string, number>; onHover?: (name: string | null) => void;
+  /** the strategies the chart draws in color; the others' swatches are gray, as their lines are */
+  focus?: Set<string>;
+}) {
   const s = snap.session;
   const run = snap.run.name;
   const toast = useToast();
@@ -44,8 +49,8 @@ export function Strategies({ snap, slots }: { snap: Snapshot; slots: Record<stri
         {snap.strategies.length === 0 && <p className="empty">No strategies have traded yet.</p>}
         {[...snap.strategies].sort((a, b) => Number(snap.kinds?.[b.instance] === "live") - Number(snap.kinds?.[a.instance] === "live")).map((st) => {
           const halted = pending[st.instance] ?? s?.instances[st.instance]?.halted ?? false;
-          return <Row key={st.instance} st={st} slot={slots[st.instance] ?? 1} session={s} halted={halted}
-            kind={snap.kinds?.[st.instance] ?? "sim"}
+          return <Row key={st.instance} st={st} slot={!focus || focus.has(st.instance) ? slots[st.instance] ?? 1 : 0} session={s} halted={halted}
+            kind={snap.kinds?.[st.instance] ?? "sim"} onHover={onHover}
             blocked={s?.instances[st.instance]?.blocked ?? 0} stops={snap.order_stats?.[st.instance]?.stops ?? 0}
             onToggle={() => act(halted ? "resume" : "halt", st.instance, `${halted ? "Resumed" : "Halted"} ${st.instance}`)}
             onEdit={(value) => act("params", st.instance, `Changed ${st.instance}`, "", value)}
@@ -80,8 +85,8 @@ export function KindBadge({ kind }: { kind: string }) {
 
 type Edit = (value: Record<string, unknown>) => Promise<boolean | null>;
 
-function Row({ st, slot, kind, session, halted, blocked, stops, onToggle, onEdit, onReset, onSave }: {
-  st: Strategy; slot: number; kind: string; session: SessionState | null; halted: boolean; blocked: number; stops: number;
+function Row({ st, slot, kind, onHover, session, halted, blocked, stops, onToggle, onEdit, onReset, onSave }: {
+  st: Strategy; slot: number; kind: string; onHover?: (name: string | null) => void; session: SessionState | null; halted: boolean; blocked: number; stops: number;
   onToggle: () => void;
   onEdit: Edit; onReset: () => Promise<boolean | null>; onSave: () => Promise<boolean | null>;
 }) {
@@ -108,12 +113,13 @@ function Row({ st, slot, kind, session, halted, blocked, stops, onToggle, onEdit
     }
   }, [st.pnl, flash, reduce]);
   return (
-    <motion.div className={`strategy ${halted ? "halted" : ""} ${kind === "live" ? "real" : ""}`} animate={flash} style={{ borderRadius: 8 }}>
+    <motion.div className={`strategy ${halted ? "halted" : ""} ${kind === "live" ? "real" : ""}`} animate={flash} style={{ borderRadius: 8 }}
+      onMouseEnter={() => onHover?.(st.instance)} onMouseLeave={() => onHover?.(null)}>
       <div className="top">
         <button className="name expander" aria-expanded={open} onClick={() => setOpen(!open)}
-          title={open ? "Hide details" : st.info?.description || "Show details"}>
+          title={[st.instance, open ? "Hide details" : st.info?.description || "Show details"].join(": ")}>
           <motion.span className="chev" animate={{ rotate: open ? 90 : 0 }} transition={{ duration: 0.15 }}>›</motion.span>
-          <i className="swatch" style={{ ["--c" as string]: `var(--series-${slot})` }} />{st.instance}
+          <i className="swatch" style={{ ["--c" as string]: `var(--series-${slot})` }} /><span className="label"><Id name={st.instance} /></span>
         </button>
         <KindBadge kind={kind} />
         <AnimatedNumber className={`pnl ${tone(st.pnl)}`} value={st.pnl} format={(v) => money(v)} />

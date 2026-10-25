@@ -101,5 +101,10 @@ export const nameOf = (names: Record<string, { title: string; subtitle: string }
 };
 
 /** Stable color slot per strategy name: sorted order, max 8 (the palette's validated slots). */
-export const slots = (names: string[]): Record<string, number> =>
-  Object.fromEntries([...names].sort().map((n, i) => [n, Math.min(i, 7) + 1]));
+export const slots = (names: string[], kinds?: Record<string, string>): Record<string, number> => {
+  // real-money strategies first, then the rest, each by name; past the 8th, gray (slot 0) rather than
+  // a repeated color. Stable while the set of strategies is.
+  const live = (n: string) => (kinds?.[n] === "live" ? 0 : 1);
+  const order = [...names].sort((a, b) => live(a) - live(b) || (a < b ? -1 : a > b ? 1 : 0));
+  return Object.fromEntries(order.map((n, i) => [n, i < 8 ? i + 1 : 0]));
+};

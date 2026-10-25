@@ -1,6 +1,7 @@
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import type { TapeItem } from "../api";
 import type { MarketName } from "../api";
+import { Id } from "./Id";
 import { cents, clock, money, nameOf, tone } from "../format";
 
 /** The event tape: fills, settlements and notable events, newest first. New items slide in;
@@ -46,7 +47,7 @@ function Body({ it, names }: { it: TapeItem; names?: Record<string, MarketName> 
     return (
       <>
         <span className="what" title={what ? `${what.title} ${what.subtitle}`.trim() : undefined}>
-          <b>{it.instance}</b> {it.action === "buy" ? "bought" : it.tag === "stop" ? "stopped out of" : "sold"} {it.qty} {it.side.toUpperCase()} at {cents(it.price)}
+          <b><Id name={it.instance} /></b> {it.action === "buy" ? "bought" : it.tag === "stop" ? "stopped out of" : "sold"} {it.qty} {it.side.toUpperCase()} at {cents(it.price)}
           <span className="detail">{about} · {it.liquidity} · fee {money(it.fee)}</span>
         </span>
         <span className={`amount ${tone(it.realized)}`}>{it.realized ? money(it.realized, true) : money(-it.qty * it.price - it.fee)}</span>
@@ -58,7 +59,7 @@ function Body({ it, names }: { it: TapeItem; names?: Record<string, MarketName> 
     return (
       <>
         <span className="what" title={what ? `${what.title} ${what.subtitle}`.trim() : undefined}>
-          <b>{it.instance}</b> {won ? "won" : "lost"} {it.qty} {it.side.toUpperCase()}
+          <b><Id name={it.instance} /></b> {won ? "won" : "lost"} {it.qty} {it.side.toUpperCase()}
           <span className="detail">{about} · {won ? `paid ${money(it.payout)}` : "expired worthless"}</span>
         </span>
         <span className={`amount ${tone(it.pnl)}`}>{money(it.pnl, true)}</span>

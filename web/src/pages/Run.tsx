@@ -38,7 +38,23 @@ export function RunPage() {
 }
 
 function Run({ snap, live }: { snap: Snapshot; live: boolean }) {
-  const slots = useMemo(() => slotsOf(snap.strategies.map((s) => s.instance)), [snap.strategies]);
+  const slots = useMemo(() => slotsOf(snap.strategies.map((s) => s.instance), snap.kinds), [snap.strategies, snap.kinds]);
+  // which strategies the chart draws in color: everything up to 8; past that the live ones (or the
+  // first 8), unless picked from the legend. Hovering a strategy anywhere highlights its line.
+  const [hovered, setHovered] = useState<string | null>(null);
+  const focusKey = `focus:${snap.run.name}`;
+  const [picked, setPicked] = useState<Set<string> | null>(() => {
+    try { const v = sessionStorage.getItem(focusKey); return v ? new Set(JSON.parse(v) as string[]) : null; } catch { return null; }
+  });
+  const ids = snap.strategies.map((s) => s.instance);
+  const realIds = ids.filter((i) => snap.kinds?.[i] === "live");
+  const focus = picked ?? (ids.length <= 8 ? new Set(ids) : new Set(realIds.length ? realIds : ids.filter((i) => slots[i] > 0)));
+  const toggle = (n: string) => {
+    const next = new Set(focus);
+    if (next.has(n)) next.delete(n); else next.add(n);
+    setPicked(next);
+    try { sessionStorage.setItem(focusKey, JSON.stringify([...next])); } catch { /* private mode */ }
+  };
   const halted = useMemo(
     () => new Set(Object.entries(snap.session?.instances ?? {}).filter(([, v]) => v.halted).map(([k]) => k)),
     [snap.session],
@@ -98,9 +114,9 @@ function Run({ snap, live }: { snap: Snapshot; live: boolean }) {
       </div>
 
       {loading != null ? <LoadingDay progress={loading} /> : <Workspace>{(handles) => <>
-        <Strategies snap={snap} slots={slots} />
+        <Strategies snap={snap} slots={slots} onHover={setHovered} focus={focus} />
         {handles.left}
-        <Center snap={snap} slots={slots} halted={halted} />
+        <Center snap={snap} slots={slots} halted={halted} chart={{ focus, onToggle: toggle, hovered, onHover: setHovered }} />
         {handles.right}
         <div className="right-col" ref={handles.rightCol}>
           <Markets session={snap.session} slots={slots} />
@@ -172,7 +188,10 @@ type Tab = (typeof TABS)[number];
 const RANGES: Record<string, number | null> = { "1h": 3_600_000, "6h": 21_600_000, "24h": 86_400_000, All: null };
 
 /** The center panel: the P&L chart, or one of the tables, in the same space. */
-function Center({ snap, slots, halted }: { snap: Snapshot; slots: Record<string, number>; halted: Set<string> }) {
+function Center({ snap, slots, halted, chart }: {
+  snap: Snapshot; slots: Record<string, number>; halted: Set<string>;
+  chart: { focus: Set<string>; onToggle: (n: string) => void; hovered: string | null; onHover: (n: string | null) => void };
+}) {
   const [tab, setTab] = useState<Tab>(() => {
     try {
       const t = sessionStorage.getItem("tab:run") as Tab;
@@ -222,7 +241,7 @@ function Center({ snap, slots, halted }: { snap: Snapshot; slots: Record<string,
         )}
       </div>
       <div className={tab === "chart" ? "chart-pane" : "table-wrap"} role="tabpanel">
-        {tab === "chart" && <PnlChart curves={snap.curves} slots={slots} halted={halted} range={RANGES[range]} kinds={snap.kinds}
+        {tab === "chart" && <PnlChart curves={snap.curves} slots={slots} halted={halted} range={RANGES[range]} kinds={snap.kinds} {...chart}
           now={snap.session?.now ?? null} />}
         {tab === "trades" && <Trades snap={snap} slots={slots} />}
         {tab === "orders" && <Orders snap={snap} slots={slots} />}

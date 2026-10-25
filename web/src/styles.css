@@ -23,7 +23,7 @@
   --critical: #d03b3b;
   --focus: #2a78d6;
   --series-1: #2a78d6; --series-2: #eb6834; --series-3: #1baf7a; --series-4: #eda100;
-  --series-5: #e87ba4; --series-6: #008300; --series-7: #6250d6; --series-8: #e34948;
+  --series-5: #e87ba4; --series-6: #008300; --series-7: #6250d6; --series-8: #e34948; --series-0: #a3abb7;
   --shadow: 0 1px 2px rgba(20, 26, 34, 0.04), 0 4px 16px rgba(20, 26, 34, 0.06);
 }
 @media (prefers-color-scheme: dark) {
@@ -33,7 +33,7 @@
     --grid: #232a34; --axis: #343d4a; --border: #252d38; --up: #2ec25a; --down: #f06a68;
     --up-wash: rgba(46, 194, 90, 0.12); --down-wash: rgba(240, 106, 104, 0.12);
     --series-1: #3987e5; --series-2: #d95926; --series-3: #199e70; --series-4: #c98500;
-    --series-5: #d55181; --series-6: #008300; --series-7: #9085e9; --series-8: #e66767;
+    --series-5: #d55181; --series-6: #008300; --series-7: #9085e9; --series-8: #e66767; --series-0: #5e6876;
     --shadow: 0 1px 2px rgba(0, 0, 0, 0.3), 0 6px 20px rgba(0, 0, 0, 0.25);
   }
 }
@@ -43,7 +43,7 @@
   --grid: #232a34; --axis: #343d4a; --border: #252d38; --up: #2ec25a; --down: #f06a68;
   --up-wash: rgba(46, 194, 90, 0.12); --down-wash: rgba(240, 106, 104, 0.12);
   --series-1: #3987e5; --series-2: #d95926; --series-3: #199e70; --series-4: #c98500;
-  --series-5: #d55181; --series-6: #008300; --series-7: #9085e9; --series-8: #e66767;
+  --series-5: #d55181; --series-6: #008300; --series-7: #9085e9; --series-8: #e66767; --series-0: #5e6876;
   --shadow: 0 1px 2px rgba(0, 0, 0, 0.3), 0 6px 20px rgba(0, 0, 0, 0.25);
 }
 
@@ -528,3 +528,19 @@ a.pill.link:hover { border-color: var(--axis); }
 .strategy.real { position: relative; }
 .strategy.real::before { content: ""; position: absolute; left: -10px; top: 6px; bottom: 6px; width: 3px; border-radius: 2px; background: var(--critical); }
 .kpi.real .label { color: var(--critical); font-weight: 600; }
+
+/* many strategies: focused lines in color, the rest faint gray behind; one highlighted on hover */
+.chart .line.faint { stroke-width: 1; opacity: 0.55; }
+.chart g.dim { opacity: 0.25 !important; }
+.chart g.hot .line { stroke-width: 3; }
+.legend .item { display: inline-flex; align-items: center; gap: 6px; border: none; background: none; padding: 0; font: inherit;
+  color: inherit; cursor: pointer; }
+.legend .item.off { color: var(--muted); }
+.legend .item.off .swatch { background: var(--series-0); }
+.legend .more { border: 1px dashed var(--border); border-radius: 999px; padding: 0 8px; background: none; font: inherit;
+  font-size: 12px; color: var(--ink-2); cursor: pointer; }
+/* long strategy names: shorten, keep the badge and P&L in view */
+.strategy .top .name { min-width: 0; flex: 1 1 auto; }
+.strategy .top .name .label { min-width: 0; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; line-height: 1.25; }
+.strategy .top .kind-badge, .strategy .top .pnl { flex: none; }
+.tape .what { min-width: 0; overflow-wrap: anywhere; }

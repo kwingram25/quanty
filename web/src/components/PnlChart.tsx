@@ -40,13 +40,21 @@ function windowed(all: Curves, range: number | null, now: number | null): { curv
   return { curves, t0, t1 };
 }
 
-export function PnlChart({ curves: all, slots, halted, range = null, now = null, kinds }: {
+export function PnlChart({ curves: all, slots, halted, range = null, now = null, kinds, focus, onToggle, hovered, onHover }: {
   curves: Curves; slots: Record<string, number>; halted: Set<string>; range?: number | null; now?: number | null;
   kinds?: Record<string, string>;
+  /** the strategies drawn in color (the rest: faint gray behind); clicking the legend toggles one */
+  focus?: Set<string>; onToggle?: (name: string) => void;
+  hovered?: string | null; onHover?: (name: string | null) => void;
 }) {
   const view = useMemo(() => windowed(all, range, now), [all, range, now]);
   const curves = view.curves;
-  const names = Object.keys(curves).sort();
+  const all_names = Object.keys(curves).sort((a, b) => (slots[a] || 99) - (slots[b] || 99) || (a < b ? -1 : 1));
+  const shown = (n: string) => !focus || focus.has(n);
+  const names = all_names.filter(shown); // in color, labeled, in the tooltip
+  const faint = all_names.filter((n) => !shown(n));
+  const [legendOpen, setLegendOpen] = useState(false);
+  const color = (n: string) => (slots[n] ? `var(--series-${slots[n]})` : "var(--ink-2)");
   const direct = names.length <= 4;
   const padR = direct ? 140 : 16;
   const [hover, setHover] = useState<{ x: number; t: number } | null>(null);
@@ -63,7 +71,7 @@ export function PnlChart({ curves: all, slots, halted, range = null, now = null,
     return { x, y, ticks: y.ticks(4), t0, t1 };
   }, [curves, view, padR, W, H]);
 
-  if (!names.length) {
+  if (!all_names.length) {
     return <div className="chart-wrap" ref={box}><p className="empty">No realized P&L yet: it appears as markets settle.</p></div>;
   }
 
@@ -92,14 +100,21 @@ export function PnlChart({ curves: all, slots, halted, range = null, now = null,
 
   return (
     <div className="chart-wrap">
-      {names.length > 1 && (
+      {all_names.length > 1 && (
         <div className="legend">
-          {names.map((n) => (
-            <span key={n} style={{ opacity: halted.has(n) ? 0.5 : 1 }}>
-              <i className="swatch" style={{ ["--c" as string]: `var(--series-${slots[n] ?? 1})` }} />{n}
+          {[...names, ...(legendOpen ? faint : [])].map((n) => (
+            <button key={n} className={`item ${shown(n) ? "" : "off"}`} style={{ opacity: halted.has(n) ? 0.5 : 1 }}
+              onClick={() => onToggle?.(n)} onMouseEnter={() => onHover?.(n)} onMouseLeave={() => onHover?.(null)}
+              title={onToggle ? (shown(n) ? "Click to gray it out" : "Click to draw it in color") : undefined}>
+              <i className="swatch" style={{ ["--c" as string]: color(n) }} />{n}
               {kinds?.[n] === "live" && <span className="kind-badge live" title="Real orders, real money">LIVE</span>}
-            </span>
+            </button>
           ))}
+          {faint.length > 0 && (
+            <button className="more" onClick={() => setLegendOpen(!legendOpen)}
+              title="Strategies drawn as faint gray lines; open to pick any to draw in color">
+              {legendOpen ? "fewer" : `+${faint.length} more in gray`}</button>
+          )}
         </div>
       )}
       <div className="plot" ref={box}>
@@ -116,11 +131,17 @@ export function PnlChart({ curves: all, slots, halted, range = null, now = null,
             {t1 - t0 > 20 * 3_600_000 ? `${weekday(t)} ${clock(t, false)}` : clock(t, seconds)}
           </text>
         ))}
+        {faint.map((n) => (
+          <g key={n} className={hovered && hovered !== n ? "dim" : hovered === n ? "hot" : ""} style={{ color: hovered === n ? color(n) : "var(--series-0)" }}>
+            <path className={`line ${hovered === n ? "" : "faint"}`} d={path(curves[n])} stroke="currentColor" />
+          </g>
+        ))}
         {names.map((n) => {
           const pts = curves[n];
           const end = pts.at(-1)!;
           return (
-            <g key={n} style={{ color: `var(--series-${slots[n] ?? 1})`, opacity: halted.has(n) ? 0.45 : 1 }}>
+            <g key={n} className={hovered && hovered !== n ? "dim" : hovered === n ? "hot" : ""}
+              style={{ color: color(n), opacity: halted.has(n) ? 0.45 : 1 }}>
               <path className="line" d={path(pts)} stroke="currentColor" />
               <AnimatePresence>
                 <motion.circle key={`${end[0]}-${end[1]}`} cx={x(end[0])} cy={y(end[1])} fill="none"
@@ -139,11 +160,11 @@ export function PnlChart({ curves: all, slots, halted, range = null, now = null,
       {hover && (
         <div className="tooltip" style={hover.x > W * 0.6 ? { right: W - hover.x + 12, top: 12 } : { left: hover.x + 12, top: 12 }}>
           <div className="when">{clock(hover.t)} {zoneName(hover.t)}</div>
-          {names.map((n) => {
+          {[...names, ...(hovered && !shown(hovered) ? [hovered] : [])].map((n) => {
             const v = valueAt(curves[n], hover.t);
             return (
               <div key={n} className="row">
-                <i className="swatch" style={{ ["--c" as string]: `var(--series-${slots[n] ?? 1})` }} />
+                <i className="swatch" style={{ ["--c" as string]: color(n) }} />
                 <span>{n}</span><span className="num">{v == null ? "–" : money(v)}</span>
               </div>
             );
