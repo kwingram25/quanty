@@ -57,6 +57,15 @@ class VenueOrder:
 
 
 @dataclass(frozen=True)
+class Holdings:
+    """What an account holds on one venue: net contracts per market (venue ids; + YES, − NO), and
+    which of the asked-about markets have settled (they no longer count as held)."""
+
+    net: dict[str, float]
+    settled: set[str]
+
+
+@dataclass(frozen=True)
 class AccountBalance:
     """An account's money on one venue, in dollars."""
 
@@ -133,6 +142,11 @@ class OrderAPI(ABC):
 
     async def balance(self, client: httpx.AsyncClient) -> AccountBalance:
         raise NotImplementedError(f"{self.venue}: reading the balance isn't supported")
+
+    async def holdings(self, client: httpx.AsyncClient, held: set[str]) -> Holdings:
+        """The account's open positions; `held` (venue ids) are markets quanty thinks it holds, so
+        any of them that settled can be told apart from a position that's missing."""
+        raise NotImplementedError(f"{self.venue}: reading positions isn't supported")
 
     async def _send(self, client: httpx.AsyncClient, method: str, path: str, **kw: Any) -> dict[str, Any]:
         headers = self.signer.headers(method, path)
@@ -261,6 +275,27 @@ class PolymarketOrders(OrderAPI):
             client, "POST", f"/v1/order/{venue_id}/cancel", json={"marketSlug": native_id(market_id)}
         )
 
+    async def holdings(self, client: httpx.AsyncClient, held: set[str]) -> Holdings:
+        # GET /v1/portfolio/positions: {positions: {slug: UserPosition}, nextCursor, eof};
+        # netPositionDecimal is + long (YES) / − short (NO); expired positions have settled
+        net: dict[str, float] = {}
+        settled: set[str] = set()
+        cursor = ""
+        for _ in range(100):  # pages
+            params = {"limit": 100, **({"cursor": cursor} if cursor else {})}
+            res = await self._send(client, "GET", "/v1/portfolio/positions", params=params)
+            for slug, p in (res.get("positions") or {}).items():
+                if p.get("expired"):
+                    settled.add(slug)
+                    continue
+                qty = p.get("netPositionDecimal", p.get("netPosition"))
+                if _num(qty):
+                    net[slug] = _num(qty)
+            cursor = res.get("nextCursor") or ""
+            if res.get("eof", True) or not cursor:
+                break
+        return Holdings(net, settled & held)
+
 
 class KalshiOrders(OrderAPI):
     """Kalshi: orders in YES terms (bid/ask); counts in hundredths of a contract."""
@@ -352,6 +387,30 @@ class KalshiOrders(OrderAPI):
         return AccountBalance(
             cash=cash, buying_power=cash, positions_value=None if value is None else _num(value) / 100
         )
+
+    async def holdings(self, client: httpx.AsyncClient, held: set[str]) -> Holdings:
+        # GET /portfolio/positions: unsettled market_positions by default; position_fp is
+        # + YES / − NO. A held market missing from it is looked up among the settled ones.
+        path = "/trade-api/v2/portfolio/positions"
+        net: dict[str, float] = {}
+        cursor = ""
+        for _ in range(100):  # pages
+            params = {"limit": 1000, "count_filter": "position", **({"cursor": cursor} if cursor else {})}
+            res = await self._send(client, "GET", path, params=params)
+            for p in res.get("market_positions") or []:
+                if _num(p.get("position_fp")):
+                    net[p["ticker"]] = _num(p.get("position_fp"))
+            cursor = res.get("cursor") or ""
+            if not cursor:
+                break
+        settled = set()
+        for ticker in sorted(held - set(net)):
+            res = await self._send(
+                client, "GET", path, params={"ticker": ticker, "settlement_status": "settled"}
+            )
+            if any(p.get("ticker") == ticker for p in res.get("market_positions") or []):
+                settled.add(ticker)
+        return Holdings(net, settled)
 
     async def resting_by_client_id(self, client: httpx.AsyncClient) -> dict[str, tuple[str, str]]:
         out: dict[str, tuple[str, str]] = {}

@@ -27,6 +27,7 @@ need several things to go wrong at once. This page is what to know before `--arm
 | Risk limits | Positions, open risk, risk per correlation group and daily loss past your limits. |
 | `error_limit` | A broker disables itself after this many consecutive venue rejections. |
 | Unknown outcomes | If an order's reply never arrives (timeout, dropped connection), the broker disables itself at once and the order stays pending. It is never assumed rejected: the venue may have filled it. |
+| Position check on start | A strategy trading on contracts that aren't there: where the venue holds less than the run's fills say (or can't be read), that strategy is halted until you resume it. |
 | Order journal | Each order is written down before it is sent. On start, orders a previous run left resting are canceled; on Kalshi, orders whose reply never came are found by client id (`quanty-…`). Only journaled orders are touched, so other programs trading the same account are safe. |
 | Dashboard controls | Halt a strategy (no new buys, exits still allowed), disarm a broker (no orders at all, resting ones canceled), or halt everything; change a strategy's params (validated by the strategy, saved for restarts; limits and broker caps can't be raised from the dashboard, so they still bound a bad value). Actions on a live run need its name typed. |
 
@@ -51,8 +52,16 @@ carry on its run:
   through every book update), and it rebuilds what strategies learn from the markets, not what
   they learned from their own fills.
 
-Not yet: comparing restored live positions with what the venue holds. Markets that settled while
-no session ran are settled when the venue next reports their result, within its results window.
+- **Positions are checked against the venue.** An armed session reads each venue's positions
+  where the run holds or has traded something for real, and compares. Where the venue holds less
+  than quanty thinks, or the other side (an order that filled while nothing ran, a sale by hand),
+  the strategies holding it are halted: no new buys, exits still allowed, until you check the
+  venue and resume them. If a venue's positions can't be read, the same. Where the venue holds
+  more, in a market the run traded, it's reported and nothing stops (another program may trade
+  the account). Each difference is in the session's output and on the dashboard's tape.
+
+Markets that settled while no session ran don't count as missing; they're settled when the venue
+next reports their result, within its results window.
 
 ## What quanty does not do
 

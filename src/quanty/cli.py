@@ -673,6 +673,12 @@ def _session(
         spare_brokers=spares,
     )
     _warm_and_restore(trader, exp, feeds, data, ledger_path)
+    if armed:  # what it holds for real, against what the venues say the account holds
+        from quanty import reconcile
+
+        found = asyncio.run(reconcile.on_start(trader))
+        for f in found:
+            typer.echo(f"{'halted' if f.halts else 'note'}: {f.text()}", err=True)
     run_name = f"session/{ledger_path.stem}"
     store = ControlStore(data / "control.sqlite")
     controller = Controller(store, run_name, trader, can_arm=armed)

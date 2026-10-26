@@ -463,6 +463,22 @@ class Engine:
             "live_without_broker": unplaceable,
         }
 
+    def live_holdings(self) -> dict[str, dict[str, float]]:
+        """What the instances hold for real: market -> instance -> net YES contracts (− = NO), for
+        positions bought through a live broker (kept on it, or on none when it isn't in this
+        session)."""
+        out: dict[str, dict[str, float]] = {}
+        for iid, mid, side, p in self.portfolio.open_positions():
+            if p.qty <= 1e-9:
+                continue
+            key = (iid, mid)
+            holder = self._held_by[key] if key in self._held_by else self.instances[iid].broker
+            if holder is not None and holder.kind != "live":
+                continue
+            net = p.qty if side is Side.YES else -p.qty
+            out.setdefault(mid, {})[iid] = round(out.get(mid, {}).get(iid, 0.0) + net, 9)
+        return out
+
     @property
     def brokers(self) -> dict[str, Broker]:
         """Every broker of this session, by name: the instances' and the spares."""

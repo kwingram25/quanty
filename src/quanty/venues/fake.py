@@ -10,6 +10,8 @@ same response fields) and matches orders against books you set. Plug it into a c
     fake.fail_next("lost_read") # the next order read replies without the order (seen on Polymarket)
 
 Resting orders fill when you call `trade(market, yes_price, qty)` (a taker trading against them).
+Positions (both venues' positions routes) are what its orders filled, plus `held` (contracts
+bought elsewhere: another program, or by hand), less markets in `settled`.
 """
 
 import itertools
@@ -51,6 +53,8 @@ class FakeExchange:
         self.requests: list[httpx.Request] = []
         self._faults: list[Fault] = []
         self._ids = itertools.count(1)
+        self.held: dict[str, float] = {}  # market -> net YES contracts held besides the orders' fills
+        self.settled: set[str] = set()  # markets that settled: no longer held
 
     # --- test controls ---
 
@@ -77,6 +81,14 @@ class FakeExchange:
             o.filled += q
             o.executions.append((q, o.yes_price))
             qty -= q
+
+    def net(self, venue: str) -> dict[str, float]:
+        """Net YES contracts per market on a venue (− = NO), as its positions route reports them."""
+        out = {m: q for m, q in self.held.items() if m not in self.settled}
+        for o in self.orders.values():
+            if o.venue == venue and o.market not in self.settled:
+                out[o.market] = round(out.get(o.market, 0.0) + (o.filled if o.buys_yes else -o.filled), 9)
+        return {m: q for m, q in out.items() if abs(q) > 1e-9}
 
     def transport(self) -> httpx.MockTransport:
         return httpx.MockTransport(self._handle)
@@ -134,13 +146,29 @@ class FakeExchange:
             return httpx.Response(500, json={"error": "internal error"})
         path = req.url.path
         body: dict[str, Any] = json.loads(req.content) if req.content else {}
-        if path.startswith("/trade-api/v2/"):
+        if req.method == "GET" and path.endswith("/portfolio/positions"):
+            resp = self._positions(path.startswith("/trade-api/v2/"), dict(req.url.params))
+        elif path.startswith("/trade-api/v2/"):
             resp = self._kalshi(req.method, path.removeprefix("/trade-api/v2"), body, fault)
         else:
             resp = self._polymarket(req.method, path, body, fault)
         if fault == "timeout":
             raise httpx.ReadTimeout("fake exchange: reply timed out", request=req)
         return resp
+
+    def _positions(self, kalshi: bool, params: dict[str, str]) -> httpx.Response:
+        if not kalshi:  # Polymarket US: one page, settled markets marked expired
+            rows = {
+                m: {"netPositionDecimal": f"{q}", "expired": False}
+                for m, q in self.net("polymarket_us").items()
+            }
+            rows |= {m: {"netPositionDecimal": "0", "expired": True} for m in self.settled}
+            return httpx.Response(200, json={"positions": rows, "nextCursor": "", "eof": True})
+        if params.get("settlement_status") == "settled":
+            found = [{"ticker": m, "position_fp": "0.00"} for m in self.settled if m == params.get("ticker")]
+        else:
+            found = [{"ticker": m, "position_fp": f"{q:.2f}"} for m, q in self.net("kalshi").items()]
+        return httpx.Response(200, json={"market_positions": found, "event_positions": [], "cursor": ""})
 
     def _polymarket(
         self, method: str, path: str, body: dict[str, Any], fault: Fault | None

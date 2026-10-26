@@ -28,6 +28,7 @@ change to `web/`.
 | `src/quanty/venues/` | Kalshi and Polymarket US: market data, order APIs, signing; `fake.py` is a fake exchange |
 | `src/quanty/feeds/` | recording, replay, feed health |
 | `src/quanty/control.py` | dashboard commands to running sessions (halt, arm, edit params, switch live, reload, …) |
+| `src/quanty/reconcile.py` | a live session's start: what it holds for real against the venues' positions |
 | `src/quanty/sweep.py` | backtests the dashboard starts: one strategy over a grid of its params, on recent recordings |
 | `src/quanty/promote.py`, `pull.py` | experiment-file edits: moving an instance between brokers (with its paper twin); bringing a server's dashboard changes home |
 | `src/quanty/ui/` | FastAPI back end (`api.py`, `queries.py`, `auth.py`); `web/` is its React front end |
