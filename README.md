@@ -88,7 +88,7 @@ paper trading, shadow trading and live trading; [Deploying](docs/deploying.md) c
 - [Writing strategies](docs/strategies.md): hooks, context, orders, signals, testing
 - [Architecture](docs/architecture.md): how the pieces fit, and why one file runs everywhere
 - [Live trading](docs/live-trading.md): the safety layers, restarts, and what to do before `--arm`
-- [Deploying](docs/deploying.md): servers (DigitalOcean, AWS, Fly.io), the dashboard over HTTPS, editing on a server
+- [Deploying](docs/deploying.md): servers (DigitalOcean, AWS, Fly.io), the dashboard over HTTPS, editing on a server, working with an AI agent, the public demo
 
 ## Commands
 
@@ -118,6 +118,8 @@ paper trading, shadow trading and live trading; [Deploying](docs/deploying.md) c
 | `venues/` | Kalshi and Polymarket US; order APIs; the fake exchange |
 | `ui/`, `control.py`, `web/` | the dashboard's API and live stream, the command channel to running sessions, and the React app |
 | `signals.py`, `synthetic.py` | derived values rebuilt identically in replay; deterministic synthetic markets |
+| `promote.py`, `pull.py`, `sweep.py` | moving strategies between brokers in a file; bringing a server's changes and recordings home; the dashboard's backtests |
+| `reconcile.py`, `version.py`, `mcp.py` | a live session's position check on start; the code each run ran; the dashboard as tools for an AI agent |
 | `db/` | SQLAlchemy models and Alembic migrations |
 
 ## Development

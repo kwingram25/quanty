@@ -1,4 +1,4 @@
-# Example experiment: two variants of the example strategy side by side on one simulated broker.
+# Example experiment: two variants of the example strategy side by side, simulated.
 #   uv run quanty backtest experiments/example.toml --hours 24
 
 clock_ms = 1000
@@ -6,8 +6,7 @@ clock_ms = 1000
 [limits]                       # account-wide, across all instances
 max_open_risk = 200
 
-[brokers.sim]
-kind = "sim"
+[brokers.sim]                  # every experiment has sim, shadow and live; a table changes settings
 latency_ms = 50
 
 [[instances]]

@@ -60,6 +60,12 @@ ledger.
 A broker turns orders into `Fill` and `OrderUpdate` events. It never mutates an order; the
 engine does, from those events.
 
+Every experiment has three, `sim`, `shadow` and `live`, and each strategy starts on the one its
+entry names (`sim` by default). A running session can move a strategy to another: new markets use
+the new broker, and markets it's already in finish on the old one, so a simulated position is never
+sold for real. The live broker exists only in a session started with `--arm`, and places nothing
+until its per-order caps are set in the experiment file.
+
 - **`SimBroker`** fills against the recorded book: takers walk the levels at their prices,
   resting orders join the back of the queue at their price and fill as trades consume the queue
   ahead or the book moves through them, post-only orders that would cross are rejected.
@@ -96,6 +102,11 @@ totals real and simulated P&L apart by row. A restarted session continues the ru
 numbering. Runs kept in the older `data/paper/` and `data/live/` folders still open; their kinds
 come from each instance's broker.
 
+When a run starts, each strategy's row records what it is (params, broker, limits) and the code it
+ran: the project's git commit (or the one `quanty deploy` sent to a server), whether files differed
+from it, and a hash of the strategy's file. A live session also compares what it holds for real
+with each venue's positions before trading (see [Live trading](live-trading.md#restarts)).
+
 ## Dashboard and controls
 
 `ui/` is a FastAPI app serving a JSON API and, per run, a WebSocket that pushes a fresh snapshot
@@ -105,8 +116,12 @@ their close, the P&L chart, a tape of fills, settlements and alerts, and toasts 
 needs attention. Every database is opened read-only. Controls go through `control.py`: the
 dashboard writes commands to `data/control.sqlite`; each running session polls for its own, applies
 them (halt, resume, disarm, arm, kill; param changes and switching an instance live or back to
-paper, both saved per run so a restart keeps them; reloading the experiment file), records the outcome and publishes a heartbeat with its state,
-including its open markets and the event clock (so countdowns stay right in sped-up demos).
+paper, both saved per run so a restart keeps them; reloading the experiment file), records the
+outcome and publishes a heartbeat with its state, including its open markets and the event clock
+(so countdowns stay right in sped-up demos). Besides commands, the dashboard writes only the
+backtests it starts from the Variants tab (`sweep.py`, into `data/backtest/`), and its Health page
+runs `quanty doctor`'s checks. `quanty mcp` is another client of the same API: an AI agent gets
+the dashboard's reads and controls, with its checks, and nothing more.
 
 ## Determinism
 

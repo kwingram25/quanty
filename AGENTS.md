@@ -30,7 +30,9 @@ change to `web/`.
 | `src/quanty/control.py` | dashboard commands to running sessions (halt, arm, edit params, switch live, reload, …) |
 | `src/quanty/reconcile.py` | a live session's start: what it holds for real against the venues' positions |
 | `src/quanty/sweep.py` | backtests the dashboard starts: one strategy over a grid of its params, on recent recordings |
-| `src/quanty/promote.py`, `pull.py` | experiment-file edits: moving an instance between brokers (with its paper twin); bringing a server's dashboard changes home |
+| `src/quanty/promote.py`, `pull.py` | experiment-file edits: moving an instance between brokers (with its paper twin); bringing a server's dashboard changes (and, with `--recordings`, its recent recordings) home |
+| `src/quanty/version.py` | the code a run ran (git commit, or what `quanty deploy` sent; a hash per strategy file) |
+| `src/quanty/mcp.py` | `quanty mcp`: the dashboard's API as MCP tools for an AI agent |
 | `src/quanty/ui/` | FastAPI back end (`api.py`, `queries.py`, `auth.py`); `web/` is its React front end |
 | `src/quanty/cli.py` | the `quanty` command; `init.py`, `deploy.py`, `doctor.py` behind its subcommands; `engine_tools.py` (paper twins in a running session) |
 | `src/quanty/strategies/` | example strategies; `strategies/_template.py` is the template |

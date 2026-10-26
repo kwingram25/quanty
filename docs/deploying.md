@@ -146,8 +146,9 @@ change the `[processes]` command in `fly.toml` to `live experiments/main.toml --
 --data data --arm --ui --ui-host ::`. To run the doctor there:
 `fly ssh console -C "sh -c 'cd /app && quanty doctor'"`.
 
-The generated `fly.toml` is valid TOML (quanty's tests check that) but hasn't been run on a Fly
-account yet; if a `fly` command disagrees with it, Fly's error is the authority.
+The generated `fly.toml` is valid TOML (quanty's tests check that); the same Fly setup without a
+volume runs the [public demo](#the-public-demo). A project's (with a volume and secrets) hasn't
+been run on a Fly account yet: if a `fly` command disagrees with it, Fly's error is the authority.
 
 ## Reaching the dashboard from anywhere
 
