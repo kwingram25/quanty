@@ -12,7 +12,7 @@ uv run pytest                 # tests (no network, no keys)
 uv run ruff check && uv run ruff format --check
 uv run mypy                   # strict, over src, tests and scripts
 cd web && npm run build       # after any change in web/: type-checks, then builds into src/quanty/ui/dist
-uv run quanty demo --live     # the dashboard on synthetic markets, at http://127.0.0.1:8765
+uv run quanty demo --live     # the dashboard on synthetic markets, at http://127.0.0.1:8764
 ```
 
 CI runs all of these. The dashboard build in `src/quanty/ui/dist` is committed (so installing

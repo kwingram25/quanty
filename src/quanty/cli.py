@@ -143,7 +143,8 @@ def demo(
     seed: Seed = 0,
     ledger: LedgerPath = None,
     ui: Annotated[bool, typer.Option("--ui", help="Then open the dashboard on the result")] = False,
-    port: Annotated[int, typer.Option(help="Dashboard port, with --ui")] = 8765,
+    # not 8765, so a project's dashboard (and `quanty mcp`, which looks there) never finds the demo
+    port: Annotated[int, typer.Option(help="Dashboard port, with --ui")] = 8764,
     browser: Annotated[bool, typer.Option(help="Open a browser, with --ui")] = True,
     live: Annotated[
         bool, typer.Option("--live", help="Play the markets in real time with the dashboard open (paper)")
