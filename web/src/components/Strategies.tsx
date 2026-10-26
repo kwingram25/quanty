@@ -323,7 +323,8 @@ function SwitchBroker({ iid, strategy, session, onSwitch, onPrepare }: {
   const shadow = others.filter(([, b]) => b.kind === "shadow");
   const paper = others.filter(([, b]) => b.kind === "sim");
   const anyLive = Object.values(session.brokers).some((b) => b.kind === "live");
-  const canPrepare = !anyLive && session.actions?.includes("add_live_broker");
+  // not in a demo: synthetic markets, and no experiment file to add a broker to
+  const canPrepare = !anyLive && session.save != null && session.actions?.includes("add_live_broker");
   const lines = held && [
     `# in the [[instances]] entry with id = "${iid}"`, `broker = "${held.broker}"`,
     ...(held.twin ? ["", "# its paper twin, a new entry", "[[instances]]", `id = "${held.twin}"`,
@@ -366,8 +367,10 @@ function SwitchBroker({ iid, strategy, session, onSwitch, onPrepare }: {
       </div>
       {canPrepare && preparing && (
         <form className="prepare" onSubmit={(e) => { e.preventDefault(); if (valid && session.save === "file") onPrepare(+caps.qty, +caps.notional).then((ok) => ok !== false && setPreparing(false)); }}>
-          <p className="muted small">A live broker caps every single order. It's added to the experiment, unused; restart the
-            session with <code>quanty live … --arm</code> and Go live appears here.</p>
+          <p className="muted small">A live broker caps every single order. It's added to the experiment, unused. Real money
+            needs the session started with <code>quanty live … --arm</code> (on a server, <code>QUANTY_MODE=live</code> in
+            .env), so that takes one restart from the command line; after it, Go live and Back to paper switch here
+            without restarts.</p>
           <label>Largest order, contracts <input inputMode="decimal" value={caps.qty} onChange={(e) => setCaps({ ...caps, qty: e.target.value })} /></label>
           <label>Largest order, $ <input inputMode="decimal" value={caps.notional} onChange={(e) => setCaps({ ...caps, notional: e.target.value })} /></label>
           <div className="actions">
