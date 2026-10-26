@@ -119,6 +119,8 @@ def test_ui_gates(ui: tuple[TestClient, Controller, Path]) -> None:
     assert post(client, {"action": "kill", "confirm": "acct"}, tok="wrong").status_code == 403  # type: ignore[attr-defined]
     cross = post(client, {"action": "kill", "confirm": "acct"}, origin="https://evil.example")
     assert cross.status_code == 403  # type: ignore[attr-defined]
+    proxied = post(client, {"action": "kill"}, origin="https://testserver")  # an HTTPS proxy in front
+    assert proxied.status_code == 400  # type: ignore[attr-defined]  # past the origin check, at the confirm
     r = post(client, {"action": "kill"})
     assert r.status_code == 400 and "type acct to confirm" in r.json()["detail"]  # type: ignore[attr-defined]
     assert ControlStore(tmp / "control.sqlite").history("live/acct") == []  # nothing was sent

@@ -11,6 +11,7 @@ import time
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 
 import httpx
 from fastapi import APIRouter, HTTPException, Query, Request, Response, WebSocket, WebSocketDisconnect
@@ -424,7 +425,8 @@ class Api:
     def guard(self, request: Request) -> None:
         """Writes come from this dashboard's own pages only."""
         origin = request.headers.get("origin")
-        if origin is not None and origin != f"{request.url.scheme}://{request.url.netloc}":
+        # the host only: behind an HTTPS proxy (Fly, Caddy) the page is https and this server sees http
+        if origin is not None and urlsplit(origin).netloc != request.headers.get("host", request.url.netloc):
             raise HTTPException(403, "cross-site request refused")
         if request.headers.get("x-quanty-token") != self.token:
             raise HTTPException(403, "missing or stale token: reload the page")
