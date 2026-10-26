@@ -3,7 +3,7 @@ import { getJSON } from "../api";
 import { ago } from "../format";
 
 interface Check { section: string; name: string; status: "ok" | "warn" | "fail" | "skip"; detail: string; fix: string }
-interface Health { ran: number; project: string; checks: Check[] }
+interface Health { ran: number; project: string | null; demo?: boolean; checks: Check[] }
 
 const MARK: Record<Check["status"], string> = { ok: "✓", warn: "!", fail: "✗", skip: "–" };
 
@@ -29,10 +29,16 @@ export function HealthPage() {
     <div className="page health-page">
       <div className="list-head">
         <h1>Health</h1>
-        <button className="btn" onClick={() => run(true)} disabled={busy}
+        {!data?.demo && <button className="btn" onClick={() => run(true)} disabled={busy}
           title="The venue checks make real, read-only requests (a balance, rate limits): at most once a minute">
-          {busy ? "Checking…" : "Run checks again"}</button>
+          {busy ? "Checking…" : "Run checks again"}</button>}
       </div>
+      {data?.demo ? (
+        <p className="empty">This is a demo on synthetic markets, so there's nothing to check: it needs no feeds.toml,
+          keys or venue. In a project, this page shows what <code>quanty doctor</code> checks there: the experiments,
+          strategies and feeds.toml load, keys are present and accepted, the clock agrees with each venue's, rate-limit
+          headroom, orders a previous live run left unresolved, and disk space, each with its fix.</p>
+      ) : <>
       <p className="muted health-where">
         {data ? <>What <code>quanty doctor</code> checks, for the project in {data.project}. Checked {ago(data.ran * 1000)}.</> : "Checking…"}
       </p>
@@ -56,6 +62,7 @@ export function HealthPage() {
           </ul>
         </section>
       ))}
+      </>}
     </div>
   );
 }

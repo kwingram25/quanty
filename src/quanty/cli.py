@@ -753,7 +753,9 @@ def _demo_live(
     store = ControlStore(data / "control.sqlite")
     playback = Playback(speed, tuple(sorted({1.0, speed})))  # the dashboard toggles fast / real time
     server = uvicorn.Server(
-        uvicorn.Config(create_app(data, refresh_s=2), host="127.0.0.1", port=port, log_level="warning")
+        uvicorn.Config(
+            create_app(data, refresh_s=2, demo=True), host="127.0.0.1", port=port, log_level="warning"
+        )
     )
 
     def build(seed: int) -> tuple[Engine, Ledger, synthetic.Spec]:

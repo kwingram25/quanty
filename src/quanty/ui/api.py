@@ -101,7 +101,8 @@ def _activity(a: queries.Activity) -> dict[str, Any]:
 
 
 class Api:
-    def __init__(self, data: Path, auth: "Auth | None" = None) -> None:
+    def __init__(self, data: Path, auth: "Auth | None" = None, demo: bool = False) -> None:
+        self.demo = demo
         self._health: dict[str, Any] | None = None
         self.data = data
         self.auth = auth  # the dashboard login, when one is set
@@ -149,6 +150,8 @@ class Api:
         read-only, requests)."""
         from quanty import doctor
 
+        if self.demo:  # synthetic markets need no feeds, keys or venues
+            return {"ran": time.time(), "project": None, "demo": True, "checks": []}
         last = self._health
         if last is not None and (not fresh or time.time() - last["ran"] < 60):
             return last

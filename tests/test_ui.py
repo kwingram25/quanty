@@ -234,6 +234,14 @@ def test_health_runs_doctor_once_then_again_at_most_once_a_minute(
     assert c.get("/api/health?fresh=1").json()["ran"] == 1061.0 and len(runs) == 2
 
 
+def test_a_demo_has_no_project_to_check(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from quanty import doctor
+
+    monkeypatch.setattr(doctor, "run", lambda *a, **k: pytest.fail("a demo runs no checks"))
+    got = TestClient(create_app(tmp_path, demo=True)).get("/api/health").json()
+    assert got["demo"] and got["checks"] == []
+
+
 def test_unknown_api_paths_are_json_404s_not_the_page(tmp_path: Path) -> None:
     c = TestClient(create_app(tmp_path))
     r = c.get("/api/nope")

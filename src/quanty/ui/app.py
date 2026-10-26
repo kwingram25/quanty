@@ -22,15 +22,18 @@ _FROM_ENV = "from .env"
 PUBLIC = ("/login", "/assets/", "/favicon")
 
 
-def create_app(data: Path, refresh_s: int = 2, password_hash: str | None = _FROM_ENV) -> FastAPI:
+def create_app(
+    data: Path, refresh_s: int = 2, password_hash: str | None = _FROM_ENV, demo: bool = False
+) -> FastAPI:
     """refresh_s is kept for callers; the page is pushed changes over a WebSocket instead.
-    password_hash: the login hash (QUANTY_UI_PASSWORD by default); None = no login."""
+    password_hash: the login hash (QUANTY_UI_PASSWORD by default); None = no login. demo: serving
+    `quanty demo` (synthetic markets in a temporary folder: no project to check)."""
     if password_hash == _FROM_ENV:
         secret = keys().quanty_ui_password
         password_hash = secret.get_secret_value().strip() if secret else None
     auth = Auth(password_hash) if password_hash else None
     app = FastAPI(title="quanty", docs_url=None, redoc_url=None)
-    api = Api(data, auth)
+    api = Api(data, auth, demo=demo)
 
     if auth is not None:
 
