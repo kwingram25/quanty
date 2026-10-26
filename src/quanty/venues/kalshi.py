@@ -299,7 +299,8 @@ class Kalshi(VenueFeed):
             self._trade_ids[tid] = None
             if len(self._trade_ids) > 10_000:
                 self._trade_ids.pop(next(iter(self._trade_ids)))
-        taker = Action.BUY if tr.get("taker_side") == "yes" else Action.SELL
+        # taker_outcome_side is canonical; taker_side (deprecated) is all older recordings have
+        taker = Action.BUY if tr.get("taker_outcome_side", tr.get("taker_side")) == "yes" else Action.SELL
         return [
             MarketTrade(
                 ts=raw.t,

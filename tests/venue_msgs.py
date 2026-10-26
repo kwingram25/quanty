@@ -51,9 +51,15 @@ def k_delta(ticker: str, side: str, price: str, delta: str, seq: int, sid: int =
     return json.dumps({"type": "orderbook_delta", "sid": sid, "seq": seq, "msg": msg})
 
 
-def k_trade(ticker: str, tid: str, yes_price: str, count: str, taker: str, ts: int = T0) -> str:
+def k_trade(
+    ticker: str, tid: str, yes_price: str, count: str, taker: str, ts: int = T0, legacy: bool = False
+) -> str:
+    """legacy: only the deprecated taker_side, as older recordings have it."""
+    sides = {"taker_side": taker}
+    if not legacy:
+        sides |= {"taker_outcome_side": taker, "taker_book_side": "bid" if taker == "yes" else "ask"}
     msg = {"trade_id": tid, "market_ticker": ticker, "yes_price_dollars": yes_price, "count_fp": count,
-           "taker_side": taker, "ts_ms": ts}  # fmt: skip
+           **sides, "ts_ms": ts}  # fmt: skip
     return json.dumps({"type": "trade", "sid": 2, "seq": 1, "msg": msg})
 
 

@@ -120,6 +120,8 @@ def test_kalshi_trades_and_index() -> None:
     assert i == IndexValue(ts=T0, src_ts=T0 - 40, key="cfbenchmarks:BRTI", value=81281.5)
     with pytest.raises(ValueError):
         k.parse(raw('{"type":"error","msg":{"code":6,"msg":"Already subscribed"}}'))
+    (old,) = k.parse(raw(k_trade(TK, "c", "0.6700", "2", "no", legacy=True)))  # an older recording
+    assert isinstance(old, MarketTrade) and old.taker is Action.SELL
 
 
 def test_kalshi_subscriptions() -> None:
