@@ -91,6 +91,15 @@ def _num(v: Any) -> float:
     return float(v or 0)
 
 
+def has_keys(api: "OrderAPI") -> bool:
+    """Whether this venue's keys are configured (signing would work)."""
+    try:
+        api.signer  # noqa: B018 - raises when they aren't
+    except (RuntimeError, ValueError, OSError):
+        return False
+    return True
+
+
 class OrderAPI(ABC):
     venue: str
     base_url: str

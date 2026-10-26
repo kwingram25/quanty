@@ -5,14 +5,15 @@ need several things to go wrong at once. This page is what to know before `--arm
 
 ## Before the first live run
 
-1. **Paper trade the experiment** until its fills and P&L look like the backtest's. Move an instance
-   on with `quanty promote <id> --to shadow`, then `--to live`.
-2. **Shadow trade it** (`kind = "shadow"`) so every order is checked by the venue, or built and
-   signed locally for Kalshi: tick sizes, quantity steps and permissions are confirmed before
-   money is involved.
-3. **Place one tiny order by hand through `quanty live`** with small caps, early in a market where
-   nothing else of yours trades, and watch the dashboard: placement, fill, cancel, and the
-   numbers in the ledger against the venue's own.
+1. **Paper trade the experiment** until its fills and P&L look like the backtest's. Every
+   experiment has the `sim`, `shadow` and `live` brokers; strategies start on `sim`.
+2. **Shadow trade it** (the dashboard's **Shadow**, or `quanty promote <id> --to shadow`) so every
+   order is checked by the venue, or built and signed locally for Kalshi: tick sizes, quantity
+   steps and permissions are confirmed before money is involved.
+3. **Go live with one strategy at tiny caps** (`max_qty` and `max_notional` under
+   `[brokers.live]`, in a session started with `quanty live … --arm`), early in a market where
+   nothing else of yours trades, and watch the dashboard: placement, fill, cancel, and the numbers
+   in the ledger against the venue's own.
 4. **Run `quanty doctor`** (or open the dashboard's Health page) and fix anything it marks ✗: keys, clock drift, rate limits and orders
    a previous live run left unresolved.
 5. **Start small**: `max_qty` and `max_notional` at the size you would not mind getting wrong.
@@ -22,7 +23,7 @@ need several things to go wrong at once. This page is what to know before `--arm
 | Layer | What it stops |
 |---|---|
 | `quanty live --arm` | Nothing places orders without it. `paper` and `backtest` refuse live brokers outright. |
-| `max_qty`, `max_notional` (required) | A single oversized order, whatever the strategy computes. |
+| `max_qty`, `max_notional` (required) | A single oversized order, whatever the strategy computes. Without both, the live broker places nothing. They are set in the experiment file only (Reload applies a change), never from the dashboard. |
 | Risk limits | Positions, open risk, risk per correlation group and daily loss past your limits. |
 | `error_limit` | A broker disables itself after this many consecutive venue rejections. |
 | Unknown outcomes | If an order's reply never arrives (timeout, dropped connection), the broker disables itself at once and the order stays pending. It is never assumed rejected: the venue may have filled it. |

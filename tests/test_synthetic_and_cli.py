@@ -74,20 +74,20 @@ def test_list_and_params() -> None:
 def test_live_brokers_are_gated(tmp_path: Path) -> None:
     exp = tmp_path / "live.toml"
     exp.write_text(
-        '[brokers.real]\nkind = "live"\nmax_qty = 10\nmax_notional = 5\n\n'
-        '[[instances]]\nid = "a"\nstrategy = "example_favorite"\nbroker = "real"\n'
+        "[brokers.live]\nmax_qty = 10\nmax_notional = 5\n\n"
+        '[[instances]]\nid = "a"\nstrategy = "example_favorite"\nbroker = "live"\n'
     )
     feeds = tmp_path / "feeds.toml"
     feeds.write_text('[feeds.coinbase]\nkind = "coinbase"\n')
     res = run("paper", str(exp), "--feeds", str(feeds), "--data", str(tmp_path))
-    assert res.exit_code == 2 and "are live: use quanty live --arm" in res.stderr
+    assert res.exit_code == 2 and "place real orders: use quanty live --arm" in res.stderr
     res = run("live", str(exp), "--feeds", str(feeds), "--data", str(tmp_path))
     assert res.exit_code == 2 and "pass --arm" in res.stderr
     res = run("backtest", str(exp), "--hours", "0.5")
     assert res.exit_code == 2 and "backtests need sim or shadow brokers" in res.stderr
     missing = tmp_path / "nocap.toml"
     missing.write_text(exp.read_text().replace("max_notional = 5\n", ""))
-    assert "max_notional" in run("backtest", str(missing)).stderr
+    assert "has no caps: set max_qty and max_notional" in run("backtest", str(missing)).stderr
 
 
 def test_backtest_ledger_folder_is_created(tmp_path: Path) -> None:

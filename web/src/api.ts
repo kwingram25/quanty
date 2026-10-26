@@ -68,7 +68,13 @@ export interface OpenMarket {
   estimates?: Record<string, number>;
 }
 
-export interface Broker { kind: "sim" | "shadow" | "live"; armed?: boolean; disabled?: string }
+export interface Broker {
+  kind: "sim" | "shadow" | "live"; armed?: boolean; disabled?: string;
+  /** a live broker's max_qty and max_notional are both set (without them it places nothing) */
+  capped?: boolean;
+  /** a shadow broker: venues whose keys aren't configured (it can't check their orders) */
+  keys_missing?: string[];
+}
 
 export interface SessionState {
   /** commands this session's quanty understands (missing: a session from before they were listed) */

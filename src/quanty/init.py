@@ -44,6 +44,9 @@ class Answers:
     kalshi_key_path: str = ""
     polymarket_key_id: str = ""
     polymarket_secret: str = ""
+    # the live broker's caps, the largest single order (contracts, $); none: nothing can go live yet
+    max_qty: float | None = None
+    max_notional: float | None = None
 
 
 def check_name(name: str) -> str:
@@ -205,22 +208,31 @@ def _feeds(a: Answers) -> str:
 
 
 def _experiment(a: Answers) -> str:
-    return f"""# What runs: `uv run quanty paper experiments/main.toml --feeds feeds.toml`.
-# Brokers: kind = "sim" simulates fills (paper); "shadow" also checks every order with the venue
-# without placing it; "live" places real orders (needs max_qty, max_notional and `uv run quanty live --arm`).
+    if a.max_qty is not None and a.max_notional is not None:
+        qty, notional = f"max_qty = {a.max_qty:g}", f"max_notional = {a.max_notional:g}"
+    else:  # commented out: set both to go live
+        qty, notional = "# max_qty = 5", "# max_notional = 5"
+    caps = f"{qty:<22}# largest single order, contracts\n{notional:<22}# largest single order, $"
+    return f"""# What runs: `uv run quanty live experiments/main.toml --feeds feeds.toml --arm`
+# (or `quanty paper`, which never places a real order). Every experiment has three brokers:
+# sim simulates fills (paper), shadow also checks every order with the venue without placing it,
+# live places real orders. Strategies start where `broker =` says (sim if it's left out); the
+# dashboard's Shadow, Go live and Back to paper move them while the session runs.
 
 [limits]               # account-wide
 max_open_risk = 100
 max_daily_loss = 50
 
-[brokers.main]
-kind = "sim"
+[brokers.sim]
 latency_ms = 100
+
+[brokers.live]         # without both caps nothing goes live; Reload applies changes to them
+{caps}
 
 [[instances]]
 id = "{a.strategy}"
 strategy = "{a.strategy}"
-broker = "main"
+broker = "sim"
 [instances.params]     # override the strategy's defaults here (`quanty params {a.strategy}` lists them)
 [instances.limits]
 max_order_qty = 10
@@ -257,15 +269,16 @@ placed) and live. Run everything through `uv run quanty …`; the first run sets
   strategies from folders in the user's `~/.config/quanty/config.toml`; leave those alone and don't
   reuse their names.
 - `experiments/main.toml`: which strategies run (`[[instances]]`), their params, their broker
-  (`kind = "sim"`, `"shadow"` or `"live"`) and risk limits. A `grid = {{ param = [values] }}` in an
+  (`sim`, `shadow` or `live`; every experiment has the three), the live broker's caps and risk
+  limits. A `grid = {{ param = [values] }}` in an
   entry makes one instance per combination (`id = "name_{{param}}"` names them).
 - `feeds.toml`: the venues and series to connect to. `.env`: API keys.
 
 ## Rules
 
-- **Never run `quanty live`, never set `kind = "live"` or `QUANTY_MODE=live`, and never raise
-  `max_qty`, `max_notional` or `[limits]`, unless the user explicitly asks.** These place or permit
-  real orders with real money.
+- **Never run `quanty live`, never set `broker = "live"` or `QUANTY_MODE=live`, and never set or
+  raise `max_qty`, `max_notional` or `[limits]`, unless the user explicitly asks.** These place or
+  permit real orders with real money.
 - Don't move a strategy toward live (`quanty promote --to live`, the dashboard's Go live) unless the
   user asks; `--to shadow` is safe (orders checked by the venue, never placed).
 - **Never read, print or edit `.env`** (API keys). `uv run quanty doctor` checks it without showing it.
@@ -413,12 +426,13 @@ A quanty project: your strategy, its configuration, and what's needed to deploy 
    (`grid = {{ min_conf = [0.9, 0.95] }}`); after editing the file, `uv run quanty reload` starts and
    retires them without a restart. The dashboard's **Variants** tab ranks them for promotion, and
    backtests new values of a strategy's params on the recent recordings.
-5. **Shadow, then live**: `uv run quanty promote <id> --to shadow` has every order checked by the
-   venue; `--to live` adds a live broker (asking for `max_qty` and `max_notional`) and keeps a paper
-   twin beside it, for the dashboard's **Compare**. Then
-   `uv run quanty live experiments/main.toml --feeds feeds.toml --data data --arm`. In a session
-   started that way, **Go live** on the dashboard (or `quanty promote --now`) switches strategies
-   without a restart.
+5. **Shadow, then live**: set the live broker's caps in `experiments/main.toml` (`[brokers.live]`
+   `max_qty` and `max_notional`, the largest single order), then run the session armed, everything
+   still on paper: `uv run quanty live experiments/main.toml --feeds feeds.toml --data data --arm --ui`.
+   On the dashboard, a strategy's **Shadow** has every order checked by the venue, **Go live** places
+   real orders from its next market (with a paper twin beside it, for **Compare**), and **Back to
+   paper** steps back, all without a restart. `uv run quanty promote <id> --to live --now` does it from
+   a terminal.
 
 ## Deploy
 

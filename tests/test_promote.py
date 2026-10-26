@@ -8,7 +8,7 @@ from quanty import cli, experiment
 from quanty.control import ControlStore
 from quanty.promote import promote
 
-TWO = """# two strategies, one (implicit) broker
+TWO = """# two strategies on the default broker (sim)
 [[instances]]
 id = "a"
 strategy = "example_favorite"
@@ -23,23 +23,20 @@ def test_promote_keeps_the_others_and_the_comments(tmp_path: Path) -> None:
     exp = tmp_path / "main.toml"
     exp.write_text(TWO)
     done = promote(exp, "a", "live", max_qty=5, max_notional=4, overrides={"size": 3})
+    assert done.capped  # the built-in live broker had no caps
     raw = tomllib.loads(exp.read_text())
-    assert raw["brokers"]["sim"]["kind"] == "sim" and raw["brokers"]["live"] == {
-        "kind": "live",
-        "max_qty": 5,
-        "max_notional": 4,
-    }
+    assert raw["brokers"] == {"live": {"max_qty": 5, "max_notional": 4}}
     by_id = {i["id"]: i for i in raw["instances"]}
     assert by_id["a"]["broker"] == "live" and by_id["a"]["params"] == {"size": 3}
-    assert by_id["b"]["broker"] == "sim" and done.pinned == ["b"]  # explicit now that there are two
+    assert "broker" not in by_id["b"]  # still on the default
     assert "# stays on paper" in exp.read_text() and "# two strategies" in exp.read_text()
     assert experiment.live_brokers(experiment.load(exp)) == ["live"]
 
-    promote(exp, "a", "sim")  # back: the live block stays, parked, and isn't "live" any more
+    promote(exp, "a", "sim")  # back: the caps stay, and nothing is on live any more
     parked = experiment.load(exp)
-    assert "live" in parked.brokers and experiment.live_brokers(parked) == []
-    again = promote(exp, "a", "live")  # reuses it, caps and all: nothing to ask
-    assert not again.added_broker and tomllib.loads(exp.read_text())["brokers"]["live"]["max_qty"] == 5
+    assert experiment.live_brokers(parked) == [] and experiment.parked_live_brokers(parked) == ["live"]
+    again = promote(exp, "a", "live")  # caps and all: nothing to ask
+    assert not again.capped and tomllib.loads(exp.read_text())["brokers"]["live"]["max_qty"] == 5
 
 
 def test_promote_refusals_leave_the_file_alone(tmp_path: Path) -> None:
@@ -82,20 +79,3 @@ def test_promote_command_carries_dashboard_edits(tmp_path: Path, monkeypatch: py
     back = CliRunner().invoke(cli.app, ["promote", "a", "--to", "sim", "--no-check"])
     assert back.exit_code == 0 and "removed its paper twin a_paper" in back.output
     assert [i["id"] for i in tomllib.loads(exp.read_text())["instances"]] == ["a", "b"]
-
-
-def test_adding_a_parked_live_broker(tmp_path: Path) -> None:
-    from quanty.promote import add_live_broker
-
-    exp = tmp_path / "main.toml"
-    exp.write_text(TWO)  # one implicit broker
-    assert add_live_broker(exp, 5, 4) == "live"
-    loaded = experiment.load(exp)
-    assert (
-        loaded.brokers["live"].kind == "live" and experiment.live_brokers(loaded) == []
-    )  # parked: nothing on it
-    assert experiment.parked_live_brokers(loaded) == ["live"]
-    assert all(i.broker == "sim" for i in loaded.instances)  # they keep the broker they had
-    assert "# stays on paper" in exp.read_text()
-    with pytest.raises(ValueError, match="already has a live broker"):
-        add_live_broker(exp, 5, 4)

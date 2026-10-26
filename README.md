@@ -58,8 +58,9 @@ paper trading, shadow trading and live trading; [Deploying](docs/deploying.md) c
   halts: checked before any broker sees an order.
 - **From paper to live, one strategy at a time.** Run many variants on paper (a `grid` in the
   experiment makes one per combination), rank them by what they likely make per trade at worst,
-  and switch the ones you pick to real money while the session runs: from the dashboard or
-  `quanty promote --now`. Each keeps a paper twin beside it, so live fills can be compared with
+  and switch the ones you pick to shadow, then real money, while the session runs: every
+  experiment has sim, shadow and live brokers, so it's a button on the dashboard (or
+  `quanty promote --now`) once the live broker's caps are set. Each keeps a paper twin beside it, so live fills can be compared with
   simulated ones on the same markets; every order records whether it was real money, so the two are
   never added together. `quanty reload` starts and retires variants without a restart, and
   restarts restore what each strategy holds.

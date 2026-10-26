@@ -28,6 +28,16 @@ def test_init_writes_a_working_project(tmp_path: Path) -> None:
     assert "[feeds.kalshi]" in feeds and 'slug_prefix = "cpc-btc-updown-15m"' in feeds
 
 
+def test_init_writes_the_live_caps_it_was_given(tmp_path: Path) -> None:
+    create(tmp_path / "a", Answers(), vendor=False)
+    plain = experiment.load(tmp_path / "a" / "experiments" / "main.toml")
+    assert set(plain.brokers) == {"sim", "shadow", "live"} and not plain.brokers["live"].capped  # type: ignore[union-attr]
+    create(tmp_path / "b", Answers(max_qty=5, max_notional=4), vendor=False)
+    capped = experiment.load(tmp_path / "b" / "experiments" / "main.toml")
+    assert experiment.parked_live_brokers(capped) == ["live"]  # ready, with everything on paper
+    assert {capped.broker_of(i) for i in capped.instances} == {"sim"}
+
+
 def test_init_refuses_to_overwrite_and_checks_names(tmp_path: Path) -> None:
     create(tmp_path, Answers(), vendor=False)
     with pytest.raises(ValueError, match="already has"):

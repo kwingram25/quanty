@@ -68,8 +68,7 @@ clock_ms = 1000                # on_clock every second (optional)
 [limits]                       # account-wide, across all instances
 max_open_risk = 200
 
-[brokers.sim]
-kind = "sim"                   # sim | shadow | live
+[brokers.sim]                  # every experiment has sim, shadow and live; a table changes settings
 latency_ms = 50
 
 [[instances]]
@@ -143,54 +142,44 @@ backtests. Recording continues alongside, and the ledger is written as it goes
 kill switch), and a strategy's params, such as its size, can be edited from its details without a
 restart.
 
-## 7. Shadow trade
-
-Change a broker to `kind = "shadow"`. Fills are still simulated, but every order is also turned
-into the exact request the venue would receive and checked: Polymarket US validates it
-server-side without placing it; Kalshi requests are built, signed and checked locally. This
-catches tick, size and permission problems, and measures real round trips, with no risk.
-
-## 8. Trade live
+## 7. Shadow, then live
 
 Read [Live trading](live-trading.md) first.
 
-Paper or live is a property of each instance's broker (`kind = "sim"`, `"shadow"` or `"live"`), so
-the same experiment file goes from paper to live one instance at a time. `quanty promote` makes the
-edit for you, keeping the file's comments and carrying any dashboard edits to the instance's params:
-
-```sh
-uv run quanty promote my_strategy --to shadow     # orders checked by the venue, still simulated fills
-uv run quanty promote my_strategy --to live       # asks for max_qty and max_notional, runs doctor
-uv run quanty live experiments/main.toml --feeds feeds.toml --data data --arm
-```
-
-That adds a broker like this (written by hand, it works the same):
+Every experiment has three brokers: `sim` (simulated fills: paper), `shadow` (simulated fills, and
+every order is also turned into the exact request the venue would receive and checked: Polymarket
+US validates it server-side without placing it; Kalshi requests are built, signed and checked
+locally) and `live` (real orders). A strategy starts on the one its `broker =` names, `sim` if it's
+left out. The live broker places nothing until its caps are set, in the experiment file:
 
 ```toml
 [brokers.live]
-kind = "live"
-max_qty = 10          # required: largest single order, contracts
-max_notional = 10     # required: largest single order, $
+max_qty = 10          # largest single order, contracts
+max_notional = 10     # largest single order, $
 ```
 
-Instances left on `sim` keep paper trading in the same live session. `--to sim` steps back; the live
-broker block stays in the file, unused, for next time.
-
-**Without a restart.** Start the session armed, with the live broker defined even if nothing uses it
-yet (`quanty promote` writes one, or add it by hand): `quanty live experiments/main.toml --feeds
-feeds.toml --data data --arm`. Then switch a paper strategy live while it runs, from its details on
-the dashboard (**Go live on …**, with the run's name typed to confirm) or from a terminal on the
-same machine:
+(`quanty init` asks for them.) Then start the session armed, with everything still on paper:
 
 ```sh
-uv run quanty promote my_strategy --to live --now
+uv run quanty live experiments/main.toml --feeds feeds.toml --data data --arm --ui
 ```
 
-It takes real orders from the next market it enters; markets it's already in finish on paper, so a
-simulated position is never sold for real (or the other way). Its paper twin starts beside it, and
-the experiment file is updated (in a container, where the image's copy is replaced on deploy, the
-switch is kept with the run instead and reapplied when the session restarts). **Back to paper**
-works the same way.
+An armed session only trades real money for strategies you move onto `live`, and moving them
+happens while it runs, from a strategy's details on the dashboard:
+
+1. **Shadow**: every order is checked by the venue from the next market it enters. Watch the
+   Orders tab for rejections.
+2. **Go live**, with the run's name typed to confirm: real orders from the next market it enters.
+   Markets it's already in finish where they are, so a simulated position is never sold for real
+   (or the other way). Its paper twin starts beside it, for the **Compare** tab.
+3. **Back to paper** steps back the same way.
+
+Go live stays off, with the reason, until the caps are set (edit them, then **Reload
+experiment**: caps apply without a restart) and in a session started without `--arm`
+(`quanty paper` can never place a real order). Each switch is written into the experiment file; on a
+server it's kept with the run instead, and `quanty pull` brings it home. From a terminal on the same
+machine, `uv run quanty promote my_strategy --to live --now` does the same as Go live, and without
+`--now` it edits the file for the next session (asking for the caps if they aren't set).
 
 **Many variants.** A `grid` in an `[[instances]]` entry makes one instance per combination:
 

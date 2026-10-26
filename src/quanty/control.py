@@ -40,12 +40,14 @@ from sqlalchemy import (
 )
 
 from quanty.brokers.live import LiveBroker
+from quanty.brokers.shadow import ShadowBroker
 from quanty.core.broker import Broker
 from quanty.core.engine import Engine as Trader
 from quanty.core.engine import describe
 from quanty.core.portfolio import Position
 from quanty.core.risk import event_exposure
 from quanty.core.types import Side
+from quanty.venues.orders import has_keys
 
 ACTIONS = (
     "halt",
@@ -60,7 +62,6 @@ ACTIONS = (
     "save_params",
     "switch",
     "reload",
-    "add_live_broker",
 )
 ALIVE_S = 10  # a session whose heartbeat is older than this is not running
 DEPLOYED_MARK = ".quanty-deployed"  # left by `quanty deploy` in a server's project folder
@@ -281,6 +282,7 @@ class Controller:
     ) -> None:
         """playback: a demo's pacing, which the dashboard can switch between speeds."""
         self.store, self.run, self.trader, self.can_arm, self.poll_s = store, run, trader, can_arm, poll_s
+        self._keys_missing: dict[str, list[str]] = {}
         self.playback = playback
         self.feeds: Callable[[], Mapping[str, str]] | None = None  # feed -> health, set by a live session
         self.experiment: Path | None = None  # the experiment file, set by a live session (not a demo)
@@ -370,14 +372,23 @@ class Controller:
     def _reload(self) -> str:
         """Bring the running session in line with its experiment file: start instances it added,
         retire ones it dropped (no new entries; what they hold finishes), apply changed params
-        (dashboard edits still on top) and brokers. New brokers, limits or feeds need a restart."""
+        (dashboard edits still on top), brokers and live brokers' caps. New brokers, limits or feeds
+        need a restart."""
         from quanty.core.engine import Instance
-        from quanty.experiment import strategy_class
+        from quanty.experiment import LiveBrokerConfig, strategy_class
 
         if self.rebuild is None:
             raise ValueError("this session has no experiment file to reload (a demo?)")
         exp, strategies = self.rebuild()
         t, done = self.trader, []
+        for name, cfg in exp.brokers.items():  # caps come from the file only, never the dashboard
+            b = t.brokers.get(name)
+            caps = (cfg.max_qty, cfg.max_notional) if isinstance(cfg, LiveBrokerConfig) else None
+            if caps is not None and isinstance(b, LiveBroker) and (b.max_qty, b.max_notional) != caps:
+                b.max_qty, b.max_notional = caps
+                done.append(
+                    f"{name}: caps " + (f"max_qty {caps[0]}, max_notional {caps[1]}" if b.capped else "none")
+                )
         specs = {s.id: s for s in exp.instances}
         for iid, spec in specs.items():
             if spec.strategy not in strategies:
@@ -431,6 +442,11 @@ class Controller:
         if new.kind == "live":
             if not self.can_arm or not isinstance(new, LiveBroker) or not new.armed:
                 raise ValueError("switching to a live broker needs a session started with quanty live --arm")
+            if not new.capped:
+                raise ValueError(
+                    f"{broker_name} has no caps: set max_qty and max_notional under [brokers.{broker_name}] "
+                    "in the experiment file, then Reload"
+                )
             if new.disabled:
                 raise ValueError(f"{broker_name} disabled itself ({new.disabled}); restart after checking")
         old = inst.broker
@@ -488,7 +504,11 @@ class Controller:
         for name, b in self.brokers.items():
             info: dict[str, Any] = {"kind": broker_kind(b)}
             if isinstance(b, LiveBroker):
-                info.update(armed=b.armed, disabled=b.disabled)
+                info.update(armed=b.armed, disabled=b.disabled, capped=b.capped)
+            if isinstance(b, ShadowBroker):  # it previews orders with the venue's keys
+                if name not in self._keys_missing:  # keys don't change while it runs
+                    self._keys_missing[name] = sorted(v for v, api in b.apis.items() if not has_keys(api))
+                info["keys_missing"] = self._keys_missing[name]
             brokers[name] = info
         instances = {
             iid: {
@@ -602,22 +622,6 @@ class Controller:
         t = self.trader
         if action == "reload":
             return self._reload()
-        if action == "add_live_broker":
-            from quanty import promote
-
-            v = value if isinstance(value, dict) else {}
-            if self.save_mode != "file" or self.experiment is None:
-                raise ValueError("this session can't write its experiment file: add the broker there by hand")
-            try:
-                qty, notional = float(v["max_qty"]), float(v["max_notional"])
-            except (KeyError, TypeError, ValueError):
-                raise ValueError("add_live_broker needs max_qty and max_notional") from None
-            added = promote.add_live_broker(self.experiment, qty, notional)
-            caps = f"max_qty {qty:g}, max_notional {notional:g}"
-            return (
-                f"added [brokers.{added}] ({caps}) to {self.experiment.name}; "
-                "restart with quanty live --arm to switch strategies onto it"
-            )
         if action == "switch":
             if target not in t.instances:
                 raise ValueError(f"no instance {target!r}")

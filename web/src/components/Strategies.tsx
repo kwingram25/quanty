@@ -1,6 +1,6 @@
 import { AnimatePresence, motion, useAnimationControls, useReducedMotion } from "motion/react";
 import { useEffect, useRef, useState } from "react";
-import { sendCommand, type SessionState, type Snapshot, type Strategy, type StrategyInfo } from "../api";
+import { sendCommand, type Broker, type SessionState, type Snapshot, type Strategy, type StrategyInfo } from "../api";
 import { cents, money, seriesName, tone } from "../format";
 import { AnimatedNumber } from "./AnimatedNumber";
 import { Id } from "./Id";
@@ -64,9 +64,7 @@ export function Strategies({ snap, slots, onHover, focus }: {
             onSave={() => act("save_params", st.instance, `Saved ${st.instance} to the experiment file`)}
             onSwitch={(broker, kind) => act("switch", st.instance,
               kind === "live" ? `Switched ${st.instance} to live on ${broker}` : kind === "shadow"
-                ? `Switched ${st.instance} to shadow on ${broker}` : `Switched ${st.instance} back to paper`, "", { broker, twin: true })}
-            onPrepare={(qty, notional) => act("add_live_broker", st.instance, "Added a live broker to the experiment", "",
-              { max_qty: qty, max_notional: notional })} />;
+                ? `Switched ${st.instance} to shadow on ${broker}` : `Switched ${st.instance} back to paper`, "", { broker, twin: true })} />;
         })}
         {s && <Brokers s={s} act={act} />}
       </div>
@@ -96,14 +94,13 @@ export function KindBadge({ kind }: { kind: string }) {
 
 type Edit = (value: Record<string, unknown>) => Promise<boolean | null>;
 
-function Row({ st, slot, kind, onHover, byKind, session, halted, blocked, stops, onToggle, onEdit, onReset, onSave, onSwitch, onPrepare }: {
+function Row({ st, slot, kind, onHover, byKind, session, halted, blocked, stops, onToggle, onEdit, onReset, onSave, onSwitch }: {
   st: Strategy; slot: number; kind: string; onHover?: (name: string | null) => void;
   /** its realized P&L by kind: a strategy promoted mid-run has paper and real-money parts */
   byKind?: Record<string, number>; session: SessionState | null; halted: boolean; blocked: number; stops: number;
   onToggle: () => void;
   onEdit: Edit; onReset: () => Promise<boolean | null>; onSave: () => Promise<boolean | null>;
   onSwitch: (broker: string, kind: string) => Promise<boolean | null>;
-  onPrepare: (maxQty: number, maxNotional: number) => Promise<boolean | null>;
 }) {
   const [open, setOpen] = useState(() => {
     try { return sessionStorage.getItem(`open:${st.instance}`) === "1"; } catch { return false; }
@@ -169,7 +166,7 @@ function Row({ st, slot, kind, onHover, byKind, session, halted, blocked, stops,
         {open && (
           <motion.div className="details" initial={{ height: 0, opacity: 0 }} animate={{ height: "auto", opacity: 1 }}
             exit={{ height: 0, opacity: 0 }} transition={{ duration: 0.2, ease: [0.22, 1, 0.36, 1] }}>
-            <Details st={st} session={session} onEdit={onEdit} onReset={onReset} onSave={onSave} onSwitch={onSwitch} onPrepare={onPrepare} />
+            <Details st={st} session={session} onEdit={onEdit} onReset={onReset} onSave={onSave} onSwitch={onSwitch} />
           </motion.div>
         )}
       </AnimatePresence>
@@ -181,10 +178,9 @@ const fmtParam = (v: unknown): string =>
   Array.isArray(v) ? v.join(", ") : typeof v === "number" ? String(+v.toFixed(6)) : v == null ? "–" : String(v);
 
 /** Everything worth knowing about one strategy instance. */
-function Details({ st, session, onEdit, onReset, onSave, onSwitch, onPrepare }: {
+function Details({ st, session, onEdit, onReset, onSave, onSwitch }: {
   st: Strategy; session: SessionState | null; onEdit: Edit; onReset: () => Promise<boolean | null>;
   onSave: () => Promise<boolean | null>; onSwitch: (broker: string, kind: string) => Promise<boolean | null>;
-  onPrepare: (maxQty: number, maxNotional: number) => Promise<boolean | null>;
 }) {
   const toast = useToast();
   const [editing, setEditing] = useState(false);
@@ -214,7 +210,7 @@ function Details({ st, session, onEdit, onReset, onSave, onSwitch, onPrepare }: 
       {info.description && <p className="desc">{info.description}</p>}
       {info.strategy && <p className="muted small">strategy <code>{info.strategy}</code>{info.broker && <> · broker <code>{info.broker}</code></>}</p>}
 
-      {session && <SwitchBroker iid={st.instance} strategy={info.strategy} session={session} onSwitch={onSwitch} onPrepare={onPrepare} />}
+      {session && <SwitchBroker iid={st.instance} strategy={info.strategy} series={info.series ?? []} session={session} onSwitch={onSwitch} />}
 
       <h4>Markets it trades</h4>
       <div className="chips">
@@ -302,36 +298,37 @@ function Details({ st, session, onEdit, onReset, onSave, onSwitch, onPrepare }: 
   );
 }
 
-/** Going live, shadow or back to paper while the session runs: onto a broker the session already
- * has (a live one only in a session started with `quanty live --arm`). New markets use it; the
- * markets the strategy is in finish where they are. Going live also starts its paper twin, for
- * Compare. A session with no live broker can add one to the experiment, for after a restart. */
-function SwitchBroker({ iid, strategy, session, onSwitch, onPrepare }: {
-  iid: string; strategy?: string; session: SessionState;
+/** Going live, shadow or back to paper while the session runs: every experiment has the sim, shadow
+ * and live brokers (live only in a session started with `quanty live --arm`, and only once its caps
+ * are set in the experiment file). New markets use the new broker; the markets the strategy is in
+ * finish where they are. Going live also starts its paper twin, for Compare. */
+function SwitchBroker({ iid, strategy, series, session, onSwitch }: {
+  iid: string; strategy?: string; series: string[]; session: SessionState;
   onSwitch: (broker: string, kind: string) => Promise<boolean | null>;
-  onPrepare: (maxQty: number, maxNotional: number) => Promise<boolean | null>;
 }) {
   const toast = useToast();
-  const [preparing, setPreparing] = useState(false);
-  const [caps, setCaps] = useState({ qty: "10", notional: "10" });
   const current = session.instances[iid]?.broker;
   const held = session.instances[iid]?.switched;
   if (!current || !session.actions?.includes("switch")) return null;
   const kind = session.brokers[current]?.kind;
   const others = Object.entries(session.brokers).filter(([n]) => n !== current);
-  const live = others.filter(([, b]) => b.kind === "live" && b.armed && !b.disabled && session.can_arm);
+  const live = others.filter(([, b]) => b.kind === "live");
   const shadow = others.filter(([, b]) => b.kind === "shadow");
   const paper = others.filter(([, b]) => b.kind === "sim");
-  const anyLive = Object.values(session.brokers).some((b) => b.kind === "live");
-  // not in a demo: synthetic markets, and no experiment file to add a broker to
-  const canPrepare = !anyLive && session.save != null && session.actions?.includes("add_live_broker");
+  const venues = new Set(series.map((x) => x.split(":")[0]));
+  const noKeys = (b: Broker) => (b.keys_missing ?? []).filter((v) => venues.has(v));
+  // why Go live is off, if it is (a demo has no live broker, and needs no note)
+  const whyNotLive = (b: Broker) =>
+    !session.can_arm ? "Real money needs a session started with quanty live --arm"
+      : b.capped === false ? "Set max_qty and max_notional under [brokers.live] in the experiment file (the largest single order), then Reload experiment"
+        : b.disabled ? `Disabled itself: ${b.disabled}. Check the venue, then restart`
+          : !b.armed ? "Disarmed: arm it under Live brokers" : "";
   const lines = held && [
     `# in the [[instances]] entry with id = "${iid}"`, `broker = "${held.broker}"`,
     ...(held.twin ? ["", "# its paper twin, a new entry", "[[instances]]", `id = "${held.twin}"`,
       `strategy = "${strategy ?? "?"}"`, `broker = "${session.instances[held.twin]?.broker ?? "?"}"`, `twin_of = "${iid}"`] : []),
   ].join("\n");
-  const brokerLines = `[brokers.live]\nkind = "live"\nmax_qty = ${+caps.qty || 0}       # largest single order, contracts\nmax_notional = ${+caps.notional || 0}  # largest single order, $`;
-  const valid = +caps.qty > 0 && +caps.notional > 0;
+  const liveOff = kind !== "live" && session.save != null && (live.length ? whyNotLive(live[0][1]) : session.can_arm ? "" : "Real money needs a session started with quanty live --arm");
   return (
     <div className="switch-broker">
       <h4>Broker <span className="muted small">{current} ({kind === "live" ? "real money" : kind})</span></h4>
@@ -344,48 +341,27 @@ function SwitchBroker({ iid, strategy, session, onSwitch, onPrepare }: {
           }}>Copy for the file</button></p>
       )}
       <div className="row-actions">
-        {kind !== "shadow" && kind !== "live" && shadow.map(([n]) => (
-          <button key={n} className="btn" onClick={() => onSwitch(n, "shadow")}
-            title="Each order is checked by the venue (never placed) from the next market it enters; fills stay simulated">
-            Shadow on {n}</button>
-        ))}
-        {kind !== "live" && live.map(([n]) => (
-          <button key={n} className="btn danger-outline" onClick={() => onSwitch(n, "live")}
-            title="Real orders from the next market it enters; markets it's in now finish where they are. Keeps a paper twin running beside it, for Compare">
-            Go live on {n}</button>
+        {kind !== "shadow" && kind !== "live" && shadow.map(([n, b]) => {
+          const missing = noKeys(b);
+          return (
+            <button key={n} className="btn" disabled={missing.length > 0} onClick={() => onSwitch(n, "shadow")}
+              title={missing.length ? `No ${missing.join(", ")} keys in .env: shadow checks each order with the venue's keys`
+                : "Each order is checked by the venue (never placed) from the next market it enters; fills stay simulated"}>
+              Shadow</button>
+          );
+        })}
+        {kind !== "live" && live.map(([n, b]) => (
+          <button key={n} className="btn danger-outline" disabled={!!whyNotLive(b)} onClick={() => onSwitch(n, "live")}
+            title={whyNotLive(b) || "Real orders from the next market it enters; markets it's in now finish where they are. Keeps a paper twin running beside it, for Compare"}>
+            Go live</button>
         ))}
         {kind !== "sim" && paper.slice(0, 1).map(([n]) => (
           <button key={n} className="btn" onClick={() => onSwitch(n, "sim")}
             title={kind === "live" ? "Simulated from the next market it enters; positions it holds for real finish on the venue" : "Simulated from the next market it enters"}>
             Back to paper</button>
         ))}
-        {canPrepare && !preparing && (
-          <button className="btn" onClick={() => setPreparing(true)}
-            title="Add a live broker to the experiment (nothing moves onto it); after a restart with --arm, Go live appears here">
-            Prepare for live…</button>
-        )}
       </div>
-      {canPrepare && preparing && (
-        <form className="prepare" onSubmit={(e) => { e.preventDefault(); if (valid && session.save === "file") onPrepare(+caps.qty, +caps.notional).then((ok) => ok !== false && setPreparing(false)); }}>
-          <p className="muted small">A live broker caps every single order. It's added to the experiment, unused. Real money
-            needs the session started with <code>quanty live … --arm</code> (on a server, <code>QUANTY_MODE=live</code> in
-            .env), so that takes one restart from the command line; after it, Go live and Back to paper switch here
-            without restarts.</p>
-          <label>Largest order, contracts <input inputMode="decimal" value={caps.qty} onChange={(e) => setCaps({ ...caps, qty: e.target.value })} /></label>
-          <label>Largest order, $ <input inputMode="decimal" value={caps.notional} onChange={(e) => setCaps({ ...caps, notional: e.target.value })} /></label>
-          <div className="actions">
-            <button type="button" className="btn" onClick={() => setPreparing(false)}>Cancel</button>
-            {session.save === "file" ? (
-              <button type="submit" className="btn primary" disabled={!valid}>Add to the experiment</button>
-            ) : (
-              <button type="button" className="btn primary" disabled={!valid} onClick={async () => {
-                try { await navigator.clipboard.writeText(brokerLines); toast({ kind: "ok", title: "Copied for the experiment file", body: "Paste it in your local experiment file, then deploy." }); }
-                catch { toast({ kind: "warning", title: "Copy these lines into the experiment file", body: brokerLines }); }
-              }}>Copy for the file</button>
-            )}
-          </div>
-        </form>
-      )}
+      {liveOff && <p className="muted small">{liveOff.replace(/^Set /, "To go live: set ")}.</p>}
     </div>
   );
 }
@@ -450,8 +426,8 @@ function Brokers({ s, act }: { s: SessionState; act: (a: string, t: string, l: s
       {live.map(([name, b]) => (
         <div key={name} className="strategy">
           <div className="top"><span className="name">{name}</span>
-            <span className={`pill ${b.disabled ? "disabled" : b.armed ? "armed" : "halted"}`}><span className="dot" />
-              {b.disabled ? "disabled" : b.armed ? "armed" : "disarmed"}</span></div>
+            <span className={`pill ${b.disabled ? "disabled" : b.capped === false ? "halted" : b.armed ? "armed" : "halted"}`}><span className="dot" />
+              {b.disabled ? "disabled" : b.capped === false ? "no caps" : b.armed ? "armed" : "disarmed"}</span></div>
           <div className="sub"><span className="grow">{b.disabled}</span>
             {b.armed ? <button className="btn" onClick={() => act("disarm", name, `Disarmed ${name}`)}>Disarm</button>
               : s.can_arm && !b.disabled ? <button className="btn" onClick={() => act("arm", name, `Armed ${name}`)}>Arm</button> : null}

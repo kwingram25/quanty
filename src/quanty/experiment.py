@@ -7,14 +7,18 @@ Example (TOML)::
     [limits]                     # account-wide
     max_open_risk = 500
 
+    # every experiment has three brokers, sim, shadow and live; a table only changes settings
     [brokers.sim]
-    kind = "sim"
     latency_ms = 50
+
+    [brokers.live]               # real orders need these caps (and a session with --arm)
+    max_qty = 5
+    max_notional = 5
 
     [[instances]]
     id = "fav_paper"
     strategy = "example_favorite"
-    broker = "sim"               # optional when there is one broker
+    broker = "sim"               # the default: paper; "shadow" or "live" to start it there
     [instances.params]
     min_conf = 0.9
     [instances.limits]
@@ -56,17 +60,26 @@ class ShadowBrokerConfig(SimBrokerConfig):
 
 
 class LiveBrokerConfig(ConfigModel):
-    """Real orders. Runs only under `quanty live --arm`; the caps are required (fat-finger guard)."""
+    """Real orders. Runs only under `quanty live --arm`, and places nothing until both caps are set
+    (a fat-finger guard)."""
 
     kind: Literal["live"] = "live"
-    max_qty: PositiveFloat = Field(description="Largest single order, in contracts")
-    max_notional: PositiveFloat = Field(description="Largest single order, in $ (qty × price)")
+    max_qty: PositiveFloat | None = Field(None, description="Largest single order, in contracts")
+    max_notional: PositiveFloat | None = Field(None, description="Largest single order, in $ (qty × price)")
     error_limit: PositiveInt = Field(3, description="Consecutive venue rejections that disable the broker")
     poll_s: PositiveFloat = Field(1.0, description="Seconds between reads of resting orders")
+
+    @property
+    def capped(self) -> bool:
+        return self.max_qty is not None and self.max_notional is not None
 
 
 def _broker_kind(v: Any) -> str:
     return str(v.get("kind", "sim") if isinstance(v, dict) else getattr(v, "kind", "sim"))
+
+
+DEFAULT_BROKER = "sim"  # where an instance without `broker =` runs
+BUILT_IN_BROKERS = ("sim", "shadow", "live")  # every experiment has these; each is its own kind
 
 
 # `kind` may be left out (= "sim")
@@ -92,7 +105,7 @@ class InstanceSpec(ConfigModel):
 
 
 def _default_brokers() -> dict[str, BrokerConfig]:
-    return {"sim": SimBrokerConfig()}
+    return {"sim": SimBrokerConfig(), "shadow": ShadowBrokerConfig(), "live": LiveBrokerConfig()}
 
 
 class Experiment(ConfigModel):
@@ -104,6 +117,25 @@ class Experiment(ConfigModel):
     brokers: dict[str, BrokerConfig] = Field(default_factory=_default_brokers, min_length=1)
     instances: list[InstanceSpec] = Field(min_length=1)
     signals: list[AnySignalConfig] = Field(default_factory=list)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _built_in_brokers(cls, raw: Any) -> Any:
+        """sim, shadow and live always exist; [brokers.<name>] tables change their settings (the
+        kind follows the name) or add more brokers (kind = "sim" unless given)."""
+        if not isinstance(raw, dict):
+            return raw
+        given = raw.get("brokers") or {}
+        if not isinstance(given, dict):
+            return raw
+        out: dict[str, Any] = {name: {"kind": name} for name in BUILT_IN_BROKERS}
+        for name, cfg in given.items():
+            if name in BUILT_IN_BROKERS and isinstance(cfg, dict):
+                if cfg.get("kind", name) != name:
+                    raise ValueError(f"brokers.{name} is the built-in {name} broker; name another one")
+                cfg = {**cfg, "kind": name}
+            out[name] = cfg
+        return {**raw, "brokers": out}
 
     @model_validator(mode="before")
     @classmethod
@@ -142,13 +174,19 @@ class Experiment(ConfigModel):
             if inst.twin_of is not None and inst.twin_of not in ids:
                 raise ValueError(f"instance {inst.id}: twin_of {inst.twin_of!r} is not an instance")
         for inst in self.instances:
-            name = inst.broker or (next(iter(self.brokers)) if len(self.brokers) == 1 else None)
+            name = self.broker_of(inst)
             if name not in self.brokers:
                 raise ValueError(f"instance {inst.id}: broker {inst.broker!r} is not defined under [brokers]")
+            cfg = self.brokers[name]
+            if isinstance(cfg, LiveBrokerConfig) and not cfg.capped:
+                raise ValueError(
+                    f"instance {inst.id} is on {name}, which has no caps: set max_qty and max_notional "
+                    f"under [brokers.{name}] (the largest single order, contracts and $)"
+                )
         return self
 
     def broker_of(self, inst: InstanceSpec) -> str:
-        return inst.broker or next(iter(self.brokers))
+        return inst.broker or DEFAULT_BROKER
 
 
 def load(path: Path) -> Experiment:
@@ -248,9 +286,11 @@ def build_session(
 
 
 def parked_live_brokers(exp: Experiment) -> list[str]:
-    """Live brokers no instance uses yet: a live session can switch instances onto them."""
+    """Live brokers with caps that no instance uses yet: an armed session can switch onto them."""
     used = set(live_brokers(exp))
-    return [n for n, c in exp.brokers.items() if isinstance(c, LiveBrokerConfig) and n not in used]
+    return [
+        n for n, c in exp.brokers.items() if isinstance(c, LiveBrokerConfig) and c.capped and n not in used
+    ]
 
 
 def signals(exp: Experiment) -> list[Signal]:

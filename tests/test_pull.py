@@ -43,7 +43,7 @@ def test_a_deployed_folder_keeps_dashboard_changes_with_the_run(
         [Instance("fav", Sized(SizeParams(size=5)), SimBroker("paper"))],
         ledger=Ledger(tmp_path / "l.sqlite"),
         clock_ms=None,
-        spare_brokers=[LiveBroker("real", armed=True)],
+        spare_brokers=[LiveBroker("real", armed=True, max_qty=10, max_notional=10)],
     )
     store = ControlStore(tmp_path / "data" / "control.sqlite")
     c = Controller(store, "session/main", engine, can_arm=True)

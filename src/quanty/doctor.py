@@ -91,7 +91,16 @@ def _config(out: list[Check], project: Path, experiments: list[Path], feeds: Pat
             continue
         live = experiment.live_brokers(exp)
         detail = f"{len(instances)} instance(s): {', '.join(i.id for i in instances)}"
-        out.append(Check(sec, name, "ok", detail + (f"; live brokers: {', '.join(live)}" if live else "")))
+        out.append(Check(sec, name, "ok", detail + (f"; on live brokers: {', '.join(live)}" if live else "")))
+        live_cfg = exp.brokers.get("live")
+        if isinstance(live_cfg, experiment.LiveBrokerConfig):
+            if live_cfg.capped:
+                caps = f"up to {live_cfg.max_qty:g} contracts and ${live_cfg.max_notional:g} per order"
+                out.append(Check(sec, f"{name} live caps", "ok", caps))
+            else:
+                detail = "the live broker has no caps, so nothing can go live"
+                fix = "set max_qty and max_notional under [brokers.live]"
+                out.append(Check(sec, f"{name} live caps", "skip", detail, fix))
         for inst in instances:
             venues |= {s.split(":", 1)[0] for s in inst.strategy.series if ":" in s}
     if feeds is None or not feeds.exists():

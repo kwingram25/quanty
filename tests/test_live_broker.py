@@ -38,7 +38,14 @@ class Harness:
         self.pm, self.kx = markets()
         self.fake = fake
         apis = {"polymarket_us": PolymarketOrders(FakeSigner()), "kalshi": KalshiOrders(FakeSigner())}
-        kw = {"armed": True, "poll_s": 0.02, "final_read_every_s": 0.01, **broker_kw}
+        kw = {
+            "armed": True,
+            "max_qty": 1000,
+            "max_notional": 1000,
+            "poll_s": 0.02,
+            "final_read_every_s": 0.01,
+            **broker_kw,
+        }
         self.broker = LiveBroker(apis=apis, transport=fake.transport(), **kw)  # type: ignore[arg-type]
         self.done = False
 
@@ -197,6 +204,7 @@ def test_cancel_during_placement_is_sent_once_placed() -> None:
         ({"armed": False}, "not armed"),
         ({"max_qty": 5}, "over max_qty"),
         ({"max_notional": 1.0}, "over max_notional"),
+        ({"max_qty": None}, "no caps"),
     ],
 )
 def test_refusals(kw: dict[str, object], reason: str) -> None:

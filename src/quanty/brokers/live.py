@@ -6,7 +6,8 @@ until the venue reports it done, and re-read after a cancel until it does (fills
 cancel). Safety:
 
 - armed=False (the default) rejects every order; `quanty live --arm` arms the brokers.
-- max_qty / max_notional reject any single order above them (fat-finger guard).
+- max_qty / max_notional reject any single order above them (fat-finger guard); without both,
+  nothing is placed.
 - error_limit consecutive venue rejections disable the broker until restart.
 - A request whose reply never arrives (timeout, dropped connection) leaves the order's outcome
   unknown: it stays pending and the broker disables itself at once, since the position it would
@@ -172,6 +173,11 @@ class LiveBroker(Broker):
         if self._client is not None:
             await self._client.aclose()
 
+    @property
+    def capped(self) -> bool:
+        """Both per-order caps are set; without them nothing is placed."""
+        return self.max_qty is not None and self.max_notional is not None
+
     # --- checks ---
 
     def _refusal(self, order: Order) -> str:
@@ -179,6 +185,8 @@ class LiveBroker(Broker):
             return "live broker not armed"
         if self.disabled:
             return f"live broker disabled: {self.disabled}"
+        if not self.capped:
+            return f"no caps: set max_qty and max_notional under [brokers.{self.name}]"
         market = self._markets.get(order.market_id)
         if market is None or market.venue not in self.apis:
             return f"no order API for {order.market_id}"

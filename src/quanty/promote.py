@@ -1,5 +1,5 @@
-"""`quanty promote <instance> --to sim|shadow|live`: move one instance onto another kind of broker by
-editing its experiment file (comments and layout kept), so paper becomes shadow becomes live, or back.
+"""`quanty promote <instance> --to sim|shadow|live`: move one instance onto another of the experiment's
+brokers by editing its file (comments and layout kept), so paper becomes shadow becomes live, or back.
 
 It only edits the file. Nothing trades until `quanty paper` or `quanty live --arm` runs it; a
 running session keeps its brokers until restarted. Paper and live sessions of an experiment record
@@ -21,7 +21,6 @@ import tomlkit
 from quanty import experiment
 
 KINDS = ("sim", "shadow", "live")
-DEFAULT_NAMES = {"sim": "sim", "shadow": "shadow", "live": "live"}
 
 
 @dataclass
@@ -31,21 +30,16 @@ class Promotion:
     from_kind: str
     to_broker: str
     to_kind: str
-    added_broker: bool = False
+    capped: bool = False  # set the live broker's caps
     carried: dict[str, Any] = field(default_factory=dict)  # dashboard edits written into the file
-    pinned: list[str] = field(default_factory=list)  # other instances given their broker explicitly
     twin_added: str | None = None
     twin_removed: str | None = None
 
     def lines(self) -> list[str]:
         was, now = f"{self.from_broker} ({self.from_kind})", f"{self.to_broker} ({self.to_kind})"
         out = [f"{self.instance}: broker {was} → {now}"]
-        if self.added_broker:
-            out.append(f"added [brokers.{self.to_broker}] (kind = {self.to_kind!r})")
-        if self.pinned:
-            out.append(
-                f"set broker = {self.from_broker!r} on {', '.join(self.pinned)} (now that there are two)"
-            )
+        if self.capped:
+            out.append(f"set the caps of [brokers.{self.to_broker}]")
         if self.carried:
             out.append(
                 "carried dashboard edits into the file: "
@@ -71,10 +65,10 @@ def promote(
     overrides: dict[str, Any] | None = None,
     twin: bool = True,
 ) -> Promotion:
-    """Edit the experiment at `path` so `instance` runs on a `to` broker: `broker` names one (made if
-    missing), else the first broker of that kind, else a new one. A new live broker needs max_qty and
-    max_notional. `overrides` (the instance's dashboard edits) are written into its params. twin:
-    going live from paper adds a paper twin; going back removes it."""
+    """Edit the experiment at `path` so `instance` runs on a `to` broker: `broker` names one of the
+    experiment's, else the built-in one of that kind. A live broker without caps needs max_qty and
+    max_notional (written into its table). `overrides` (the instance's dashboard edits) are written
+    into its params. twin: going live from paper adds a paper twin; going back removes it."""
     if to not in KINDS:
         raise ValueError(f"--to must be one of {', '.join(KINDS)}")
     exp = experiment.load(path)  # a valid file to start from
@@ -85,44 +79,33 @@ def promote(
         )
     from_name = exp.broker_of(spec)
     from_kind = exp.brokers[from_name].kind
-    if broker is not None and broker in exp.brokers and exp.brokers[broker].kind != to:
-        raise ValueError(f"broker {broker!r} is {exp.brokers[broker].kind}, not {to}")
-    target = (
-        broker
-        or next((n for n, b in exp.brokers.items() if b.kind == to), None)
-        or _free(DEFAULT_NAMES[to], exp)
-    )
+    target = broker or to
+    if target not in exp.brokers:
+        raise ValueError(f"{path.name} has no broker {target!r} (has: {', '.join(exp.brokers)})")
+    if exp.brokers[target].kind != to:
+        raise ValueError(f"broker {target!r} is {exp.brokers[target].kind}, not {to}")
     if target == from_name:
         raise ValueError(f"{instance} already runs on {from_name} ({from_kind})")
 
     doc = tomlkit.parse(path.read_text())
     result = Promotion(instance, from_name, from_kind, target, to)
-    if "brokers" not in doc:  # the implicit default ([brokers.sim]) becomes explicit
-        brokers = tomlkit.table(is_super_table=True)
-        brokers[from_name] = {"kind": from_kind}
-        doc["brokers"] = brokers
-    if target not in exp.brokers:
-        if to == "live" and (max_qty is None or max_notional is None):
+    cfg = exp.brokers[target]
+    if isinstance(cfg, experiment.LiveBrokerConfig) and not cfg.capped:
+        if max_qty is None or max_notional is None:
             raise ValueError(
-                "a new live broker needs --max-qty and --max-notional (the largest single order)"
+                f"[brokers.{target}] has no caps: give --max-qty and --max-notional "
+                "(the largest single order)"
             )
-        new = tomlkit.table()
-        new["kind"] = to
-        if to == "live":
-            new["max_qty"] = max_qty
-            new["max_notional"] = max_notional
-        else:
-            src = exp.brokers[from_name]
-            if src.kind != "live":  # keep the simulated latency it had
-                new["latency_ms"] = src.model_dump()["latency_ms"]
-        new.add(tomlkit.nl())
-        doc["brokers"][target] = new
-        result.added_broker = True
+        if "brokers" not in doc:
+            doc["brokers"] = tomlkit.table(is_super_table=True)
+        if target not in doc["brokers"]:
+            new = tomlkit.table()
+            new.add(tomlkit.nl())
+            doc["brokers"][target] = new
+        doc["brokers"][target]["max_qty"] = max_qty
+        doc["brokers"][target]["max_notional"] = max_notional
+        result.capped = True
     entries = doc.get("instances", [])
-    for e in entries:  # others that relied on "the one broker" keep it explicitly
-        if "broker" not in e and e.get("id") != instance:
-            e["broker"] = from_name
-            result.pinned.append(str(e.get("id")))
     entry = next(e for e in entries if e.get("id") == instance)
     entry["broker"] = target
     if overrides:
@@ -170,54 +153,14 @@ def _free_id(name: str, exp: experiment.Experiment) -> str:
     return n
 
 
-def _free(name: str, exp: experiment.Experiment) -> str:
-    n, i = name, 2
-    while n in exp.brokers:
-        n, i = f"{name}{i}", i + 1
-    return n
-
-
 def run_name(path: Path) -> str:
     """The dashboard run this experiment's sessions write to, paper or live: session/<name>."""
     return f"session/{path.stem}"
 
 
 def needs_caps(path: Path, to: str, broker: str | None) -> bool:
-    """Whether promoting to `to` would add a live broker, which needs max_qty and max_notional."""
+    """Whether promoting to `to` needs caps first: its live broker has none yet."""
     if to != "live":
         return False
-    exp = experiment.load(path)
-    if broker is not None:
-        return broker not in exp.brokers
-    return not any(b.kind == "live" for b in exp.brokers.values())
-
-
-def add_live_broker(path: Path, max_qty: float, max_notional: float, name: str = "live") -> str:
-    """Add an unused live broker to the experiment (no instance moves onto it): a session started
-    with `quanty live --arm` can then switch instances onto it while running. Returns its name."""
-    if max_qty <= 0 or max_notional <= 0:
-        raise ValueError("max_qty and max_notional must be above 0")
-    exp = experiment.load(path)
-    if any(b.kind == "live" for b in exp.brokers.values()):
-        raise ValueError(f"{path.name} already has a live broker")
-    name = _free(name, exp)
-    doc = tomlkit.parse(path.read_text())
-    if "brokers" not in doc:  # the implicit default becomes explicit, so instances keep it
-        brokers = tomlkit.table(is_super_table=True)
-        only = next(iter(exp.brokers))
-        brokers[only] = {"kind": exp.brokers[only].kind}
-        doc["brokers"] = brokers
-        for e in doc.get("instances", []):
-            e.setdefault("broker", only)
-    new = tomlkit.table()
-    new["kind"] = "live"
-    new["max_qty"] = max_qty
-    new["max_notional"] = max_notional
-    new.add(tomlkit.nl())
-    doc["brokers"][name] = new
-    text = tomlkit.dumps(doc)
-    experiment.parse(tomllib.loads(text), source=path.name)  # still loads, or nothing is written
-    tmp = path.with_name(f".{path.name}.tmp")
-    tmp.write_text(text)
-    tmp.replace(path)
-    return name
+    cfg = experiment.load(path).brokers.get(broker or to)
+    return isinstance(cfg, experiment.LiveBrokerConfig) and not cfg.capped

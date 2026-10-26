@@ -42,9 +42,10 @@ def inst(**kw: object) -> dict[str, object]:
         ({"instances": [{"strategy": "x"}]}, "exp.instances.0.id: Field required"),
         (inst(color="red"), "exp.instances.0.color: Extra inputs are not permitted"),
         (inst(broker="nope"), "broker 'nope' is not defined"),
-        ({**inst(), "brokers": {"a": {}, "b": {}}}, "broker None is not defined"),  # must name one
+        (inst(broker="live"), "on live, which has no caps"),
+        ({**inst(), "brokers": {"live": {"kind": "sim"}}}, "built-in live broker"),
         ({"instances": [{"id": "a", "strategy": "s"}, {"id": "a", "strategy": "s"}]}, "unique"),
-        ({**inst(), "brokers": {"sim": {"kind": "magic"}}}, "exp.brokers.sim: Input tag 'magic'"),
+        ({**inst(), "brokers": {"x": {"kind": "magic"}}}, "exp.brokers.x: Input tag 'magic'"),
         ({**inst(), "brokers": {"sim": {"latency_ms": -1}}}, "exp.brokers.sim.sim.latency_ms"),
         ({**inst(), "clock_ms": 0}, "exp.clock_ms"),
     ],

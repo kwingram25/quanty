@@ -36,7 +36,7 @@ def test_plan_is_the_strategy_as_it_runs_and_its_grid_on_one_sim_broker(tmp_path
     store.close()
     raw = sweep.plan(proj, data, "session/main", "fav_97", {"min_conf": [0.95, 0.98]}, hours=6)
     exp = experiment.parse(raw, source="t")
-    assert list(exp.brokers) == ["sim"] and exp.brokers["sim"].kind == "sim"
+    assert {exp.broker_of(i) for i in exp.instances} == {"sim"}  # all simulated
     got = {i.id: i.params for i in exp.instances}
     base = {"min_conf": 0.97, "max_price": 0.99, "enter_last_s": 30}
     assert got == {

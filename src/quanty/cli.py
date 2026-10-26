@@ -91,6 +91,14 @@ def init(
                 a.polymarket_secret = typer.prompt(
                     "  Polymarket US secret", "", hide_input=True, show_default=False
                 )
+            if a.venues:
+                typer.echo("Live trading caps, the largest single order (leave blank to set them later):")
+                qty = typer.prompt("  contracts", "", show_default=False)
+                notional = typer.prompt("  dollars", "", show_default=False)
+                if qty.strip() and notional.strip():
+                    a.max_qty, a.max_notional = float(qty), float(notional)
+                    if a.max_qty <= 0 or a.max_notional <= 0:
+                        raise ValueError("caps must be above 0")
         written = project.create(path, a, force=force)
     except ValueError as exc:
         raise _fail(exc) from None
@@ -252,7 +260,7 @@ def paper(
 ) -> None:
     """Paper trade: run an experiment's strategies on live feeds with simulated fills (no orders).
 
-    Brokers with kind = "shadow" also check every order with the venue (nothing is placed). Records
+    Strategies on the shadow broker also have every order checked by the venue (none placed). Records
     into the experiment's run (<data>/session/<name>.sqlite), continuing it: positions are restored,
     and warmup_s in the experiment replays recent recordings first.
     """
@@ -264,9 +272,7 @@ def paper(
 def live(
     path: ExpArg,
     feeds: FeedsOpt,
-    arm: Annotated[
-        bool, typer.Option("--arm", help='Place real orders through kind = "live" brokers')
-    ] = False,
+    arm: Annotated[bool, typer.Option("--arm", help="Let the live broker place real orders")] = False,
     data: DataOpt = Path("data"),
     ledger: LedgerOpt = None,
     duration: DurationOpt = None,
@@ -275,10 +281,11 @@ def live(
     ui_host: UiHostOpt = "127.0.0.1",
     ui_port: UiPortOpt = 8765,
 ) -> None:
-    """Trade for real: kind = "live" brokers place orders on the venues. Needs --arm.
+    """A session that may trade real money (needs --arm): strategies on the live broker place orders
+    on the venues, within its caps.
 
-    Instances on sim or shadow brokers paper trade in the same session, and a live broker no instance
-    uses yet lets you switch them on while it runs (the dashboard's Go live, quanty promote --now).
+    Strategies on sim or shadow paper trade in the same session and can be switched live while it
+    runs (the dashboard's Go live, quanty promote --now), so it can start with everything on paper.
     """
     if not arm:
         raise _fail(ValueError("quanty live places real orders: pass --arm to confirm"))
@@ -376,7 +383,7 @@ def promote(
     try:
         experiment.load(path)  # a valid file to start from
         if pm.needs_caps(path, to, broker) and (max_qty is None or max_notional is None):
-            typer.echo("A new live broker caps every single order (a fat-finger guard):")
+            typer.echo("The live broker has no caps yet; they bound every single order (a fat-finger guard):")
             max_qty = max_qty if max_qty is not None else typer.prompt("  max_qty (contracts)", type=float)
             max_notional = (
                 max_notional if max_notional is not None else typer.prompt("  max_notional ($)", type=float)
@@ -636,10 +643,14 @@ def _session(
         live_names = experiment.live_brokers(exp)
         if mode == "paper" and live_names:
             raise ValueError(
-                f'brokers {", ".join(live_names)} are live: use quanty live --arm, or kind = "shadow"'
+                f"instances on {', '.join(live_names)} place real orders: use quanty live --arm, "
+                'or broker = "shadow"'
             )
         if mode == "live" and not live_names and not experiment.parked_live_brokers(exp):
-            raise ValueError('no kind = "live" broker in this experiment: use quanty paper')
+            raise ValueError(
+                "the live broker has no caps: set max_qty and max_notional under [brokers.live] "
+                "(the largest single order), or use quanty paper"
+            )
         instances, spares = experiment.build_session(exp, _strategies(), armed=armed)
         feed_objs = load_feeds(feeds, None)
     except ValueError as exc:

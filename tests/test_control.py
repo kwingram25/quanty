@@ -20,7 +20,7 @@ from quanty.ui.app import create_app
 
 
 def make(tmp: Path, *, can_arm: bool = False) -> tuple[Controller, ControlStore, Engine]:
-    sim, live = SimBroker("sim"), LiveBroker("real", armed=can_arm)
+    sim, live = SimBroker("sim"), LiveBroker("real", armed=can_arm, max_qty=10, max_notional=10)
     insts = [Instance("a", Hooks(), sim), Instance("b", Hooks(), live)]
     engine = Engine(insts, ledger=Ledger(tmp / "l.sqlite", durable=True), clock_ms=None, strict=False)
     store = ControlStore(tmp / "control.sqlite")
@@ -47,6 +47,7 @@ def test_actions_apply_to_the_session(tmp_path: Path) -> None:
         "kind": "live",
         "armed": True,
         "disabled": "",
+        "capped": True,
     }
     assert state["state"]["instances"]["a"] == {
         "halted": True,
@@ -333,7 +334,7 @@ def test_save_params_writes_the_experiment_file(tmp_path: Path, monkeypatch: pyt
 
 def test_a_session_with_a_live_broker_needs_the_name_typed(tmp_path: Path) -> None:
     (tmp_path / "session").mkdir()
-    sim, live = SimBroker("sim"), LiveBroker("real", armed=True)
+    sim, live = SimBroker("sim"), LiveBroker("real", armed=True, max_qty=10, max_notional=10)
     insts = [Instance("a", Hooks(), sim), Instance("b", Hooks(), live)]
     engine = Engine(
         insts, ledger=Ledger(tmp_path / "session" / "acct.sqlite", durable=True), clock_ms=None, strict=False
@@ -350,7 +351,7 @@ def test_a_session_with_a_live_broker_needs_the_name_typed(tmp_path: Path) -> No
 
 
 def _switching(tmp: Path, armed: bool) -> tuple[Controller, Engine]:
-    sim, live = SimBroker("paper"), LiveBroker("real", armed=armed)
+    sim, live = SimBroker("paper"), LiveBroker("real", armed=armed, max_qty=10, max_notional=10)
     insts = [Instance("fav", Sized(SizeParams(size=5)), sim)]
     engine = Engine(
         insts,
@@ -441,15 +442,35 @@ def test_reloading_the_experiment_while_running(tmp_path: Path) -> None:
     assert next(x for x in store.history("paper/acct") if x["id"] == cid)["status"] == "failed"
 
 
-def test_a_paper_session_can_prepare_a_live_broker(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_caps_set_in_the_file_reach_the_running_session_on_reload(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     from quanty import experiment
 
     monkeypatch.delenv("QUANTY_IN_IMAGE", raising=False)
     exp = tmp_path / "main.toml"
-    exp.write_text('[[instances]]\nid = "s"\nstrategy = "sized"\n')
-    c, store, _ = sized(tmp_path)
+    exp.write_text('[[instances]]\nid = "fav"\nstrategy = "sized"\n')
+    strategies = {"sized": __import__(__name__)}
+    insts, spares = experiment.build_session(experiment.load(exp), strategies, armed=True)
+    assert [b.name for b in spares] == ["shadow", "live"]  # every experiment has them
+    engine = Engine(insts, ledger=Ledger(tmp_path / "l.sqlite", durable=True), clock_ms=None,
+                    strict=False, spare_brokers=spares)  # fmt: skip
+    c = Controller(ControlStore(tmp_path / "control.sqlite"), "session/main", engine, can_arm=True)
     c.experiment = exp
-    r = params_cmd(c, store, "add_live_broker", {"max_qty": 3, "max_notional": 2})
-    assert r["status"] == "done" and "quanty live --arm" in str(r["result"])
-    assert experiment.load(exp).brokers["live"].kind == "live"
-    assert params_cmd(c, store, "add_live_broker", {"max_qty": 3})["status"] == "failed"
+    c.rebuild = lambda: (experiment.load(exp), strategies)
+    c.tick()
+    state = c.store.session("session/main")
+    assert state is not None and state["state"]["brokers"]["live"]["capped"] is False
+
+    def send(action: str, value: object = None) -> dict[str, object]:
+        cid = c.store.submit("session/main", action, "fav", value)
+        c.tick()
+        return next(r for r in c.store.history("session/main") if r["id"] == cid)
+
+    r = send("switch", {"to": "live"})
+    assert r["status"] == "failed" and "no caps" in str(r["result"])
+    exp.write_text("[brokers.live]\nmax_qty = 3\nmax_notional = 2\n\n" + exp.read_text())
+    r = send("reload")
+    assert r["status"] == "done" and "live: caps max_qty 3.0, max_notional 2.0" in str(r["result"])
+    r = send("switch", {"to": "live"})
+    assert r["status"] == "done" and engine.instances["fav"].broker.name == "live", r
