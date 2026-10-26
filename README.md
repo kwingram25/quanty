@@ -21,6 +21,10 @@ One strategy file runs unchanged in four modes. Only the broker behind it change
   <img alt="The quanty dashboard during a paper session: strategies with paper badges and halt controls on the left, cumulative realized P&L per strategy with a hover tooltip in the middle, open markets with the market's chance and the strategies' own estimates, and the event feed on the right" src="docs/images/dashboard-light.png">
 </picture>
 
+**[Live demo](https://quanty-demo.fly.dev/)**: the dashboard on synthetic markets, shared by everyone
+viewing it (the controls work; it starts over every few hours). The first visit after a quiet spell
+takes a few seconds while it starts.
+
 ## Try it
 
 ```sh
