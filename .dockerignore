@@ -1,0 +1,8 @@
+# Only what demo.Dockerfile copies goes to the builder: never .env, data/ or anything else here.
+*
+!pyproject.toml
+!uv.lock
+!README.md
+!LICENSE
+!src/
+src/**/__pycache__

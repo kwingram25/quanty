@@ -146,6 +146,15 @@ def demo(
     ] = False,
     speed: Annotated[float, typer.Option(help="With --live: market time per wall-clock second")] = 10.0,
     history: Annotated[float, typer.Option(help="With --live: hours already traded when it opens")] = 24.0,
+    public: Annotated[
+        bool,
+        typer.Option(
+            "--public",
+            help="With --live: a hosted demo (all interfaces, a banner saying it's shared, starts over "
+            "every --reset-hours by exiting, for the host to restart it)",
+        ),
+    ] = False,
+    reset_hours: Annotated[float, typer.Option(help="With --public: hours until it starts over")] = 6.0,
 ) -> None:
     """Backtest one strategy on synthetic up/down markets.
 
@@ -179,7 +188,8 @@ def demo(
             start = _now_window_ms() - int(history * 3_600_000) // 300_000 * 300_000
             hours = hours if hours != DEFAULT_HOURS else 24 * 365  # runs until stopped unless --hours says
             spec = synthetic.Spec(hours=hours + history, seed=seed, start_ms=start)
-            _demo_live(exp, data, spec, speed, port, browser)
+            _demo_live(exp, data, spec, speed, port, browser and not public,
+                       reset_s=reset_hours * 3600 if public else None)  # fmt: skip
             return
         if data is not None:
             ledger = data / "backtest" / f"demo-{hours:g}h-seed{seed}.sqlite"
@@ -755,11 +765,18 @@ def _warm_and_restore(
 
 
 def _demo_live(
-    exp: experiment.Experiment, data: Path, spec: synthetic.Spec, speed: float, port: int, browser: bool
+    exp: experiment.Experiment,
+    data: Path,
+    spec: synthetic.Spec,
+    speed: float,
+    port: int,
+    browser: bool,
+    reset_s: float | None = None,
 ) -> None:
     """Synthetic markets played against the wall clock (sped up), traded as a paper session, with
     the dashboard and its controls open on it: what a running session looks like, without keys.
-    The dashboard's "New day" starts over on a freshly generated day (a new seed)."""
+    The dashboard's "New day" starts over on a freshly generated day (a new seed). reset_s: a public
+    demo, on every interface, that exits after this long so its host starts a fresh one."""
     import uvicorn
 
     from quanty.ui.app import create_app
@@ -771,7 +788,10 @@ def _demo_live(
     playback = Playback(speed, tuple(sorted({1.0, speed})))  # the dashboard toggles fast / real time
     server = uvicorn.Server(
         uvicorn.Config(
-            create_app(data, refresh_s=2, demo=True), host="127.0.0.1", port=port, log_level="warning"
+            create_app(data, refresh_s=2, demo=True, public=reset_s),
+            host="0.0.0.0" if reset_s else "127.0.0.1",  # a hosted demo serves everyone
+            port=port,
+            log_level="warning",
         )
     )
 
@@ -839,6 +859,13 @@ def _demo_live(
     async def main() -> None:
         state["task"] = asyncio.create_task(play(trader, day))
         tasks = [asyncio.create_task(controller.run_forever())]
+        if reset_s:  # everything visitors changed goes with the process; the host starts a fresh one
+
+            async def reset() -> None:
+                await asyncio.sleep(reset_s)
+                server.should_exit = True
+
+            tasks.append(asyncio.create_task(reset()))
         try:
             await server.serve()
         finally:

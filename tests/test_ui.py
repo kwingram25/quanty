@@ -242,6 +242,18 @@ def test_a_demo_has_no_project_to_check(tmp_path: Path, monkeypatch: pytest.Monk
     assert got["demo"] and got["checks"] == []
 
 
+def test_a_hosted_demo_says_so_and_backtests_nothing(tmp_path: Path) -> None:
+    c = TestClient(create_app(tmp_path, demo=True, public=6 * 3600))
+    page = c.get("/").text
+    assert '<meta name="quanty-public" content="6" />' in page
+    token = page.split('name="quanty-token" content="')[1].split('"')[0]
+    body = {"instance": "fav_90", "grid": {"min_conf": [0.9]}}
+    r = c.post("/api/runs/session/demo-live/backtest", json=body, headers={"x-quanty-token": token})
+    assert r.status_code == 400 and "demo" in r.json()["detail"]
+    assert "quanty-public" not in TestClient(create_app(tmp_path, demo=True)).get("/").text  # a local demo
+    assert c.get("/api/accounts").json() == []  # never the balances of keys on the machine
+
+
 def test_unknown_api_paths_are_json_404s_not_the_page(tmp_path: Path) -> None:
     c = TestClient(create_app(tmp_path))
     r = c.get("/api/nope")

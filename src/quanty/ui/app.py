@@ -23,11 +23,16 @@ PUBLIC = ("/login", "/assets/", "/favicon")
 
 
 def create_app(
-    data: Path, refresh_s: int = 2, password_hash: str | None = _FROM_ENV, demo: bool = False
+    data: Path,
+    refresh_s: int = 2,
+    password_hash: str | None = _FROM_ENV,
+    demo: bool = False,
+    public: float | None = None,
 ) -> FastAPI:
     """refresh_s is kept for callers; the page is pushed changes over a WebSocket instead.
     password_hash: the login hash (QUANTY_UI_PASSWORD by default); None = no login. demo: serving
-    `quanty demo` (synthetic markets in a temporary folder: no project to check)."""
+    `quanty demo` (synthetic markets in a temporary folder: no project to check). public: a hosted
+    demo's seconds between restarts (the page says it's shared, and links to the code)."""
     if password_hash == _FROM_ENV:
         secret = keys().quanty_ui_password
         password_hash = secret.get_secret_value().strip() if secret else None
@@ -74,6 +79,11 @@ def create_app(
             return HTMLResponse(NOT_BUILT)
         # the control token rides in the page; another site can't read it
         page = index.read_text().replace("__QUANTY_TOKEN__", api.token)
+        if public is not None:  # the app shows a banner: shared by everyone, starts over
+            page = page.replace(
+                '<meta name="quanty-token"',
+                f'<meta name="quanty-public" content="{public / 3600:g}" />\n    <meta name="quanty-token"',
+            )
         if auth is not None:  # the app shows "Sign out"
             page = page.replace(
                 '<meta name="quanty-token"',

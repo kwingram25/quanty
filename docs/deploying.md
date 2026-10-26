@@ -200,3 +200,17 @@ a deployed one), and runs them again on request, at most once a minute.
 
 Read [Live trading](live-trading.md): paper first, then shadow, then one small order watched closely,
 with `max_qty` and `max_notional` set to amounts you would not mind getting wrong.
+
+## The public demo
+
+`quanty demo --live --public` is the demo built for hosting: synthetic markets only, no keys and no
+account balances, a banner saying it's shared by everyone viewing it, and every few hours
+(`--reset-hours`, 6 by default) it exits so the host starts a fresh one. `demo.Dockerfile` and
+`fly.demo.toml` in this repo run it on Fly.io, where it stops when nobody is visiting:
+
+```sh
+fly apps create quanty-demo            # the name must be unique on Fly; change it in fly.demo.toml too
+fly deploy --config fly.demo.toml --ha=false
+```
+
+`.dockerignore` lets only the source reach the builder, never `.env` or `data/`.

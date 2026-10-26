@@ -593,3 +593,8 @@ table.variants .cost { display: block; font-size: 11px; }
 .backtest-form input, .backtest-form select { font: inherit; padding: 5px 8px; border: 1px solid var(--border); border-radius: 6px; background: var(--surface); color: inherit; }
 .backtest-params { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 8px 12px; }
 .backtest-actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+
+/* a hosted demo */
+.demo-banner { margin: 0; padding: 8px 24px; font-size: 13px; color: var(--ink-2); background: var(--raised);
+  border-bottom: 1px solid var(--border); }
+.demo-banner a { color: var(--focus); }

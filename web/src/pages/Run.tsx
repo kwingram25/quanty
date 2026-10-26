@@ -503,7 +503,8 @@ function Variants({ snap, slots }: { snap: Snapshot; slots: Record<string, numbe
   const { data, error } = usePoll<VariantRow[]>(`/api/runs/${snap.run.name}/variants`, 5000);
   const [sort, setSort] = useState<{ key: keyof VariantRow; desc: boolean }>({ key: "lower", desc: true });
   // backtest variants of a strategy from a paper or live run (its experiment file is here)
-  const form = (top: string) => snap.run.mode !== "backtest" && <BacktestForm snap={snap} pick={top} />;
+  const form = (top: string) =>
+    snap.run.mode !== "backtest" && snap.session?.save !== null && <BacktestForm snap={snap} pick={top} />; // none in a demo
   if (error) return <p className="empty" style={{ padding: 16 }}>Couldn't rank: {error}</p>;
   if (!data) return <p className="empty" style={{ padding: 16 }}>Loading…</p>;
   if (!data.length) return <>{form(snap.strategies[0]?.instance ?? "")}<p className="empty" style={{ padding: 16 }}>No closed positions yet to rank by.</p></>;

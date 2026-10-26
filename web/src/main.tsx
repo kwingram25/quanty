@@ -57,6 +57,10 @@ function Shortcuts() {
   return null;
 }
 
+const REPO = "https://github.com/kwingram25/quanty";
+// a hosted demo: hours between its fresh starts
+const PUBLIC = document.querySelector<HTMLMetaElement>('meta[name="quanty-public"]')?.content;
+
 function App() {
   useZone(); // re-render every page when the time zone changes
   return (
@@ -80,6 +84,12 @@ function App() {
           <form method="post" action="/logout"><button className="icon-btn signout" title="Sign out">Sign out</button></form>
         )}
       </div>
+      {PUBLIC && (
+        <p className="demo-banner">
+          A demo on synthetic markets, shared by everyone viewing it: the controls work, and it starts over
+          every {PUBLIC} hours. <a href={REPO} target="_blank" rel="noreferrer">quanty on GitHub</a>
+        </p>
+      )}
       <Routes>
         <Route path="/" element={<RunsPage />} />
         <Route path="/feeds" element={<FeedsPage />} />

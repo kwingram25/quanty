@@ -361,7 +361,10 @@ class Api:
 
     async def accounts(self) -> list[dict[str, Any]]:
         """Each venue with API keys on this machine: its balance, read-only and cached (venues share
-        rate limits with anything else trading the account, so this asks rarely)."""
+        rate limits with anything else trading the account, so this asks rarely). None in a demo:
+        it trades synthetic markets, and a hosted one is public."""
+        if self.demo:
+            return []
         async with self._balance_lock:
             now = time.time()
             due = []
@@ -429,6 +432,8 @@ class Api:
     def backtest(self, request: Request, mode: str, name: str, req: BacktestRequest) -> dict[str, Any]:
         """Start a backtest of one of the run's strategies over a grid of its params."""
         self.guard(request)
+        if self.demo:
+            raise HTTPException(400, "a demo has no experiment file or recordings to backtest")
         run = f"{mode}/{name}"
         if queries.run_by_name(self.data, run) is None:
             raise HTTPException(404, f"no run {run}")
