@@ -65,6 +65,16 @@ jobs:
           curl -sf http://127.0.0.1:8765/ | grep -q 'id="root"'
           docker compose ps
           docker compose down
+      - name: the hosted demo's image serves the demo, without .env or data/ in it
+        run: |
+          echo "SECRET=x" > .env && mkdir -p data && touch data/marker
+          docker build -f demo.Dockerfile -t quanty-demo .
+          ! docker run --rm --entrypoint sh quanty-demo -c 'ls -a /app' | grep -E '^(\.env|data)$'
+          docker run -d --name demo -p 8080:8080 quanty-demo
+          for i in $(seq 1 60); do curl -sf http://127.0.0.1:8080/api/runs | grep -q demo-live && break; sleep 2; done
+          curl -sf http://127.0.0.1:8080/ | grep -q 'name="quanty-public"'
+          test "$(curl -sf http://127.0.0.1:8080/api/accounts)" = "[]"
+          docker rm -f demo
 
   secrets:
     runs-on: ubuntu-latest
