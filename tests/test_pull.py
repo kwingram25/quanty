@@ -108,3 +108,32 @@ def test_deploy_marks_the_servers_folder(tmp_path: Path) -> None:
     _, rsync, remote = commands("me@srv", tmp_path / "bot", "bot", stamp={"commit": "abc123", "dirty": False})
     assert f"--exclude={DEPLOYED_MARK}" in rsync  # never deleted by --delete
     assert f"""printf '%s\\n' '{{"commit":"abc123","dirty":false}}' > {DEPLOYED_MARK}""" in remote[2]
+
+
+def test_recordings_come_home_for_the_hours_asked_and_nothing_else(tmp_path: Path) -> None:
+    from datetime import UTC, datetime
+
+    from quanty.pull import recordings_command
+
+    server = tmp_path / "srv" / "data"
+    now = int(datetime(2026, 10, 25, 22, 13, tzinfo=UTC).timestamp() * 1000)
+    for rel in (
+        "kalshi/2026-10-25/22.jsonl.gz",  # this hour
+        "kalshi/2026-10-25/21.jsonl.gz",  # the one before
+        "kalshi/2026-10-24/10.jsonl.gz",  # too old
+        "coinbase/2026-10-25/22.jsonl.gz",
+        "session/main.sqlite",  # runs stay on the server
+        "quanty.sqlite",
+    ):
+        (server / rel).parent.mkdir(parents=True, exist_ok=True)
+        (server / rel).write_bytes(b"x")
+    here = tmp_path / "data"
+    cmd = recordings_command("me@srv", "bot", here, hours=1.5, now_ms=now)
+    assert cmd[-2] == "me@srv:bot/data/"
+    subprocess.run([*cmd[:-2], f"{server}/", f"{here}/"], check=True)  # the same filters, locally
+    got = sorted(str(p.relative_to(here)) for p in here.rglob("*") if p.is_file())
+    assert got == [
+        "coinbase/2026-10-25/22.jsonl.gz",
+        "kalshi/2026-10-25/21.jsonl.gz",
+        "kalshi/2026-10-25/22.jsonl.gz",
+    ]

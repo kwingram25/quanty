@@ -518,18 +518,40 @@ def pull(
     host: Annotated[str, typer.Argument(help="The server, as you'd give ssh")],
     path: Annotated[Path, typer.Option(help="Project folder")] = Path("."),
     to: Annotated[str | None, typer.Option(help="Folder on the server (default: the project's name)")] = None,
+    recordings: Annotated[
+        bool, typer.Option("--recordings", help="Also copy the server's recent recordings into data/ here")
+    ] = False,
+    hours: Annotated[float, typer.Option(help="With --recordings: how many recent hours")] = 24.0,
+    data: Annotated[Path, typer.Option(help="With --recordings: the data folder here")] = Path("data"),
 ) -> None:
     """Bring the dashboard changes a server is holding (param edits, switches to live or paper)
-    into this project's experiment files. Review and commit them like any change."""
+    into this project's experiment files. Review and commit them like any change. --recordings also
+    copies its recent recordings here, to backtest new code on real markets before deploying it."""
     from quanty import pull as pl
 
+    remote = to or path.resolve().name
     try:
-        lines = pl.apply(path, pl.fetch(host, to or path.resolve().name))
+        lines = pl.apply(path, pl.fetch(host, remote))
     except (ValueError, OSError) as exc:
         raise _fail(exc) from None
     typer.echo(
         "\n".join(f"  {line}" for line in lines) if lines else "nothing to bring home: the files say it all"
     )
+    if recordings:
+        data.mkdir(parents=True, exist_ok=True)
+        cmd = pl.recordings_command(host, remote, data, hours)
+        typer.echo(f"copying the last {hours:g} h of recordings into {data}/ ...")
+        if subprocess.run(cmd).returncode:
+            raise _fail(ValueError("rsync failed: see above"))
+        from quanty.feeds.recording import recorded_feeds, span
+
+        for feed in recorded_feeds(data):
+            got = span(data, feed)
+            size = sum(p.stat().st_size for p in (data / feed).rglob("*.jsonl.gz")) / 1e6
+            if got:
+                start = time.strftime("%Y-%m-%d %H:%M", time.gmtime(got[0] / 1000))
+                typer.echo(f"  {feed}: from {start} UTC, {size:.0f} MB here")
+        typer.echo(f"backtest on them: uv run quanty backtest experiments/main.toml --data {data}")
 
 
 @app.command()

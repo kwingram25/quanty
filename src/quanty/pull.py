@@ -6,11 +6,16 @@ experiment file, because the next deploy replaces it: param edits and switches t
 kept with the run in data/control.sqlite. This reads them there (`quanty changes --json`, over ssh)
 and writes them here the way Save to file and `quanty promote` would. Nothing is cleared on the
 server: once the deployed file says the same, the next session drops what it no longer needs.
+
+With --recordings it also copies the server's recent recordings into data/ here (read-only on the
+server; nothing here is deleted), so a new strategy can be backtested on real markets before it's
+deployed: `quanty backtest experiments/main.toml --data data`.
 """
 
 import json
 import shlex
 import subprocess
+import time
 import tomllib
 from pathlib import Path
 from typing import Any
@@ -71,3 +76,31 @@ def apply(project: Path, changes: dict[str, dict[str, Any]]) -> list[str]:
                 + (f", paper twin {done.twin_added}" if done.twin_added else "")
             )
     return out
+
+
+LEDGERS = ("session", "backtest", "paper", "live")  # data/ folders that hold runs, not recordings
+
+
+def recordings_command(
+    host: str, remote_dir: str, data: Path, hours: float, now_ms: int | None = None
+) -> list[str]:
+    """rsync of the server's last `hours` of recordings (every feed's hourly files) into data/."""
+    now = now_ms if now_ms is not None else int(time.time() * 1000)
+    first = (now - int(hours * 3_600_000)) // 3_600_000 * 3_600_000
+    wanted = sorted(
+        {
+            time.strftime("*/%Y-%m-%d/%H.jsonl.gz", time.gmtime(t / 1000))
+            for t in range(first, now + 1, 3_600_000)
+        }
+    )
+    return [
+        "rsync",
+        "-az",
+        "--prune-empty-dirs",
+        *(f"--exclude=/{d}/" for d in LEDGERS),
+        "--include=*/",
+        *(f"--include={w}" for w in wanted),
+        "--exclude=*",
+        f"{host}:{remote_dir.rstrip('/')}/data/",
+        f"{data}/",
+    ]

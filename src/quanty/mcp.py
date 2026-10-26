@@ -71,22 +71,24 @@ class Dashboard:
             raise ToolError(_detail(r))
         return r.json()
 
-    def command(self, run: str, action: str, target: str = "", value: Any = None, confirm: str = "") -> str:
-        body = {"action": action, "target": target, "value": value, "confirm": confirm}
+    def post(self, path: str, body: Any = None) -> Any:
+        """A write, with the page's token."""
         for _ in range(2):  # a restarted dashboard has a new token: fetch it and try again
             if self._token is None:
                 page = self._send("GET", "/").text
                 self._token = page.split('name="quanty-token" content="')[1].split('"')[0]
-            r = self._send(
-                "POST", f"/api/runs/{run}/control", json=body, headers={"x-quanty-token": self._token}
-            )
+            r = self._send("POST", f"/api{path}", json=body, headers={"x-quanty-token": self._token})
             if r.status_code == 403 and "token" in r.text:
                 self._token = None
                 continue
             break
         if r.status_code >= 400:
             raise ToolError(_detail(r))
-        out = r.json()
+        return r.json()
+
+    def command(self, run: str, action: str, target: str = "", value: Any = None, confirm: str = "") -> str:
+        body = {"action": action, "target": target, "value": value, "confirm": confirm}
+        out = self.post(f"/runs/{run}/control", body)
         if not out.get("ok"):
             raise ToolError(str(out.get("result")))
         return str(out.get("result"))
@@ -194,6 +196,24 @@ def server(dash: Dashboard) -> MCPServer:
         """What `quanty doctor` checks where the dashboard runs: config, keys, clock, venues, rate-limit
         headroom, orders left unresolved, disk; each problem with its fix."""
         return dict(dash.get("/health"))
+
+    @mcp.tool(annotations=CHANGE)
+    def backtest_variants(
+        run: str, instance: str, grid: dict[str, list[Any]], hours: float = 24
+    ) -> dict[str, Any]:
+        """Backtest one of a run's strategies, as it runs now and one copy per combination of `grid`
+        ({param: [values to try]}, at most 50 combinations), on the last `hours` of the dashboard's
+        own recordings: the server's real markets, with simulated fills. It runs in the background,
+        one at a time, at low priority, and changes nothing in the run. Follow it with
+        backtest_status; when done, rank_strategies on its result run compares the variants."""
+        return dict(dash.post(f"/runs/{run}/backtest", {"instance": instance, "grid": grid, "hours": hours}))
+
+    @mcp.tool(annotations=READ)
+    def backtest_status() -> dict[str, Any] | None:
+        """The backtest started last on this dashboard: running, done (`result` is its run, e.g.
+        backtest/main-fav_90-20261026-101500) or failed (`error` says why). None if none was started."""
+        got = dash.get("/backtest")
+        return dict(got) if got else None
 
     @mcp.tool(annotations=CHANGE)
     def edit_params(run: str, instance: str, params: dict[str, Any], confirm: str = "") -> str:

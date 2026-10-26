@@ -303,13 +303,24 @@ placed) and live. Run everything through `uv run quanty …`; the first run sets
 ## The running strategies
 
 The `quanty` MCP tools (`.mcp.json`; `uv run quanty mcp`) are the dashboard's: `list_runs`,
-`run_summary`, `rank_strategies`, `trades` and `health` read; `edit_params`, `halt`, `resume`,
-`switch_broker`, `save_params_to_file` and `reload_experiment` change a running session at once. They
+`run_summary`, `rank_strategies`, `trades` and `health` read; `backtest_variants` tries values of a
+strategy's params on the dashboard's own recordings (`backtest_status` for the result, then
+`rank_strategies` on it); `edit_params`, `halt`, `resume`, `switch_broker`, `save_params_to_file`
+and `reload_experiment` change a running session at once. They
 reach the dashboard on this machine (`uv run quanty ui`, or a session's `--ui`); for a server's,
 `claude mcp add quanty-server -- uv run quanty mcp --ssh you@server`. Changes there are kept with the
 run until `uv run quanty pull` writes them into these files: pull, then commit. Code and new
 strategies go the other way: edit here, commit, `uv run quanty deploy`. Read before you change, say
 what you'll change, and on a run with real money pass `confirm` only after the user agrees.
+
+A new strategy from an idea: write `strategies/<name>.py` (start from an existing one or the
+template; `uv run quanty params <name>` checks it loads), copy the server's recent markets home
+(`uv run quanty pull you@server --recordings --hours 24`), backtest on them
+(`uv run quanty backtest experiments/<file>.toml --data data`, with the new strategy in an
+experiment), then add its `[[instances]]` entry to `experiments/main.toml` with `broker = "sim"`
+(paper), commit, and deploy (`uv run quanty deploy you@server`, after the user agrees). New code
+needs that deploy: Reload picks up file changes, not new code. Then watch it with `run_summary` and
+`rank_strategies`; it goes live only if the user says so.
 
 ## Rules
 
@@ -615,6 +626,8 @@ CLAUDE_SETTINGS = """{
       "mcp__quanty__rank_strategies",
       "mcp__quanty__trades",
       "mcp__quanty__health",
+      "mcp__quanty__backtest_variants",
+      "mcp__quanty__backtest_status",
       "Bash(uv run quanty list:*)",
       "Bash(uv run quanty params:*)",
       "Bash(uv run quanty backtest:*)",
@@ -629,6 +642,7 @@ CLAUDE_SETTINGS = """{
       "mcp__quanty__reload_experiment",
       "Bash(uv run quanty deploy:*)",
       "Bash(uv run quanty promote:*)",
+      "Bash(uv run quanty pull:*)",
       "Bash(ssh:*)"
     ],
     "deny": [

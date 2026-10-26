@@ -213,12 +213,17 @@ tunnel it opens itself:
 claude mcp add quanty-server -- uv run quanty mcp --ssh root@your-server
 ```
 
-Then "how are the strategies doing?", "rank the variants", "cut fav_90's size to 5" or "halt
-everything" work in the conversation: the same reads and controls as the dashboard, with the same
+Then "how are the strategies doing?", "rank the variants", "try fav_90 with min_conf 0.85 to 0.95
+on yesterday's markets", "cut fav_90's size to 5" or "halt everything" work in the conversation: the same reads and controls as the dashboard, with the same
 checks (the run's name to confirm anything on a run with real money; it can't arm a broker or raise
 a cap). A dashboard with a login reads its password from `QUANTY_DASHBOARD_PASSWORD` in your
 environment. Changes are kept with the run on the server; `quanty pull` writes them into your files.
 Code changes go the other way: edit, commit, `quanty deploy`.
+
+A new strategy can start in the same conversation: the agent writes it in the project, copies the
+server's recent markets home to backtest it on (`quanty pull you@server --recordings --hours 24`;
+read-only on the server, nothing here is deleted), adds it to the experiment on paper, commits and
+deploys (after you agree), then watches how it ranks against the others.
 
 Running the agent on the server instead would give it the live keys in `.env`, and its builds and
 tests would compete with the trader for a small server's CPU. Projects from `quanty init` carry a
