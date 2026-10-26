@@ -234,6 +234,13 @@ def test_health_runs_doctor_once_then_again_at_most_once_a_minute(
     assert c.get("/api/health?fresh=1").json()["ran"] == 1061.0 and len(runs) == 2
 
 
+def test_unknown_api_paths_are_json_404s_not_the_page(tmp_path: Path) -> None:
+    c = TestClient(create_app(tmp_path))
+    r = c.get("/api/nope")
+    assert r.status_code == 404 and "restart it" in r.json()["detail"]
+    assert c.get("/runs/session/x").status_code == 200  # pages still get the app
+
+
 def test_session_reports_platforms(tmp_path: Path) -> None:
     from quanty.control import Controller, ControlStore
 

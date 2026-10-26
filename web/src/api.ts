@@ -223,7 +223,12 @@ export const toLogin = () => location.assign(`/login?next=${encodeURIComponent(l
 export async function getJSON<T>(url: string): Promise<T> {
   const r = await fetch(url);
   if (r.status === 401) toLogin();
-  if (!r.ok) throw new Error(`${r.status} ${await r.text()}`);
+  if (!r.ok) {
+    const text = await r.text();
+    let detail = text;
+    try { detail = JSON.parse(text).detail ?? text; } catch { /* not JSON */ }
+    throw new Error(`${r.status}: ${detail}`);
+  }
   return r.json() as Promise<T>;
 }
 

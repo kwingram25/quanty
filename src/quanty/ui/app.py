@@ -4,7 +4,7 @@ Run it with `quanty ui`. Reads databases read-only; see ui/api.py."""
 from collections.abc import Awaitable, Callable
 from pathlib import Path
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 
@@ -60,6 +60,10 @@ def create_app(data: Path, refresh_s: int = 2, password_hash: str | None = _FROM
 
     @app.get("/{path:path}", include_in_schema=False, response_model=None)
     def spa(path: str) -> HTMLResponse | FileResponse:
+        if path == "api" or path.startswith("api/"):  # not a page: a route this server doesn't have
+            raise HTTPException(
+                404, f"no /{path} here: the dashboard server may be older than the page (restart it)"
+            )
         if path and (DIST / path).is_file() and not path.endswith(".html"):
             return FileResponse(DIST / path)
         index = DIST / "index.html"
