@@ -14,6 +14,7 @@ dependencies = [
     "hdrhistogram>=0.10",
     "httpx>=0.27",
     "jinja2>=3.1",
+    "mcp>=2.3",
     "orjson>=3.10",
     "pydantic>=2.8",
     "pydantic-settings>=2.4",

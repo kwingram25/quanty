@@ -597,6 +597,28 @@ def deploy(
 
 
 @app.command()
+def mcp(
+    url: Annotated[str, typer.Option(help="The dashboard (a local one, or the tunnel's end)")] = (
+        "http://127.0.0.1:8765"
+    ),
+    ssh: Annotated[
+        str | None, typer.Option(help="A server: open an SSH tunnel to its dashboard and use that")
+    ] = None,
+    remote_port: Annotated[int, typer.Option(help="The dashboard's port on the server, with --ssh")] = 8765,
+) -> None:
+    """The dashboard as tools for an AI agent (an MCP server on stdin/stdout): summarize and rank
+    strategies, read trades and health, edit params, halt, resume, switch brokers, reload. The same
+    checks as the dashboard; it can't arm or raise caps. Add it to Claude Code with
+    `claude mcp add quanty -- uv run quanty mcp` (or `... mcp --ssh you@server`)."""
+    from quanty import mcp as server
+
+    try:
+        server.run(url, ssh, remote_port)
+    except RuntimeError as exc:
+        raise _fail(exc) from None
+
+
+@app.command()
 def password(
     write: Annotated[bool, typer.Option("--write", help="Save it in ./.env instead of printing it")] = False,
 ) -> None:

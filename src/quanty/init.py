@@ -13,6 +13,8 @@ my-quanty/
   pyproject.toml           so `uv run quanty ...` works here with nothing installed first
   README.md                next steps
   AGENTS.md, CLAUDE.md     how to work here, for AI coding assistants (Claude Code reads CLAUDE.md)
+  .mcp.json                the dashboard as tools for Claude Code (`quanty mcp`)
+  .claude/settings.json    what Claude Code may do here without asking, and never (.env, quanty live)
 """
 
 import os
@@ -75,6 +77,8 @@ def files(a: Answers, name: str = "my-quanty") -> dict[str, str]:
         "README.md": _readme(a, name),
         "AGENTS.md": _agents(a, first),
         "CLAUDE.md": "@AGENTS.md\n",
+        ".mcp.json": MCP_JSON,
+        ".claude/settings.json": CLAUDE_SETTINGS,
     }
 
 
@@ -295,6 +299,17 @@ placed) and live. Run everything through `uv run quanty …`; the first run sets
   limits. A `grid = {{ param = [values] }}` in an
   entry makes one instance per combination (`id = "name_{{param}}"` names them).
 - `feeds.toml`: the venues and series to connect to. `.env`: API keys.
+
+## The running strategies
+
+The `quanty` MCP tools (`.mcp.json`; `uv run quanty mcp`) are the dashboard's: `list_runs`,
+`run_summary`, `rank_strategies`, `trades` and `health` read; `edit_params`, `halt`, `resume`,
+`switch_broker`, `save_params_to_file` and `reload_experiment` change a running session at once. They
+reach the dashboard on this machine (`uv run quanty ui`, or a session's `--ui`); for a server's,
+`claude mcp add quanty-server -- uv run quanty mcp --ssh you@server`. Changes there are kept with the
+run until `uv run quanty pull` writes them into these files: pull, then commit. Code and new
+strategies go the other way: edit here, commit, `uv run quanty deploy`. Read before you change, say
+what you'll change, and on a run with real money pass `confirm` only after the user agrees.
 
 ## Rules
 
@@ -578,6 +593,53 @@ primary_region = "iad"
   memory = "1gb"
   cpu_kind = "shared"
   cpus = 1
+"""
+
+# Claude Code: the dashboard's tools (`quanty mcp`, on the local dashboard; for a server's, add
+# `claude mcp add quanty-server -- uv run quanty mcp --ssh you@server`)
+MCP_JSON = """{
+  "mcpServers": {
+    "quanty": { "command": "uv", "args": ["run", "quanty", "mcp"] }
+  }
+}
+"""
+
+# reads without asking; changes on a dashboard, deploys and ssh ask first; keys and real-money
+# sessions never (AGENTS.md says why)
+CLAUDE_SETTINGS = """{
+  "enabledMcpjsonServers": ["quanty"],
+  "permissions": {
+    "allow": [
+      "mcp__quanty__list_runs",
+      "mcp__quanty__run_summary",
+      "mcp__quanty__rank_strategies",
+      "mcp__quanty__trades",
+      "mcp__quanty__health",
+      "Bash(uv run quanty list:*)",
+      "Bash(uv run quanty params:*)",
+      "Bash(uv run quanty backtest:*)",
+      "Bash(uv run quanty doctor:*)"
+    ],
+    "ask": [
+      "mcp__quanty__edit_params",
+      "mcp__quanty__save_params_to_file",
+      "mcp__quanty__halt",
+      "mcp__quanty__resume",
+      "mcp__quanty__switch_broker",
+      "mcp__quanty__reload_experiment",
+      "Bash(uv run quanty deploy:*)",
+      "Bash(uv run quanty promote:*)",
+      "Bash(ssh:*)"
+    ],
+    "deny": [
+      "Read(./.env)",
+      "Read(./.env.*)",
+      "Bash(cat .env:*)",
+      "Bash(uv run quanty live:*)",
+      "Bash(quanty live:*)"
+    ]
+  }
+}
 """
 
 FALLBACK_TEMPLATE = '''"""Strategy template: copy to strategies/<name>.py and fill in the TODOs."""

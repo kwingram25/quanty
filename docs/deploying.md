@@ -203,6 +203,28 @@ a deployed one), and runs them again on request, at most once a minute.
 Read [Live trading](live-trading.md): paper first, then shadow, then one small order watched closely,
 with `max_qty` and `max_notional` set to amounts you would not mind getting wrong.
 
+## With an AI agent
+
+Keep the agent (Claude Code, or another) on your machine, in the project's repository; the server
+only runs what you deploy. `quanty mcp` gives it the server's dashboard as tools, through an SSH
+tunnel it opens itself:
+
+```sh
+claude mcp add quanty-server -- uv run quanty mcp --ssh root@your-server
+```
+
+Then "how are the strategies doing?", "rank the variants", "cut fav_90's size to 5" or "halt
+everything" work in the conversation: the same reads and controls as the dashboard, with the same
+checks (the run's name to confirm anything on a run with real money; it can't arm a broker or raise
+a cap). A dashboard with a login reads its password from `QUANTY_DASHBOARD_PASSWORD` in your
+environment. Changes are kept with the run on the server; `quanty pull` writes them into your files.
+Code changes go the other way: edit, commit, `quanty deploy`.
+
+Running the agent on the server instead would give it the live keys in `.env`, and its builds and
+tests would compete with the trader for a small server's CPU. Projects from `quanty init` carry a
+`.mcp.json` (the local dashboard's tools) and a `.claude/settings.json` that lets Claude Code read
+without asking, asks before any change, deploy or ssh, and never reads `.env` or runs `quanty live`.
+
 ## The public demo
 
 `quanty demo --live --public` is the demo built for hosting: synthetic markets only, no keys and no

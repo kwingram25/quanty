@@ -105,6 +105,7 @@ paper trading, shadow trading and live trading; [Deploying](docs/deploying.md) c
 | `quanty init`, `deploy` | create a project; copy it to a Docker server (bringing its dashboard changes home first), check it there and start it |
 | `quanty doctor` | check a project before trading: config, keys, clock, venues, leftovers (read-only; also the dashboard's Health page) |
 | `quanty list`, `params` | strategies quanty can find, and their parameters |
+| `quanty mcp` | the dashboard as tools for an AI agent (Claude Code): summarize, rank, edit params, halt, switch (`--ssh you@server` for a server's) |
 | `quanty password` | set the dashboard's login (a salted hash in `.env`) |
 
 ## Layout
