@@ -38,14 +38,17 @@ Your strategies, configs and keys live in a project of your own, not in this clo
 ```sh
 uv run quanty init ~/code/my-quanty     # a few questions (strategy name, venues, keys); --yes for defaults
 cd ~/code/my-quanty
-git init && git add -A && git commit -m "my quanty project"   # .env and data/ are already ignored
 ```
 
 It holds `strategies/<name>.py` (a skeleton aimed at your first series), `experiments/main.toml`,
 `feeds.toml`, `.env` (your keys, readable only by you) and the files to deploy it. `uv run quanty`
-works in it with nothing installed first, and every command below runs there. Keep the repo
-private and push it somewhere backed up: your strategies are your edge. quanty itself is just a
-dependency of it.
+works in it with nothing installed first, and every command below runs there. It's a git
+repository with a first commit (`.env` and `data/` are ignored): keep it private and push it
+somewhere backed up, since your strategies are your edge. quanty itself is just a dependency of it.
+
+Every run records the code it ran with each strategy: the project's commit (marked when files
+differed from it) and a hash of the strategy's file, which changes with any edit. The dashboard
+shows them in a strategy's details, so a change in results can be traced to a change in code.
 
 ## 3. Run an experiment
 

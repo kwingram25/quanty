@@ -13,7 +13,7 @@ import heapq
 import itertools
 import sys
 from collections import defaultdict
-from collections.abc import Callable, Iterable, Iterator, Sequence
+from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
@@ -55,9 +55,12 @@ class Instance:
     twin_of: str | None = None  # a paper copy of this live instance, for the dashboard's Compare
 
 
-def describe(inst: Instance) -> dict[str, object]:
+def describe(inst: Instance, code: Mapping[str, Any] | None = None) -> dict[str, object]:
     """What an instance is: its strategy, description, the series it trades, every param (and which
-    ones its config set), broker and limits. Logged when a run starts, for the dashboard."""
+    ones its config set), broker and limits, and the code it ran (`code`: the project's version, see
+    quanty.version; plus a hash of the strategy's file). Logged when a run starts, for the dashboard."""
+    from quanty.version import file_hash
+
     strategy, params = inst.strategy, inst.strategy.params
     doc = (type(strategy).__doc__ or "").strip().splitlines()
     module_doc = (sys.modules[type(strategy).__module__].__doc__ or "").strip()
@@ -73,6 +76,10 @@ def describe(inst: Instance) -> dict[str, object]:
         "broker_kind": inst.broker.kind,  # live = real money
         "limits": inst.limits.model_dump(exclude_none=True),
         "twin_of": inst.twin_of,
+        "code": {
+            **(code or {}),
+            "file": file_hash(getattr(sys.modules[type(strategy).__module__], "__file__", None)),
+        },
     }
 
 
@@ -197,8 +204,11 @@ class Engine:
         strict: bool = True,
         signals: Sequence["Signal"] = (),
         spare_brokers: Sequence[Broker] = (),
+        code: Mapping[str, Any] | None = None,
     ) -> None:
-        """strict re-raises strategy errors (backtests); otherwise the instance is logged and halted."""
+        """strict re-raises strategy errors (backtests); otherwise the instance is logged and halted.
+        code: the project's code version (quanty.version.project), recorded with each strategy."""
+        self.code = dict(code or {})
         self.instances = {i.id: i for i in instances}
         if len(self.instances) != len(instances):
             raise ValueError("instance ids must be unique")
@@ -227,7 +237,7 @@ class Engine:
             self._signals_by_key.setdefault(sig.key, []).append(sig)
         self._ctx = {i.id: Context(self, i) for i in instances}
         for inst in instances:  # what each instance is, so a ledger can say what was run
-            self.ledger.log(self.now, inst.id, "strategy", describe(inst))
+            self.ledger.log(self.now, inst.id, "strategy", describe(inst, self.code))
         self._brokers: dict[str, Broker] = {}
         for b in [*(i.broker for i in instances), *spare_brokers]:  # spares: to switch instances onto
             if self._brokers.setdefault(b.name, b) is not b:
@@ -501,7 +511,9 @@ class Engine:
             self._held_by.setdefault((instance_id, m), inst.broker)
         inst.broker = new
         self.ledger.kinds[instance_id] = new.kind
-        self.ledger.log(self.now, instance_id, "strategy", describe(inst))  # the dashboard: its kind now
+        self.ledger.log(
+            self.now, instance_id, "strategy", describe(inst, self.code)
+        )  # the dashboard: its kind now
         return sorted(busy)
 
     def add_instance(self, inst: Instance) -> None:
@@ -514,7 +526,7 @@ class Engine:
         self.instances[inst.id] = inst
         self._ctx[inst.id] = Context(self, inst)
         self.ledger.kinds[inst.id] = inst.broker.kind
-        self.ledger.log(self.now, inst.id, "strategy", describe(inst))
+        self.ledger.log(self.now, inst.id, "strategy", describe(inst, self.code))
         self._guard(inst, lambda s, c: s.on_start(c))
         for m in list(self.open_markets.values()):
             if inst.strategy.wants(m):

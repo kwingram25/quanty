@@ -17,6 +17,7 @@ my-quanty/
 
 import os
 import re
+import shutil
 import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -98,6 +99,27 @@ def create(dest: Path, a: Answers, *, force: bool = False, vendor: bool | None =
     wheels = _vendor(checkout, dest / "vendor") if vendor else []
     (dest / "pyproject.toml").write_text(_pyproject(dest, wheels[0] if wheels else None))
     return [*written, *wheels, "pyproject.toml"]
+
+
+def git_init(dest: Path) -> str:
+    """Make the project a git repository with a first commit (.env and data/ are ignored; the
+    vendored wheel is kept, so the project builds anywhere). Returns what it did, for the CLI."""
+    if shutil.which("git") is None:
+        return "git isn't installed, so this isn't a repository yet"
+
+    def git(*args: str) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(["git", "-C", str(dest), *args], capture_output=True, text=True, timeout=60)
+
+    top = git("rev-parse", "--show-toplevel")
+    if top.returncode == 0:
+        return f"already inside the git repository at {top.stdout.strip()}; made no new one"
+    git("init", "-q", "-b", "main")
+    git("add", "-A")
+    done = git("commit", "-q", "-m", "quanty init")
+    if done.returncode != 0:
+        why = (done.stderr.strip().splitlines() or ["?"])[-1]
+        return f"made a git repository, but couldn't commit ({why}): commit the files yourself"
+    return "made a git repository with a first commit: push it to a private remote to back it up"
 
 
 def _vendor(checkout: Path, into: Path) -> list[str]:
@@ -443,7 +465,8 @@ with `deploy/cloud-init.yaml` pasted as its "user data", then from this folder:
 
 That copies this folder (with `.env`; never `data/`), checks it with `quanty doctor` on the server,
 and starts the trader (paper by default; `QUANTY_MODE=live` in `.env` trades for real) and the
-dashboard, both restarted on failure and on reboot. Run it again after every change. The dashboard
+dashboard, both restarted on failure and on reboot. Run it again after every change (commit first:
+the server records the commit it got, and each run there the code it ran). The dashboard
 listens on the server's 127.0.0.1:8765: `ssh -N -L 8765:127.0.0.1:8765 root@your-server`, then open
 http://127.0.0.1:8765.
 

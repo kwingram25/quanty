@@ -48,6 +48,7 @@ from quanty.core.portfolio import Position
 from quanty.core.risk import event_exposure
 from quanty.core.types import Side
 from quanty.venues.orders import has_keys
+from quanty.version import DEPLOYED_MARK
 
 ACTIONS = (
     "halt",
@@ -64,7 +65,6 @@ ACTIONS = (
     "reload",
 )
 ALIVE_S = 10  # a session whose heartbeat is older than this is not running
-DEPLOYED_MARK = ".quanty-deployed"  # left by `quanty deploy` in a server's project folder
 
 meta = MetaData()
 commands = Table(
@@ -365,7 +365,7 @@ class Controller:
                 self.trader.now,
                 iid,
                 "strategy",
-                {**describe(inst), "params_set": sorted(self.file_set[iid]), "edited": []},
+                {**describe(inst, self.trader.code), "params_set": sorted(self.file_set[iid]), "edited": []},
             )
         return f"{iid}: saved {', '.join(f'{k} = {v}' for k, v in edited.items())} to {self.experiment.name}"
 
@@ -489,7 +489,7 @@ class Controller:
                 iid,
                 "strategy",
                 {
-                    **describe(inst),
+                    **describe(inst, self.trader.code),
                     "params_set": sorted(self.file_set[iid]),  # still the file's
                     "edited": sorted(edited),
                 },

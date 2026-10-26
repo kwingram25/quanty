@@ -209,6 +209,12 @@ function Details({ st, session, onEdit, onReset, onSave, onSwitch }: {
     <div className="details-body">
       {info.description && <p className="desc">{info.description}</p>}
       {info.strategy && <p className="muted small">strategy <code>{info.strategy}</code>{info.broker && <> · broker <code>{info.broker}</code></>}</p>}
+      {info.code && (
+        <p className="muted small" title="The code this run started with: the project's git commit (or the one quanty deploy sent), and a hash of the strategy's file, which changes with any edit">
+          code {info.code.commit ? <><code>{info.code.commit}</code>{info.code.dirty && " with uncommitted changes"}</> : "not in git"}
+          {info.code.file && <> · file <code>{info.code.file}</code></>}{info.code.quanty && <> · quanty {info.code.quanty}</>}
+        </p>
+      )}
 
       {session && <SwitchBroker iid={st.instance} strategy={info.strategy} series={info.series ?? []} session={session} onSwitch={onSwitch} />}
 

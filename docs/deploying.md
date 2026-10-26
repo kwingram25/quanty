@@ -70,7 +70,9 @@ there, runs `quanty doctor` inside it, and only if that passes, starts the trade
 Run the same command after every change: the containers restart on the new code, and `data/` on the
 server is never sent or deleted. `--to` picks the folder on the server (default: the project's name,
 in your home), `--dry-run` prints the commands, and `--no-check` skips the doctor step. It needs
-`ssh` and `rsync`, which macOS and Linux have.
+`ssh` and `rsync`, which macOS and Linux have. It records the commit it sent on the server (the
+image has no `.git`), so runs there say which code they ran, and warns when you have uncommitted
+changes: commit first, and a run's commit names exactly what it ran.
 
 What runs, in two containers sharing `data/`, each restarted on failure and on reboot:
 

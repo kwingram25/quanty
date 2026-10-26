@@ -45,6 +45,9 @@ export interface StrategyInfo {
   markets_traded?: number;
   /** params changed from the dashboard (differing from the experiment file) */
   edited?: string[];
+  /** the code it ran: the project's commit (and whether files differed from it), quanty's version,
+   *  and a hash of the strategy's file */
+  code?: { commit?: string | null; dirty?: boolean; quanty?: string; file?: string | null };
 }
 
 export interface Held { instance: string; side: string; qty: number; avg: number }

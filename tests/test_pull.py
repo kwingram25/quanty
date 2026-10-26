@@ -11,10 +11,11 @@ from typer.testing import CliRunner
 from quanty import cli, pull
 from quanty.brokers.live import LiveBroker
 from quanty.brokers.sim import SimBroker
-from quanty.control import DEPLOYED_MARK, Controller, ControlStore
+from quanty.control import Controller, ControlStore
 from quanty.core import Engine, Instance, Ledger
 from quanty.deploy import commands
 from quanty.init import Answers, create
+from quanty.version import DEPLOYED_MARK
 
 EXP = """[brokers.paper]
 kind = "sim"
@@ -104,6 +105,6 @@ def test_fetch_reads_the_json_among_dockers_noise(monkeypatch: pytest.MonkeyPatc
 
 def test_deploy_marks_the_servers_folder(tmp_path: Path) -> None:
     create(tmp_path / "bot", Answers(), vendor=False)
-    _, rsync, remote = commands("me@srv", tmp_path / "bot", "bot")
+    _, rsync, remote = commands("me@srv", tmp_path / "bot", "bot", stamp={"commit": "abc123", "dirty": False})
     assert f"--exclude={DEPLOYED_MARK}" in rsync  # never deleted by --delete
-    assert f"touch {DEPLOYED_MARK}" in remote[2]
+    assert f"""printf '%s\\n' '{{"commit":"abc123","dirty":false}}' > {DEPLOYED_MARK}""" in remote[2]

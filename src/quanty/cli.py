@@ -21,7 +21,7 @@ from typing import TYPE_CHECKING, Annotated, Any
 import structlog
 import typer
 
-from quanty import config, experiment, plugins, synthetic
+from quanty import config, experiment, plugins, synthetic, version
 from quanty.brokers.live import LiveBroker
 from quanty.control import Controller, ControlStore, Playback
 from quanty.core import Engine, Event, Ledger, Summary
@@ -61,8 +61,10 @@ def init(
     venue: Annotated[list[str] | None, typer.Option(help="kalshi and/or polymarket_us (repeat)")] = None,
     yes: Annotated[bool, typer.Option("--yes", "-y", help="Accept the defaults; ask nothing")] = False,
     force: Annotated[bool, typer.Option(help="Overwrite files that already exist")] = False,
+    git: Annotated[bool, typer.Option(help="Make it a git repository with a first commit")] = True,
 ) -> None:
-    """Create a project: a strategy skeleton, configs, API keys, and Docker files to deploy it."""
+    """Create a project: a strategy skeleton, configs, API keys, and Docker files to deploy it, as a
+    git repository of its own (each run records the commit it ran)."""
     from quanty import init as project
 
     a = project.Answers()
@@ -103,6 +105,8 @@ def init(
     except ValueError as exc:
         raise _fail(exc) from None
     typer.echo(f"created {path}/: " + ", ".join(written))
+    if git:
+        typer.echo(project.git_init(path))
     typer.echo(f"next: cd {path} && uv run quanty list   (then see README.md)")
 
 
@@ -559,8 +563,22 @@ def deploy(
             typer.echo("brought home from the server (now in your files; commit them):")
             typer.echo("\n".join(f"  {line}" for line in lines))
 
+    sent = version.git(path)
+    if sent is None:
+        typer.echo("note: not a git repo, so the server won't know which commit it runs", err=True)
+    elif sent["dirty"]:
+        files = ", ".join(sent["changed"][:5]) + (", …" if len(sent["changed"]) > 5 else "")
+        typer.echo(
+            f"note: uncommitted changes ({files}): runs there will record {sent['commit']} with changes; "
+            "commit first to match one exactly",
+            err=True,
+        )
+    stamp = {
+        **({"commit": sent["commit"], "dirty": sent["dirty"]} if sent else {}),
+        "deployed_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+    }
     try:
-        cmds = dp.commands(host, path, to or path.resolve().name, check=check)
+        cmds = dp.commands(host, path, to or path.resolve().name, check=check, stamp=stamp)
     except ValueError as exc:
         raise _fail(exc) from None
     for cmd in cmds:
@@ -681,6 +699,7 @@ def _session(
         strict=False,
         signals=experiment.signals(exp),
         spare_brokers=spares,
+        code=version.project(Path.cwd()),  # the code it ran, with each strategy
     )
     _warm_and_restore(trader, exp, feeds, data, ledger_path)
     if armed:  # what it holds for real, against what the venues say the account holds
@@ -905,7 +924,14 @@ def _backtest(
     instances = experiment.build(exp, _strategies(), synthetic.FEES)
     signals = experiment.signals(exp)
     ledger = Ledger(ledger_path or ":memory:")
-    engine = Engine(instances, ledger=ledger, limits=exp.limits, clock_ms=exp.clock_ms, signals=signals)
+    engine = Engine(
+        instances,
+        ledger=ledger,
+        limits=exp.limits,
+        clock_ms=exp.clock_ms,
+        signals=signals,
+        code=version.project(Path.cwd()),
+    )
     events: Iterable[Event]
     if data is not None:
         feeds = load_feeds(None, recorded(data))
