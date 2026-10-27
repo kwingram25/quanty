@@ -7,7 +7,13 @@ command line. A patch version (0.1.1) never does. Projects from `quanty init` de
 version (`quanty-py>=0.1.0,<0.2`), so moving to the next is your choice: raise the bound in
 `pyproject.toml`, then `quanty upgrade`.
 
-## Unreleased
+## 0.2.0 (2026-10-27)
+
+Upgrading from 0.1: in your project's `pyproject.toml`, change `quanty-py>=0.1.0,<0.2` to
+`quanty-py>=0.2.0,<0.3`, then `quanty upgrade`. Experiment, feeds and strategy files need no
+changes. Only code that imported quanty's internals is affected: `quanty.signals.KINDS` is now
+`quanty.signals.kinds()`, and `AnySignalConfig` is gone (an experiment's `signals` are validated
+by their `kind`, extensions' kinds included).
 
 - Extensions: your own data feeds, signals and venues, from a project's `extensions/` folder or an
   installed package's `quanty.extensions` entry point; recorded, replayed, health-checked and
