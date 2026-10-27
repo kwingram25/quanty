@@ -7,6 +7,10 @@ command line. A patch version (0.1.1) never does. Projects from `quanty init` de
 version (`quanty-py>=0.1.0,<0.2`), so moving to the next is your choice: raise the bound in
 `pyproject.toml`, then `quanty upgrade`.
 
+## Unreleased
+
+- `quanty demo` trades 100 contracts a time (`--param size=` still sets it).
+
 ## 0.1.0 (2026-10-27)
 
 The first release.
