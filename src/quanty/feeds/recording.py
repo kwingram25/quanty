@@ -20,10 +20,12 @@ from pathlib import Path
 from typing import IO, Literal, cast
 
 import orjson
+import structlog
 
 from quanty.feeds.base import Link, Raw
 
 HOUR_MS = 3_600_000
+log = structlog.get_logger("quanty.record")
 
 
 def hour_path(root: Path, feed: str, t: int) -> Path:
@@ -59,12 +61,15 @@ class Recorder:
 
     One recorder per feed folder: two processes appending to one compressed file interleave their
     writes and corrupt it, so each feed's folder is locked while recorded (released at exit, even a
-    killed one) and a second recorder of it is refused."""
+    killed one). A second recorder of it is refused, or with share=True (a trading session) leaves
+    that feed to the other process, checking each minute whether it has stopped, to take over."""
 
-    def __init__(self, root: Path) -> None:
+    def __init__(self, root: Path, share: bool = False) -> None:
         self.root = root
+        self.share = share
         self._files: dict[str, tuple[Path, IO[str]]] = {}
         self._locks: dict[str, IO[bytes]] = {}
+        self._elsewhere: dict[str, int] = {}  # feed recorded by another process -> when to try again
 
     def _lock(self, feed: str) -> None:
         folder = self.root / feed
@@ -82,7 +87,21 @@ class Recorder:
 
     def write(self, item: Raw | Link) -> None:
         if item.feed not in self._locks:
-            self._lock(item.feed)
+            retry = self._elsewhere.get(item.feed)
+            if retry is not None and item.t < retry:
+                return  # another process records it
+            try:
+                self._lock(item.feed)
+            except RuntimeError:
+                if not self.share:
+                    raise
+                if retry is None:
+                    log.info("another process records this feed here; this session leaves it to it",
+                             feed=item.feed, data=str(self.root))  # fmt: skip
+                self._elsewhere[item.feed] = item.t + 60_000
+                return
+            if self._elsewhere.pop(item.feed, None) is not None:
+                log.info("the other recorder stopped; this session records the feed now", feed=item.feed)
         path = hour_path(self.root, item.feed, item.t)
         cur = self._files.get(item.feed)
         if cur is None or cur[0] != path:

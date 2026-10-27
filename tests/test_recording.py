@@ -185,3 +185,16 @@ def test_keep_days_comes_from_the_feeds_config(tmp_path: Path) -> None:
     cfg.write_text("[recording]\nkeep_days = 0\n")
     with pytest.raises(ValueError, match="keep_days"):
         keep_days(cfg)
+
+
+def test_a_session_leaves_a_feed_to_its_recorder_and_takes_over_when_it_stops(tmp_path: Path) -> None:
+    t = 1_700_000_000_000
+    recorder, session = Recorder(tmp_path), Recorder(tmp_path, share=True)
+    recorder.write(Raw("kalshi", t, '{"by":"recorder"}'))
+    session.write(Raw("kalshi", t + 1, '{"by":"session"}'))  # no error: left to the recorder
+    recorder.close()  # the recorder stops
+    session.write(Raw("kalshi", t + 30_000, '{"by":"session"}'))  # within the minute: still left
+    session.write(Raw("kalshi", t + 61_000, '{"by":"session"}'))  # a minute on: taken over
+    session.close()
+    got = [(i.t, i.text) for i in read(tmp_path, "kalshi", t, t + HOUR_MS) if isinstance(i, Raw)]
+    assert got == [(t, '{"by":"recorder"}'), (t + 61_000, '{"by":"session"}')]

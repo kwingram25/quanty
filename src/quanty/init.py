@@ -477,8 +477,8 @@ A quanty project: your strategy, its configuration, and what's needed to deploy 
    then `uv run quanty ui --data data`.
 3. **Backtest** on what you recorded: `uv run quanty backtest experiments/main.toml --data data`.
 4. **Paper trade** live markets with simulated fills, with the dashboard alongside:
-   `uv run quanty paper experiments/main.toml --feeds feeds.toml --data data --ui` (it records too:
-   stop the recorder from step 2 first, or add `--no-record`).
+   `uv run quanty paper experiments/main.toml --feeds feeds.toml --data data --ui` (it records too,
+   or leaves that to a recorder still running from step 2).
    Many variants: a `grid` in an `[[instances]]` entry makes one per combination
    (`grid = {{ min_conf = [0.9, 0.95] }}`); after editing the file, `uv run quanty reload` starts and
    retires them without a restart. The dashboard's **Variants** tab ranks them for promotion, and
