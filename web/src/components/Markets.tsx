@@ -52,7 +52,10 @@ export function Markets({ session, slots }: { session: SessionState | null; slot
   const now = useEventClock(session);
   if (!session) return null;
   const events = new Map<string, OpenMarket[]>();
-  for (const m of session.markets) events.set(m.event, [...(events.get(m.event) ?? []), m]);
+  // a market leaves as its countdown ends, not when the next heartbeat says so (seconds later, or a
+  // minute of a sped-up demo)
+  const open = now == null ? session.markets : session.markets.filter((m) => m.close_ts > now);
+  for (const m of open) events.set(m.event, [...(events.get(m.event) ?? []), m]);
   return (
     <section className="panel" aria-label="Open markets">
       <header><h2>Open markets</h2><span className="hint">soonest close first</span></header>

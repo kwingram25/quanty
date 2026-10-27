@@ -7,6 +7,11 @@ file is opened) and the command line. Projects from `quanty init` depend on one 
 (`quanty-py>=0.4.0,<0.5`), so moving to the next is your choice: raise the bound in
 `pyproject.toml`, then `quanty upgrade`.
 
+## Unreleased
+
+- The dashboard's open markets drop a market as its countdown ends, rather than at the next update
+  (which a slow connection, or a sped-up demo, made seconds or a demo minute late).
+
 ## 0.4.0 (2026-10-27)
 
 Upgrading from 0.3: change the bound to `quanty-py>=0.4.0,<0.5`, then `quanty upgrade` (it brings the
