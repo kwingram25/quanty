@@ -4,10 +4,14 @@ quanty is `quanty-py` on PyPI. Every release is a new minor version (0.2, 0.3, .
 0.x, a release may change what your project relies on, and says so here with what to do: the
 `Strategy` class and `ctx`, experiment and feeds files, the ledger's schema (migrated for you when a
 file is opened) and the command line. Projects from `quanty init` depend on one minor version
-(`quanty-py>=0.3.0,<0.4`), so moving to the next is your choice: raise the bound in
+(`quanty-py>=0.4.0,<0.5`), so moving to the next is your choice: raise the bound in
 `pyproject.toml`, then `quanty upgrade`.
 
-## Unreleased
+## 0.4.0 (2026-10-27)
+
+Upgrading from 0.3: change the bound to `quanty-py>=0.4.0,<0.5`, then `quanty upgrade` (it brings the
+new Dockerfile). Recordings made before it have no data files, so a warm-up is fully quick once the
+recorder has run on 0.4 for as long as the warm-up reaches back (4 hours, say).
 
 - Restarts are quicker. The recorder also writes each hour's data messages (Kalshi's index values,
   among its books) to a small file beside the hour's (`<HH>.data.jsonl.gz`, about 2% of it), and a
