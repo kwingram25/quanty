@@ -31,6 +31,16 @@ Start = Annotated[
 End = Annotated[str | None, typer.Option(help="UTC end (default: last recording)")]
 
 
+PROJECT_FEEDS = Path("feeds.toml")
+
+
+def replay_config(config: Path | None) -> Path | None:
+    """The feed config recordings are parsed with: the one given, else the project's feeds.toml,
+    else built-in defaults. It matters: a feed's settings (a venue's series, say) decide which
+    recorded messages become markets."""
+    return config if config is not None else PROJECT_FEEDS if PROJECT_FEEDS.is_file() else None
+
+
 def recorded(data: Path) -> list[str]:
     names = recorded_feeds(data)
     if not names:
@@ -134,7 +144,7 @@ def replay(
 ) -> None:
     """Parse recordings back into events and summarize them."""
     try:
-        feeds = load_feeds(config, feed or recorded(data))
+        feeds = load_feeds(replay_config(config), feed or recorded(data))
         lo, hi = recorded_range(data, list(feeds), start, end)
     except ValueError as exc:
         raise _fail(exc) from None
@@ -170,7 +180,7 @@ def health(
 ) -> None:
     """Health and receive lag of recorded feeds over a period, computed from the recordings."""
     try:
-        feeds = load_feeds(config, feed or recorded(data))
+        feeds = load_feeds(replay_config(config), feed or recorded(data))
         lo, hi = recorded_range(data, list(feeds), start, end)
     except ValueError as exc:
         raise _fail(exc) from None

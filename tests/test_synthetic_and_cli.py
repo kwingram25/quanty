@@ -193,3 +193,26 @@ def test_example_stop_sells_and_never_buys_back_in() -> None:
     assert stops and all(r.action == "sell" for r in stops)
     for stop in stops:  # after a stop, no more buys in that market
         assert not [r for r in rows if r.market_id == stop.market_id and r.action == "buy" and r.ts > stop.ts]
+
+
+def test_backtest_parses_recordings_with_the_projects_feeds_toml(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import time
+
+    from quanty.feeds.base import Raw
+    from quanty.feeds.recording import Recorder
+
+    fixture = (Path(__file__).parent / "fixtures" / "coinbase.jsonl").read_text().splitlines()
+    rec, now = Recorder(tmp_path / "data"), int(time.time() * 1000)
+    for i, line in enumerate(fixture):
+        rec.write(Raw("btc", now - 60_000 + i, line))  # a feed named in feeds.toml, not a kind
+    rec.close()
+    exp = Path(__file__).parent.parent / "experiments" / "example.toml"
+    monkeypatch.chdir(tmp_path)
+    res = run("backtest", str(exp), "--data", "data")
+    assert res.exit_code == 2 and "unknown kind 'btc'" in res.output  # defaults can't parse it
+    (tmp_path / "feeds.toml").write_text('[feeds.btc]\nkind = "coinbase"\n')
+    res = run("backtest", str(exp), "--data", "data")
+    assert res.exit_code == 0, res.output
+    assert "replay btc from data/" in res.output

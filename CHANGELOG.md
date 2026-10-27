@@ -7,6 +7,13 @@ command line. A patch version (0.1.1) never does. Projects from `quanty init` de
 version (`quanty-py>=0.1.0,<0.2`), so moving to the next is your choice: raise the bound in
 `pyproject.toml`, then `quanty upgrade`.
 
+## Unreleased
+
+- Fix: `quanty backtest --data` and `quanty replay` parse recordings with the project's
+  `feeds.toml` (or `--feeds`/`--config`), not built-in defaults, which dropped every market outside
+  the default series (Polymarket US 5m, Kalshi series other than KXBTC15M). The dashboard's
+  Backtest variants runs through it, so it's fixed there too.
+
 ## 0.2.0 (2026-10-27)
 
 Upgrading from 0.1: in your project's `pyproject.toml`, change `quanty-py>=0.1.0,<0.2` to

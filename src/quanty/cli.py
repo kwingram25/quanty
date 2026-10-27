@@ -34,6 +34,7 @@ from quanty.feeds.cli import (
     recorded,
     recorded_range,
     replay,
+    replay_config,
 )
 from quanty.feeds.health import Status, Window
 from quanty.feeds.replay import Replay
@@ -254,10 +255,14 @@ def backtest(
     ] = None,
     start: Annotated[str | None, typer.Option(help="UTC start of the replay (with --data)")] = None,
     end: Annotated[str | None, typer.Option(help="UTC end of the replay (with --data)")] = None,
+    feeds: Annotated[
+        Path | None,
+        typer.Option(help="With --data: the feed config they were recorded with (default: ./feeds.toml)"),
+    ] = None,
 ) -> None:
     """Run an experiment config on synthetic markets, or on recordings with --data."""
     try:
-        _backtest(experiment.load(path), hours, seed, ledger, data, start, end)
+        _backtest(experiment.load(path), hours, seed, ledger, data, start, end, feeds)
     except ValueError as exc:
         raise _fail(exc) from None
 
@@ -1121,6 +1126,7 @@ def _backtest(
     data: Path | None = None,
     start: str | None = None,
     end: str | None = None,
+    feeds_config: Path | None = None,
 ) -> None:
     if ledger_path and ledger_path.exists():
         raise ValueError(f"{ledger_path} already exists")
@@ -1141,7 +1147,7 @@ def _backtest(
     )
     events: Iterable[Event]
     if data is not None:
-        feeds = load_feeds(None, recorded(data))
+        feeds = load_feeds(replay_config(feeds_config), recorded(data))
         lo, hi = recorded_range(data, list(feeds), start, end)
         seconds, data_only = experiment.warmup(exp, (i.strategy for i in instances))
         if seconds:  # the history its strategies need, orders off: before --start, or the first hours
@@ -1149,7 +1155,8 @@ def _backtest(
             lo = max(lo, warm_from + seconds * 1000)
             typer.echo(f"warming up on {_span(seconds)} of recordings (orders off), trading from then")
             with engine.warming():
-                for ev in Replay(load_feeds(None, list(feeds)), data, warm_from, lo, data_only=data_only):
+                warm = load_feeds(replay_config(feeds_config), list(feeds))
+                for ev in Replay(warm, data, warm_from, lo, data_only=data_only):
                     engine.advance(ev.ts)
                     engine.process(ev)
         events = Replay(feeds, data, lo, hi)
