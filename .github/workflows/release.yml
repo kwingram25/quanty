@@ -71,3 +71,22 @@ jobs:
           name: dist
           path: dist/
       - uses: pypa/gh-action-pypi-publish@release/v1
+
+  # the public demo (quanty-demo.fly.dev) runs the released code: deployed from the tag once PyPI has it.
+  # Needs FLY_API_TOKEN, a deploy token for the demo app alone (`fly tokens create deploy -a quanty-demo`).
+  demo:
+    if: github.ref_type == 'tag'
+    needs: pypi
+    runs-on: ubuntu-latest
+    environment: demo
+    concurrency: demo
+    steps:
+      - uses: actions/checkout@v4
+      - uses: superfly/flyctl-actions/setup-flyctl@1.5
+      - run: flyctl deploy --config fly.demo.toml --ha=false --remote-only
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+      - name: the demo answers
+        run: |
+          for i in $(seq 1 30); do curl -sf https://quanty-demo.fly.dev/api/runs | grep -q demo-live && exit 0; sleep 10; done
+          echo "the demo didn't come back with its run" >&2; exit 1

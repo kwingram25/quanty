@@ -54,7 +54,15 @@ https://quanty-demo.fly.dev runs `quanty demo --live --public`, the demo built f
 synthetic markets only, no keys and no account balances, a banner saying it's shared by everyone
 viewing it, and every few hours (`--reset-hours`, 6 by default) it exits so the host starts a fresh
 one. `demo.Dockerfile` and `fly.demo.toml` in this repo run it on Fly.io, on one shared-CPU machine kept
-running (about $3 a month), with 6 hours of history so each fresh start is quick. To update it after a change:
+running (about $3 a month), with 6 hours of history so each fresh start is quick. Every release deploys
+it (the `demo` job in `release.yml`, after PyPI has the version), from the tagged commit, and checks it
+answers. It needs, once, a deploy token for the demo app alone in the repository's `demo` environment:
+
+```sh
+fly tokens create deploy -a quanty-demo -x 8760h | gh secret set FLY_API_TOKEN --env demo   # a year
+```
+
+By hand, between releases (or the first time):
 
 ```sh
 fly apps create quanty-demo            # the name must be unique on Fly; change it in fly.demo.toml too
