@@ -157,3 +157,28 @@ def span(root: Path, feed: str) -> tuple[int, int] | None:
         return int(dt.timestamp() * 1000)
 
     return start_of(paths[0]), start_of(paths[-1]) + int(timedelta(hours=1).total_seconds() * 1000)
+
+
+def prune(root: Path, feeds: Iterable[str], keep_days: float, now: int) -> int:
+    """Delete these feeds' hourly files that ended more than keep_days ago (and emptied day folders);
+    returns how many files went."""
+    cutoff = now - int(keep_days * 86_400_000)
+    gone = 0
+    for feed in feeds:
+        for day in sorted((root / feed).glob("????-??-??")):
+            for path in sorted(day.glob("*.jsonl.gz")):
+                try:
+                    start = int(
+                        datetime.strptime(f"{day.name} {path.name[:2]}", "%Y-%m-%d %H")
+                        .replace(tzinfo=UTC)
+                        .timestamp()
+                        * 1000
+                    )
+                except ValueError:
+                    continue
+                if start + HOUR_MS <= cutoff:
+                    path.unlink(missing_ok=True)
+                    gone += 1
+            if day.is_dir() and not any(day.iterdir()):
+                day.rmdir()
+    return gone

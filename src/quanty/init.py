@@ -204,7 +204,13 @@ def inline_pem(path: str) -> str:
 
 
 def _feeds(a: Answers) -> str:
-    out = ["# Venues and series this project connects to. `quanty feeds list` shows every feed kind.", ""]
+    out = [
+        "# Venues and series this project connects to. `quanty feeds list` shows every feed kind.",
+        "",
+        "[recording]",
+        "# keep_days = 30   # delete recordings older than this (a busy Kalshi feed records GBs a day)",
+        "",
+    ]
     if "kalshi" in a.venues:
         series = ", ".join(f'"{s}"' for s in a.series.get("kalshi") or DEFAULT_SERIES["kalshi"])
         out += [

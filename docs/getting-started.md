@@ -140,6 +140,14 @@ side. Every strike is still discovered and recorded; the others just get no book
 channel, about once a second) instead of full order books: far fewer messages, for strategies that
 only take the best price.
 
+To cap disk use, `keep_days` under `[recording]` in `feeds.toml` deletes recordings older than
+that, checked hourly by whatever is recording (a busy Kalshi feed writes several GB a day):
+
+```toml
+[recording]
+keep_days = 30
+```
+
 Every message is stored exactly as received (`data/<feed>/<date>/<hour>.jsonl.gz`), with receive
 timestamps. Replays parse the same bytes in the same order, so a backtest on recordings sees what
 a live run would have seen:

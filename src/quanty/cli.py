@@ -25,7 +25,16 @@ from quanty import config, experiment, plugins, synthetic, version
 from quanty.brokers.live import LiveBroker
 from quanty.control import Controller, ControlStore, Playback
 from quanty.core import Engine, Event, Ledger, Summary
-from quanty.feeds.cli import feeds_app, load_feeds, print_windows, record, recorded, recorded_range, replay
+from quanty.feeds.cli import (
+    feeds_app,
+    keep_days,
+    load_feeds,
+    print_windows,
+    record,
+    recorded,
+    recorded_range,
+    replay,
+)
 from quanty.feeds.health import Status, Window
 from quanty.feeds.replay import Replay
 from quanty.feeds.session import RecordSession, TaskCrashed
@@ -771,6 +780,7 @@ def _session(
             )
         instances, spares = experiment.build_session(exp, _strategies(), armed=armed)
         feed_objs = load_feeds(feeds, None)
+        keep = keep_days(feeds)
     except ValueError as exc:
         raise _fail(exc) from None
     structlog.configure(logger_factory=structlog.PrintLoggerFactory(sys.stderr))  # after any refusal
@@ -811,6 +821,7 @@ def _session(
         trader=trader,
         controller=controller,
         record=record,
+        keep_days=keep,
     )
     ids = [i.id for i in instances]
 

@@ -49,6 +49,18 @@ def load_feeds(path: Path | None, names: list[str] | None) -> dict[str, Feed]:
     return {name: feedlib.make(name, tables.get(name, {})) for name in wanted}
 
 
+def keep_days(path: Path | None) -> float | None:
+    """[recording] keep_days in a feeds config: how long recordings are kept (None: forever)."""
+    if path is None:
+        return None
+    raw = tomllib.loads(path.read_text()).get("recording", {}).get("keep_days")
+    if raw is None:
+        return None
+    if not isinstance(raw, int | float) or isinstance(raw, bool) or raw <= 0:
+        raise ValueError(f"{path.name}: [recording] keep_days must be a number of days above 0")
+    return float(raw)
+
+
 def parse_time(s: str) -> int:
     dt = datetime.fromisoformat(s)
     return int((dt if dt.tzinfo else dt.replace(tzinfo=UTC)).timestamp() * 1000)
@@ -96,10 +108,11 @@ def record(
     structlog.configure(logger_factory=structlog.PrintLoggerFactory(sys.stderr))
     try:
         feeds = load_feeds(config, feed)
+        keep = keep_days(config)
     except ValueError as exc:
         raise _fail(exc) from None
     data.mkdir(parents=True, exist_ok=True)
-    session = RecordSession(feeds, data, db or data / "quanty.sqlite", window_s=window)
+    session = RecordSession(feeds, data, db or data / "quanty.sqlite", window_s=window, keep_days=keep)
     typer.echo(f"recording {', '.join(feeds)} to {data}/ (Ctrl-C to stop)")
     try:
         asyncio.run(session.run(duration, on_window=print_windows))

@@ -151,3 +151,37 @@ def test_a_session_stops_cleanly_on_sigterm(tmp_path: Path) -> None:
         return tm.monotonic() - start
 
     assert asyncio.run(main()) < 3  # not the 30 s asked: SIGTERM ended it
+
+
+def test_old_recordings_are_pruned_by_age_and_only_the_feeds_asked(tmp_path: Path) -> None:
+    from datetime import UTC, datetime
+
+    from quanty.feeds.recording import prune
+
+    def at(day: str, hour: int) -> int:
+        return int(datetime.fromisoformat(f"{day}T{hour:02}:00:00+00:00").astimezone(UTC).timestamp() * 1000)
+
+    for feed in ("kalshi", "coinbase"):
+        for day, hour in (("2026-10-01", 5), ("2026-10-19", 23), ("2026-10-20", 0), ("2026-10-26", 12)):
+            path = tmp_path / feed / day / f"{hour:02}.jsonl.gz"
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(b"x")
+    now = at("2026-10-27", 0)  # keep 7 days: from 2026-10-20 00:00 on
+    assert prune(tmp_path, ["kalshi"], 7, now) == 2
+    left = sorted(str(p.relative_to(tmp_path / "kalshi")) for p in (tmp_path / "kalshi").rglob("*.gz"))
+    assert left == ["2026-10-20/00.jsonl.gz", "2026-10-26/12.jsonl.gz"]
+    assert not (tmp_path / "kalshi" / "2026-10-01").exists()  # its emptied day folder too
+    assert len(list((tmp_path / "coinbase").rglob("*.gz"))) == 4  # not a feed it was asked about
+
+
+def test_keep_days_comes_from_the_feeds_config(tmp_path: Path) -> None:
+    from quanty.feeds.cli import keep_days
+
+    cfg = tmp_path / "feeds.toml"
+    cfg.write_text('[feeds.coinbase]\nkind = "coinbase"\n')
+    assert keep_days(cfg) is None and keep_days(None) is None
+    cfg.write_text('[recording]\nkeep_days = 21\n\n[feeds.coinbase]\nkind = "coinbase"\n')
+    assert keep_days(cfg) == 21.0
+    cfg.write_text("[recording]\nkeep_days = 0\n")
+    with pytest.raises(ValueError, match="keep_days"):
+        keep_days(cfg)

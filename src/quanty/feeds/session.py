@@ -22,7 +22,7 @@ from quanty.core.events import Status as StatusEvent
 from quanty.db.models import FeedMetricRow
 from quanty.feeds.base import Feed, Link, Raw, now_ms
 from quanty.feeds.health import FeedHealth, Status, Window
-from quanty.feeds.recording import Recorder
+from quanty.feeds.recording import HOUR_MS, Recorder, prune
 
 log = structlog.get_logger("quanty.record")
 
@@ -59,9 +59,11 @@ class RecordSession:
         trader: "Trader | None" = None,
         controller: "Controller | None" = None,
         record: bool = True,
+        keep_days: float | None = None,
     ) -> None:
         """trader: an engine to drive with the live events (paper/shadow/live); None = record only.
-        record: write the raw messages to disk (off when a separate recorder does, on its own core)."""
+        record: write the raw messages to disk (off when a separate recorder does, on its own core).
+        keep_days: delete this session's recordings older than this, checked hourly (None: keep all)."""
         self.trader = trader
         self.controller = controller  # applies UI commands to the trader (quanty.control)
         if controller is not None:
@@ -69,6 +71,8 @@ class RecordSession:
         self.feeds = dict(feeds)
         self.recorder = Recorder(root)
         self.record = record
+        self.keep_days = keep_days
+        self._next_prune = 0
         self.db: Engine | None = db.connect(db_path) if db_path else None
         self.window_ms = int(window_s * 1000)
         start = now_ms()
@@ -161,7 +165,16 @@ class RecordSession:
             if self.db is not None:
                 self.db.dispose()
 
+    def _prune(self, now: int) -> None:
+        if not self.record or self.keep_days is None or now < self._next_prune:
+            return
+        self._next_prune = now + HOUR_MS
+        gone = prune(self.recorder.root, self.feeds, self.keep_days, now)
+        if gone:
+            log.info("old recordings deleted", files=gone, keep_days=self.keep_days)
+
     def _close_window(self, end: int, on_window: OnWindow | None) -> None:
+        self._prune(end)
         windows = [h.window(end) for h in self.health.values()]
         if self.db is not None:
             with self.db.begin() as conn:
