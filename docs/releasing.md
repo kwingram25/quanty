@@ -43,8 +43,9 @@ yanked on PyPI), never by re-uploading.
 Publishing makes the source public (a PyPI package ships it), the same step as making this
 repository public. Before that:
 
-- **README and getting started**: the install steps (today a `git clone`) become `pip install quanty-py` (or `uvx --from quanty-py quanty demo
-  --ui`), with a line warning against the other `quanty`; image links become absolute
+- **README and getting started**: the install steps (today a `git clone`) become
+  `pip install quanty-py` (or `uvx --from quanty-py quanty demo --ui`), with a line warning against
+  the other `quanty`; image links become absolute
   (`https://raw.githubusercontent.com/kwingram25/quanty/main/docs/images/...`), since PyPI doesn't
   serve the repository's files.
 - **A disclaimer** in the README and on PyPI: quanty places real-money orders; no warranty, not
