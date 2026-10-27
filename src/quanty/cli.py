@@ -675,6 +675,10 @@ def keys(
     """Put a server's API keys in place, apart from the code: `quanty deploy` never sends or touches
     them. Run it before the first deploy, and again to rotate keys (running containers restart on
     them). Best with keys made for that server alone, so they can be revoked without touching others."""
+    _send_keys(host, file, path, to)
+
+
+def _send_keys(host: str, file: Path, path: Path, to: str | None) -> None:
     from quanty import deploy as dp
 
     try:
@@ -693,12 +697,19 @@ def password(
     write: Annotated[
         bool, typer.Option("--write", help="Save it in the file instead of printing it")
     ] = False,
-    file: Annotated[Path, typer.Option(help="With --write: .env here, or a server's keys file")] = Path(
-        ".env"
-    ),
+    file: Annotated[
+        Path | None, typer.Option(help="With --write: the file (default .env, or .env.server with --server)")
+    ] = None,
+    server: Annotated[
+        str | None,
+        typer.Option(help="A server (as for ssh): save it in .env.server and send that there (quanty keys)"),
+    ] = None,
+    to: Annotated[
+        str | None, typer.Option(help="With --server: its folder (default: the project's name)")
+    ] = None,
 ) -> None:
     """Set the dashboard password: prints a QUANTY_UI_PASSWORD line for .env (only a salted hash).
-    For a server: --write --file .env.server, then `quanty keys` sends it."""
+    --server you@host saves it in .env.server and sends that file to the server, in one step."""
     from quanty.ui.auth import hash_password
 
     pw = typer.prompt("Dashboard password", hide_input=True, confirmation_prompt=True)
@@ -706,10 +717,10 @@ def password(
         raise _fail(ValueError("use at least 8 characters"))
     # single-quoted: Docker Compose substitutes $NAME in .env values, and the hash is full of `$`
     line = f"QUANTY_UI_PASSWORD='{hash_password(pw)}'"
-    if not write:
+    if not write and server is None:
         typer.echo(line)
         return
-    env = file
+    env = file or Path(".env.server" if server else ".env")
     lines = [
         x
         for x in (env.read_text().splitlines() if env.exists() else [])
@@ -717,6 +728,10 @@ def password(
     ]
     env.write_text("\n".join([*lines, line]) + "\n")
     env.chmod(0o600)
+    if server is not None:
+        typer.echo(f"saved to {env}")
+        _send_keys(server, env, Path("."), to)  # the dashboard restarts on it
+        return
     typer.echo(f"saved to {env}; restart `quanty ui` to use it (on a server: send it with `quanty keys`)")
 
 

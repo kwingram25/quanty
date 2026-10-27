@@ -190,3 +190,25 @@ def test_keys_refuse_a_dollar_compose_would_substitute(tmp_path: Path) -> None:
         deploy.check_keys(f)
     f.write_text("KALSHI_KEY_ID=abc\nQUANTY_UI_PASSWORD='scrypt$16384$8$1$salt$digest'\n")
     assert deploy.check_keys(f) == ["KALSHI_KEY_ID", "QUANTY_UI_PASSWORD"]
+
+
+def test_password_goes_straight_to_the_server(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    project = tmp_path / "bot"
+    project.mkdir()
+    (project / ".env.server").write_text("KALSHI_KEY_ID=abc\n")
+    monkeypatch.chdir(project)
+    sent: dict[str, object] = {}
+
+    def run(cmd: list[str], **kw: object) -> subprocess.CompletedProcess[bytes]:
+        sent.update(cmd=cmd, input=kw.get("input"))
+        return subprocess.CompletedProcess(cmd, 0)
+
+    monkeypatch.setattr(subprocess, "run", run)
+    res = CliRunner().invoke(
+        cli.app, ["password", "--server", "me@srv"], input="long enough pw\nlong enough pw\n"
+    )
+    assert res.exit_code == 0, res.output
+    text = (project / ".env.server").read_text()
+    assert text.startswith("KALSHI_KEY_ID=abc\n") and "QUANTY_UI_PASSWORD='scrypt$" in text
+    assert sent["cmd"][:2] == ["ssh", "me@srv"] and sent["input"] == text.encode()  # type: ignore[index]
+    assert "QUANTY_UI_PASSWORD" in res.output and "scrypt" not in res.output  # the name, never the hash

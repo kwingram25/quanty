@@ -189,8 +189,7 @@ The dashboard has an optional login. Set a password (only a salted hash is store
 keys file, and send it:
 
 ```sh
-uv run quanty password --write --file .env.server
-uv run quanty keys root@203.0.113.7 --file .env.server
+uv run quanty password --server root@203.0.113.7   # saves it in .env.server and sends that file
 ```
 
 With a password set, every page, API call and live update needs signing in first; sessions last 7
