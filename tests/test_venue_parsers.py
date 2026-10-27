@@ -282,7 +282,8 @@ def test_kalshi_top_only_series_follow_the_ticker_channel_as_one_level_books() -
 
     (b,) = k.parse(raw(tick("0.9700", "35.00", "0.9900", "120.00")))
     assert isinstance(b, Book) and b.market_id == f"kalshi:{ladder}"
-    assert b.bids == ((0.97, 35.0),) and b.asks == ((0.99, 120.0),) and b.src_ts == T0
+    assert b.bids == ((0.97, 35.0),) and b.asks == ((0.99, 120.0),)
+    assert b.src_ts is None  # batched by Kalshi: its time isn't the connection's lag
     assert k.parse(raw(tick("0.9700", "35.00", "0.9900", "120.00"))) == []  # unchanged: nothing new
     (empty,) = k.parse(raw(tick("0.0000", "0.00", "1.0000", "0.00")))  # an empty book (bid 0, ask 1)
     assert isinstance(empty, Book) and empty.bids == () and empty.asks == ()

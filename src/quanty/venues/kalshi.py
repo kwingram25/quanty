@@ -356,7 +356,9 @@ class Kalshi(VenueFeed):
         bid_q, ask_q = float(body.get("yes_bid_size_fp") or 0), float(body.get("yes_ask_size_fp") or 0)
         book = Book(
             ts=raw.t,
-            src_ts=body.get("ts_ms"),
+            # none: Kalshi batches this channel (sent up to ~1 s after the change), so its ts_ms says how
+            # stale the best price is, not how late the connection is, which feed lag measures
+            src_ts=None,
             market_id=f"{VENUE}:{ticker}",
             bids=((round(bid, 4), bid_q),) if bid > 0 and bid_q > 0 else (),
             asks=((round(ask, 4), ask_q),) if 0 < ask < 1 and ask_q > 0 else (),
