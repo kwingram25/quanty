@@ -566,7 +566,7 @@ thin book, and prices jump near the close. Selling works while a strategy is hal
 `tag="stop"` on stop sells: the dashboard shows those as stop losses.
 `example_favorite.py` has a model stop (`stop_conf`).
 
-Full reference: {REPO}/blob/main/docs/strategies.md (may be private). Working examples, in the
+Full reference: {REPO}/blob/main/docs/strategies.md. Working examples, in the
 installed package: `.venv/lib/python3.*/site-packages/quanty/strategies/example_favorite.py` (a
 probability model from an index) and `example_bucket.py` (range markets).
 

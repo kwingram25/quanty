@@ -38,6 +38,8 @@ change to `web/`.
 | `src/quanty/strategies/` | example strategies, and `_template.py`, the template `quanty init` starts a strategy from |
 | `src/quanty/db/migrations/` | Alembic migrations for the ledger |
 
+Releasing quanty and running its public demo: [MAINTAINING.md](MAINTAINING.md).
+
 ## Rules
 
 - **No real orders, ever, from tests or while developing.** Use `venues/fake.py` (an httpx

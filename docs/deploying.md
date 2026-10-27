@@ -171,9 +171,8 @@ change the `[processes]` command in `fly.toml` to `live experiments/main.toml --
 --data data --arm --ui --ui-host ::`. To run the doctor there:
 `fly ssh console -C "sh -c 'cd /app && quanty doctor'"`.
 
-The generated `fly.toml` is valid TOML (quanty's tests check that); the same Fly setup without a
-volume runs the [public demo](#the-public-demo). A project's (with a volume and secrets) hasn't
-been run on a Fly account yet: if a `fly` command disagrees with it, Fly's error is the authority.
+Fly's configuration format changes now and then: if a `fly` command disagrees with `fly.toml`, Fly's
+error message is the authority.
 
 ## Reaching the dashboard from anywhere
 
@@ -273,17 +272,3 @@ Running the agent on the server instead would give it the live keys in `.env`, a
 tests would compete with the trader for a small server's CPU. Projects from `quanty init` carry a
 `.mcp.json` (the local dashboard's tools) and a `.claude/settings.json` that lets Claude Code read
 without asking, asks before any change, deploy or ssh, and never reads `.env` or runs `quanty live`.
-
-## The public demo
-
-`quanty demo --live --public` is the demo built for hosting: synthetic markets only, no keys and no
-account balances, a banner saying it's shared by everyone viewing it, and every few hours
-(`--reset-hours`, 6 by default) it exits so the host starts a fresh one. `demo.Dockerfile` and
-`fly.demo.toml` in this repo run it on Fly.io, where it stops when nobody is visiting:
-
-```sh
-fly apps create quanty-demo            # the name must be unique on Fly; change it in fly.demo.toml too
-fly deploy --config fly.demo.toml --ha=false
-```
-
-`.dockerignore` lets only the source reach the builder, never `.env` or `data/`.

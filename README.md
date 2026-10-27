@@ -89,8 +89,7 @@ paper trading, shadow trading and live trading; [Deploying](docs/deploying.md) c
 - [Writing strategies](docs/strategies.md): hooks, context, orders, signals, testing
 - [Architecture](docs/architecture.md): how the pieces fit, and why one file runs everywhere
 - [Live trading](docs/live-trading.md): the safety layers, restarts, and what to do before `--arm`
-- [Deploying](docs/deploying.md): servers (DigitalOcean, AWS, Fly.io), the dashboard over HTTPS, editing on a server, working with an AI agent, the public demo
-- [Releasing](docs/releasing.md): publishing quanty-py to PyPI
+- [Deploying](docs/deploying.md): servers (DigitalOcean, AWS, Fly.io), the dashboard over HTTPS, editing on a server, working with an AI agent
 
 ## Commands
 
