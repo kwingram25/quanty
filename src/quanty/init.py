@@ -139,6 +139,7 @@ def _vendor(checkout: Path, into: Path) -> list[str]:
         )
     except (OSError, subprocess.SubprocessError):
         return []
+    (into / ".gitignore").unlink(missing_ok=True)  # uv build ignores its output; the wheel is committed
     return [f"vendor/{w.name}" for w in into.glob("quanty-*.whl")]
 
 

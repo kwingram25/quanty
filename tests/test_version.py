@@ -55,3 +55,13 @@ def test_each_strategy_records_the_code_it_ran(tmp_path: Path) -> None:
     assert row is not None
     recorded = row.fields["code"]
     assert recorded["commit"] == "abc123" and len(recorded["file"]) == 12  # the strategy file's hash
+
+
+def test_the_vendored_wheel_is_committed(tmp_path: Path) -> None:
+    dest = tmp_path / "bot"
+    written = create(dest, Answers(), vendor=True)  # builds a wheel of this checkout
+    wheels = [w for w in written if w.startswith("vendor/")]
+    assert wheels, "no wheel built"
+    git_init(dest)
+    tracked = subprocess.run(["git", "-C", str(dest), "ls-files"], capture_output=True, text=True).stdout
+    assert wheels[0] in tracked.split()  # the project builds from a clone, without this repo
