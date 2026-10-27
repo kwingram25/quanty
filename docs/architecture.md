@@ -70,7 +70,9 @@ until its per-order caps are set in the experiment file.
   resting orders join the back of the queue at their price and fill as trades consume the queue
   ahead or the book moves through them, post-only orders that would cross are rejected.
   `QueueModel` switches choose how optimistic that is (when queue position is measured, whether
-  cancels ahead count, what a trade through the price fills).
+  cancels ahead count, what a trade through the price fills), set per broker in an experiment
+  (`queue = { measure_at = "decision", ... }`) so a maker can be simulated as conservatively as
+  you like.
 - **`ShadowBroker`** fills exactly like `SimBroker` and also sends each order to the venue's
   preview endpoint, or builds and signs it locally where there is none.
 - **`LiveBroker`** sends real orders through `venues/orders.py`, polls resting orders for fills,
@@ -83,6 +85,11 @@ until its per-order caps are set in the experiment file.
 polling) and the recorder. `venues/` holds Kalshi and Polymarket US: market discovery for
 repeated series, order-book reconstruction from snapshots and deltas with sequence checking, fee
 models, request signing, and the order APIs.
+
+A session records its own feeds by default. Under load, recording (compressing every message)
+competes with trading for one core, so a session can leave it to a separate `quanty record` with
+`--no-record`: deployed projects run it that way, each process with its own feed connections and
+its own core.
 
 Discovery responses are recorded in the same stream as books and trades. A replay therefore sees
 markets open, strikes appear and results arrive in the order they did live, which matters for

@@ -74,6 +74,10 @@ max_open_risk = 200
 [brokers.sim]                  # every experiment has sim, shadow and live; a table changes settings
 latency_ms = 50
 
+[brokers.maker]                # more simulated brokers (kind = "sim" unless given), e.g. for makers:
+latency_ms = 300               # queue sets how resting orders fill (see Architecture: Brokers)
+queue = { measure_at = "decision", credit_cancels = false, fill_on_cross = false }
+
 [[instances]]
 id = "fav_90"
 strategy = "example_favorite"
@@ -99,9 +103,13 @@ uv run quanty params <name>             # and its params
 uv run quanty demo --strategy <name>    # a quick run on synthetic markets
 ```
 
+Strategies can import helper packages kept beside them in the project (a `models/` folder with
+fitted parameters, say: `from models import vol`), here and on a server alike.
+
 To share one private strategy library between several projects, point quanty at its folder in your
 user config. That works on your machine; a deployed project only carries its own `strategies/`, so
-copy in what a server should run.
+copy in what a server should run. A project's own strategies win over the library's when names
+match, so what you run locally is what it deploys.
 
 ```toml
 # ~/.config/quanty/config.toml

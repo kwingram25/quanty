@@ -330,7 +330,8 @@ needs that deploy: Reload picks up file changes, not new code. Then watch it wit
   permit real orders with real money.
 - Don't move a strategy toward live (`quanty promote --to live`, the dashboard's Go live) unless the
   user asks; `--to shadow` is safe (orders checked by the venue, never placed).
-- **Never read, print or edit `.env`** (API keys). `uv run quanty doctor` checks it without showing it.
+- **Never read, print or edit `.env` or `.env.*`** (API keys; `.env.server` holds a server's). `uv run
+  quanty doctor` checks them without showing them; `quanty keys` sends a server's without printing them.
 - A strategy only reads events and acts through `ctx`: no network calls, files, clocks
   (`time.time()`) or randomness of its own, so backtests replay exactly what live would do. State on
   `self` is fine (each run builds a fresh instance; nothing on `self` survives a restart).
