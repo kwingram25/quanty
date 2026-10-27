@@ -26,8 +26,10 @@ from quanty import experiment, promote
 def fetch(host: str, remote_dir: str) -> dict[str, dict[str, Any]]:
     """The server's held changes, per run ({} when there's no deployed project there yet)."""
     d = shlex.quote(remote_dir)
+    # exit 3: nothing deployed there yet (the folder may exist, with a volume mounted on its data/)
     cmd = (
-        f"cd {d} 2>/dev/null || exit 3; docker compose run --rm -T --entrypoint quanty trader changes --json"
+        f"cd {d} 2>/dev/null && test -f compose.yaml || exit 3; "
+        "docker compose run --rm -T --entrypoint quanty trader changes --json"
     )
     done = subprocess.run(["ssh", host, cmd], capture_output=True, text=True)
     if done.returncode == 3:
