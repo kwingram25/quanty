@@ -212,11 +212,20 @@ and read them with `ctx.signal("btc_vol")` (None until there is enough data).
 
 A paper or live session can restart and carry on its run: positions and realized P&L are rebuilt
 from the ledger, so `ctx.position` is right from the first event. What a strategy keeps on `self`
-starts empty. If it needs market history (a model of the last hours of an index), set
-`warmup_s` in the experiment: the session replays that much of its recordings first, with orders
-off, through the strategies' hooks. Add `warmup_events = "data"` when only index values are needed (most
-models): it skips the books, and replays hours of a busy venue in seconds. State built from your own fills (an entry price, a stopped-out
-set) isn't replayed; derive it from `ctx.position` and `ctx.entry_price` where you can.
+starts empty. If it needs market history (a model of the last hours of an index), say so on the
+class, and every session warms it up before trading:
+
+```python
+class MyStrategy(Strategy[MyParams]):
+    warmup_s = 4 * 3600  # replay the last 4 h of recordings first, orders off
+    warmup_events = "data"  # index values only (the default): hours of a busy venue in seconds
+```
+
+Use `warmup_events = "all"` if it builds state from books or trades too (slower). A session warms up
+for the longest any of its strategies asks; an experiment can override it with `warmup_s` and
+`warmup_events`. Backtests on recordings warm up the same way before trading. State built from your
+own fills (an entry price, a stopped-out set) isn't replayed; derive it from `ctx.position` and
+`ctx.entry_price` where you can.
 
 ## Testing a strategy
 

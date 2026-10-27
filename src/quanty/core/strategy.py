@@ -1,4 +1,4 @@
-from typing import TYPE_CHECKING, ClassVar
+from typing import TYPE_CHECKING, ClassVar, Literal
 
 from quanty.core.events import Book, Clock, DataEvent, Fill, MarketTrade
 from quanty.core.orders import Order
@@ -27,6 +27,12 @@ class Strategy[P: Params]:
         str, ...
     ] = ()  # series to trade ("<venue>:<series>"); empty = all. An experiment may override it
     description: ClassVar[str] = ""
+    # the history its model needs before it can trade (an index's last hours, say): sessions, and
+    # backtests on recordings, replay this much first with orders off, the longest any strategy asks
+    warmup_s: ClassVar[int] = 0
+    # what that replay needs: "data" (index values and other data feeds; seconds even for hours of a
+    # busy venue) or "all" (books and trades too, for state built from the markets themselves)
+    warmup_events: ClassVar[Literal["all", "data"]] = "data"
 
     def __init__(self, params: P) -> None:
         self.params = params

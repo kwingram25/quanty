@@ -131,3 +131,25 @@ def test_a_broker_queue_model_comes_from_the_file() -> None:
     b = make_broker("maker", exp.brokers["maker"], {})
     assert isinstance(b, SimBroker) and b.queue == QueueModel(measure_at="decision", fill_on_cross=False)
     assert make_broker("sim", exp.brokers["sim"], {}).queue == QueueModel()  # type: ignore[attr-defined]
+
+
+def test_warmup_is_what_the_strategies_need_unless_the_experiment_says() -> None:
+    from typing import ClassVar, Literal
+
+    from helpers import Hooks
+
+    from quanty.experiment import warmup
+
+    class Model(Hooks):
+        warmup_s: ClassVar[int] = 4 * 3600
+
+    class Books(Hooks):
+        warmup_s: ClassVar[int] = 600
+        warmup_events: ClassVar[Literal["all", "data"]] = "all"
+
+    exp = experiment.parse(inst())
+    assert warmup(exp, [Hooks()]) == (0, True)  # nothing asked
+    assert warmup(exp, [Hooks(), Model()]) == (4 * 3600, True)  # the longest, index data only
+    assert warmup(exp, [Model(), Books()]) == (4 * 3600, False)  # one needs the books too
+    told = experiment.parse({**inst(), "warmup_s": 60, "warmup_events": "data"})
+    assert warmup(told, [Model(), Books()]) == (60, True)  # the experiment's word wins

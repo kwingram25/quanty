@@ -27,7 +27,7 @@ Example (TOML)::
 
 import itertools
 import tomllib
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 from pathlib import Path
 from types import ModuleType
 from typing import Annotated, Any, Literal, Self
@@ -126,10 +126,11 @@ class Experiment(ConfigModel):
     clock_ms: PositiveInt | None = 1000
     # paper/live sessions: replay this much of the recent recordings first (orders off), so models
     # and signals that need history (an index's last hours) start warm instead of cold
-    warmup_s: NonNegativeInt = 0
+    # None (the default): what its strategies declare (Strategy.warmup_s), the longest of them
+    warmup_s: NonNegativeInt | None = None
     # what the warm-up replays: everything, or "data" only (index values and data feeds; no books),
-    # which is all most models need and many times faster on a busy venue's recordings
-    warmup_events: Literal["all", "data"] = "all"
+    # which is all most models need and many times faster; None: "all" if a strategy needs it
+    warmup_events: Literal["all", "data"] | None = None
     limits: Limits = Limits()
     brokers: dict[str, BrokerConfig] = Field(default_factory=_default_brokers, min_length=1)
     instances: list[InstanceSpec] = Field(min_length=1)
@@ -313,3 +314,12 @@ def parked_live_brokers(exp: Experiment) -> list[str]:
 
 def signals(exp: Experiment) -> list[Signal]:
     return [make_signal(cfg) for cfg in exp.signals]
+
+
+def warmup(exp: Experiment, strategies: Iterable[Strategy[Any]]) -> tuple[int, bool]:
+    """(seconds to replay before trading, whether data only): the experiment's settings where it
+    makes them, else what its strategies need (the longest; books too if any needs them)."""
+    needing = [s for s in strategies if s.warmup_s]
+    seconds = exp.warmup_s if exp.warmup_s is not None else max((s.warmup_s for s in needing), default=0)
+    events = exp.warmup_events or ("all" if any(s.warmup_events == "all" for s in needing) else "data")
+    return seconds, events == "data"

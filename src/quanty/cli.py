@@ -294,7 +294,7 @@ def paper(
 
     Strategies on the shadow broker also have every order checked by the venue (none placed). Records
     into the experiment's run (<data>/session/<name>.sqlite), continuing it: positions are restored,
-    and warmup_s in the experiment replays recent recordings first.
+    and the history its strategies need (Strategy.warmup_s) is replayed from recordings first.
     """
     with _dashboard(data, ui_host, ui_port) if ui else contextlib.nullcontext():
         _session("paper", path, feeds, data, ledger, duration, window, armed=False, record=record)
@@ -868,24 +868,18 @@ def _now_window_ms(window_s: int = 300) -> int:
 def _warm_and_restore(
     trader: Engine, exp: experiment.Experiment, feeds: Path, data: Path, ledger: Path
 ) -> None:
-    """Before a session trades: replay the recent recordings (exp.warmup_s, orders off) so strategy
-    state is rebuilt, then restore what the run already holds from its ledger."""
-    if exp.warmup_s:
+    """Before a session trades: replay the recent recordings (orders off) for the history its
+    strategies need (or the experiment's warmup_s), then restore what the run holds from its ledger."""
+    seconds, data_only = experiment.warmup(exp, (i.strategy for i in trader.instances.values()))
+    if seconds:
         end = int(time.time() * 1000)
         typer.echo(
-            f"warming up: replaying the last {exp.warmup_s / 3600:g} h of recordings in {data}/ (orders off"
-            + (", data only)" if exp.warmup_events == "data" else ")")
+            f"warming up: replaying the last {seconds / 3600:g} h of recordings in {data}/ (orders off"
+            + (", data only)" if data_only else ")")
         )
         n = 0
         with trader.warming():
-            replay = Replay(
-                load_feeds(feeds, None),
-                data,
-                end - exp.warmup_s * 1000,
-                end,
-                data_only=exp.warmup_events == "data",
-            )
-            for ev in replay:
+            for ev in Replay(load_feeds(feeds, None), data, end - seconds * 1000, end, data_only=data_only):
                 trader.advance(ev.ts)
                 trader.process(ev)
                 n += 1
@@ -1052,6 +1046,15 @@ def _backtest(
     if data is not None:
         feeds = load_feeds(None, recorded(data))
         lo, hi = recorded_range(data, list(feeds), start, end)
+        seconds, data_only = experiment.warmup(exp, (i.strategy for i in instances))
+        if seconds:  # the history its strategies need, orders off: before --start, or the first hours
+            warm_from = lo - seconds * 1000 if start else lo
+            lo = max(lo, warm_from + seconds * 1000)
+            typer.echo(f"warming up on {seconds / 3600:g} h of recordings (orders off), trading from then")
+            with engine.warming():
+                for ev in Replay(load_feeds(None, list(feeds)), data, warm_from, lo, data_only=data_only):
+                    engine.advance(ev.ts)
+                    engine.process(ev)
         events = Replay(feeds, data, lo, hi)
         typer.echo(f"replay {', '.join(feeds)} from {data}/")
     else:
