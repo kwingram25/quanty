@@ -5,7 +5,7 @@ prediction markets** on Kalshi and Polymarket US: crypto up/down windows, daily 
 economic releases, any market that recurs on a schedule and settles against a known source.
 
 Any binary contract works: up/down windows, ranges and ladders (a question with several outcomes
-is a set of binaries sharing an event), thresholds. See [Writing strategies](docs/strategies.md#any-binary-market).
+is a set of binaries sharing an event), thresholds. See [Writing strategies](https://github.com/kwingram25/quanty/blob/main/docs/strategies.md#any-binary-market).
 
 One strategy file runs unchanged in four modes. Only the broker behind it changes:
 
@@ -17,8 +17,8 @@ One strategy file runs unchanged in four modes. Only the broker behind it change
 | **live** | live feeds | real orders, behind several layers of safety stops |
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/images/dashboard-dark.png">
-  <img alt="The quanty dashboard during a paper session: strategies with paper badges and halt controls on the left, cumulative realized P&L per strategy with a hover tooltip in the middle, open markets with the market's chance and the strategies' own estimates, and the event feed on the right" src="docs/images/dashboard-light.png">
+  <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/kwingram25/quanty/main/docs/images/dashboard-dark.png">
+  <img alt="The quanty dashboard during a paper session: strategies with paper badges and halt controls on the left, cumulative realized P&L per strategy with a hover tooltip in the middle, open markets with the market's chance and the strategies' own estimates, and the event feed on the right" src="https://raw.githubusercontent.com/kwingram25/quanty/main/docs/images/dashboard-light.png">
 </picture>
 
 **[Live demo](https://quanty-demo.fly.dev/)**: the dashboard on synthetic markets, shared by everyone
@@ -47,8 +47,8 @@ quanty keys root@your-server --file .env.server   # the server's own API keys, o
 quanty deploy root@your-server            # trader + dashboard, restarted on failure
 ```
 
-[Getting started](docs/getting-started.md) goes step by step from experiments to recording real data,
-paper trading, shadow trading and live trading; [Deploying](docs/deploying.md) covers servers.
+[Getting started](https://github.com/kwingram25/quanty/blob/main/docs/getting-started.md) goes step by step from experiments to recording real data,
+paper trading, shadow trading and live trading; [Deploying](https://github.com/kwingram25/quanty/blob/main/docs/deploying.md) covers servers.
 
 ## What's in it
 
@@ -88,11 +88,11 @@ paper trading, shadow trading and live trading; [Deploying](docs/deploying.md) c
 
 ## Docs
 
-- [Getting started](docs/getting-started.md): install to live, step by step
-- [Writing strategies](docs/strategies.md): hooks, context, orders, signals, testing
-- [Architecture](docs/architecture.md): how the pieces fit, and why one file runs everywhere
-- [Live trading](docs/live-trading.md): the safety layers, restarts, and what to do before `--arm`
-- [Deploying](docs/deploying.md): servers (DigitalOcean, AWS, Fly.io), the dashboard over HTTPS, editing on a server, working with an AI agent
+- [Getting started](https://github.com/kwingram25/quanty/blob/main/docs/getting-started.md): install to live, step by step
+- [Writing strategies](https://github.com/kwingram25/quanty/blob/main/docs/strategies.md): hooks, context, orders, signals, testing
+- [Architecture](https://github.com/kwingram25/quanty/blob/main/docs/architecture.md): how the pieces fit, and why one file runs everywhere
+- [Live trading](https://github.com/kwingram25/quanty/blob/main/docs/live-trading.md): the safety layers, restarts, and what to do before `--arm`
+- [Deploying](https://github.com/kwingram25/quanty/blob/main/docs/deploying.md): servers (DigitalOcean, AWS, Fly.io), the dashboard over HTTPS, editing on a server, working with an AI agent
 
 ## Commands
 
@@ -160,9 +160,9 @@ nothing in it (the example strategies, the fill model, the backtests, the varian
 that a strategy will make money: simulated results can be better than what live trading gets, and
 software, venues and networks fail. You are responsible for what it trades for you, and for
 following your venues' rules and the laws where you live. Start on paper, then shadow, then with
-caps you'd not mind losing; [Live trading](docs/live-trading.md) explains how. quanty is provided as
+caps you'd not mind losing; [Live trading](https://github.com/kwingram25/quanty/blob/main/docs/live-trading.md) explains how. quanty is provided as
 is, without warranty of any kind (see the license).
 
 ## License
 
-MIT. Changes by version: [CHANGELOG.md](CHANGELOG.md).
+MIT. Changes by version: [CHANGELOG.md](https://github.com/kwingram25/quanty/blob/main/CHANGELOG.md).

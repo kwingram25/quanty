@@ -45,22 +45,6 @@ so no API token is stored anywhere.
 Versions can't be reused on PyPI: a broken release is fixed by the next version (and the bad one
 yanked on PyPI), never by re-uploading.
 
-### Before the first public release
-
-Publishing makes the source public (a PyPI package ships it), the same step as making this
-repository public. Before that:
-
-- **The docs install from PyPI** (`uv tool install quanty-py`), so until the first release
-  their install commands fail; from a checkout, `uv run quanty ...` stands in for `quanty ...`. Image links
-  in the README become absolute
-  (`https://raw.githubusercontent.com/kwingram25/quanty/main/docs/images/...`), since PyPI doesn't
-  serve the repository's files (while the repository is private, those links don't load).
-- **The git history**, reviewed once more: it was started fresh, and gitleaks and the private-name
-  guard run on every commit, but read it before the world does.
-- **Private vulnerability reporting turned on** (Settings → Security), which `SECURITY.md` points
-  reporters to, with secret scanning and push protection (free once public).
-- **The repository made public**, so the PyPI page's links and the public demo's GitHub link work.
-
 ## The public demo
 
 https://quanty-demo.fly.dev runs `quanty demo --live --public`, the demo built for hosting:
