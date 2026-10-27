@@ -65,7 +65,7 @@ def files(a: Answers, name: str = "my-quanty") -> dict[str, str]:
     first = next((f"{v}:{a.series[v][0]}" for v in a.venues if a.series.get(v)), "kalshi:KXBTC15M")
     return {
         ".env": _env(a),
-        ".gitignore": ".env\ndata/\n__pycache__/\n.venv/\n",
+        ".gitignore": ".env\n.env.*\ndata/\n__pycache__/\n.venv/\n",
         ".dockerignore": ".env\ndata/\n.git/\n__pycache__/\n.venv/\n",
         "feeds.toml": _feeds(a),
         "experiments/main.toml": _experiment(a),
@@ -486,13 +486,18 @@ A quanty project: your strategy, its configuration, and what's needed to deploy 
 ## Deploy
 
 Any Linux server with Docker (a DigitalOcean Droplet, AWS EC2 or Lightsail, Hetzner, ...): create it
-with `deploy/cloud-init.yaml` pasted as its "user data", then from this folder:
+with `deploy/cloud-init.yaml` pasted as its "user data". Give the server API keys of its own (made
+for it at each venue, so they can be revoked alone) in `.env.server`, written like `.env`, then
+from this folder:
 
+    uv run quanty keys root@your-server --file .env.server   # once; again to rotate them
     uv run quanty deploy root@your-server
 
-That copies this folder (with `.env`; never `data/`), checks it with `quanty doctor` on the server,
-and starts the trader (paper by default; `QUANTY_MODE=live` in `.env` trades for real) and the
-dashboard, both restarted on failure and on reboot. Run it again after every change (commit first:
+Keys travel apart from code: `quanty deploy` never sends `.env` or `.env.*`, and won't start a
+server that has no keys. It copies this folder (never `data/`), checks it with `quanty doctor` on the
+server, and starts the trader (paper by default; `QUANTY_MODE=live` in the server's keys file trades
+for real) and the dashboard, both restarted on failure and on reboot. Run it again after every
+change (commit first:
 the server records the commit it got, and each run there the code it ran). The dashboard
 listens on the server's 127.0.0.1:8765: `ssh -N -L 8765:127.0.0.1:8765 root@your-server`, then open
 http://127.0.0.1:8765.
@@ -583,7 +588,7 @@ runcmd:
 FLY = """# Fly.io: one machine runs the trader and the dashboard, with data/ on a volume. First time:
 #   fly apps create {app}                         (the name must be unique on Fly; change it here too)
 #   fly volumes create data --size 10 --region iad
-#   grep -E '^[A-Z_]+=.' .env | fly secrets import
+#   grep -E '^[A-Z_]+=.' .env.server | fly secrets import
 #   fly deploy --ha=false
 # After changes: fly deploy. Dashboard: fly proxy 8765:8765, then open http://127.0.0.1:8765
 # (it listens on Fly's private network only, reachable by your organization).

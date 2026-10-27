@@ -572,8 +572,9 @@ def deploy(
     ] = True,
 ) -> None:
     """Copy this project to a server with Docker, check it there, and (re)start it. Run it again after
-    every change. Never sends or deletes data/. First brings the dashboard changes the server is
-    holding into your experiment files, so a deploy never undoes them."""
+    every change. Never sends or deletes data/ or the server's keys (`quanty keys` puts those there).
+    First brings the dashboard changes the server is holding into your experiment files, so a deploy
+    never undoes them."""
     from quanty import deploy as dp
     from quanty import pull as pl
 
@@ -642,10 +643,44 @@ def mcp(
 
 
 @app.command()
-def password(
-    write: Annotated[bool, typer.Option("--write", help="Save it in ./.env instead of printing it")] = False,
+def keys(
+    host: Annotated[str, typer.Argument(help="The server, as you'd give ssh")],
+    file: Annotated[
+        Path,
+        typer.Option(
+            help="The server's keys: KALSHI_KEY_ID=... lines, like .env", exists=True, dir_okay=False
+        ),
+    ] = Path(".env.server"),
+    path: Annotated[Path, typer.Option(help="Project folder")] = Path("."),
+    to: Annotated[str | None, typer.Option(help="Folder on the server (default: the project's name)")] = None,
 ) -> None:
-    """Set the dashboard password: prints a QUANTY_UI_PASSWORD line for .env (only a salted hash)."""
+    """Put a server's API keys in place, apart from the code: `quanty deploy` never sends or touches
+    them. Run it before the first deploy, and again to rotate keys (running containers restart on
+    them). Best with keys made for that server alone, so they can be revoked without touching others."""
+    from quanty import deploy as dp
+
+    try:
+        names = dp.check_keys(file)
+    except (ValueError, OSError) as exc:
+        raise _fail(exc) from None
+    remote = to or path.resolve().name
+    done = subprocess.run(dp.keys_command(host, remote), input=file.read_bytes())
+    if done.returncode:
+        raise _fail(ValueError(f"ssh exited {done.returncode}: the server's keys weren't changed"))
+    typer.echo(f"{host}:{remote}/.env now sets {', '.join(names)} (owner-only)")
+
+
+@app.command()
+def password(
+    write: Annotated[
+        bool, typer.Option("--write", help="Save it in the file instead of printing it")
+    ] = False,
+    file: Annotated[Path, typer.Option(help="With --write: .env here, or a server's keys file")] = Path(
+        ".env"
+    ),
+) -> None:
+    """Set the dashboard password: prints a QUANTY_UI_PASSWORD line for .env (only a salted hash).
+    For a server: --write --file .env.server, then `quanty keys` sends it."""
     from quanty.ui.auth import hash_password
 
     pw = typer.prompt("Dashboard password", hide_input=True, confirmation_prompt=True)
@@ -655,7 +690,7 @@ def password(
     if not write:
         typer.echo(line)
         return
-    env = Path(".env")
+    env = file
     lines = [
         x
         for x in (env.read_text().splitlines() if env.exists() else [])
@@ -663,7 +698,7 @@ def password(
     ]
     env.write_text("\n".join([*lines, line]) + "\n")
     env.chmod(0o600)
-    typer.echo("saved to .env; restart `quanty ui` to use it")
+    typer.echo(f"saved to {env}; restart `quanty ui` to use it (on a server: send it with `quanty keys`)")
 
 
 @app.command()

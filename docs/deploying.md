@@ -59,14 +59,15 @@ Hillsboro.
 
 ### 2. Deploy
 
-From the project folder on your machine:
+From the project folder on your machine, the server's keys first, then the code:
 
 ```sh
+uv run quanty keys root@203.0.113.7 --file .env.server   # once (see "API keys on a server")
 uv run quanty deploy root@203.0.113.7          # or ubuntu@… on AWS, or a name from ~/.ssh/config
 ```
 
-It copies the project to the server (with `.env`, kept owner-only; never `data/`), builds the image
-there, runs `quanty doctor` inside it, and only if that passes, starts the trader and the dashboard.
+`quanty deploy` copies the project to the server (never `.env`, `.env.*` or `data/`; it stops if the
+server has no keys yet), builds the image there, runs `quanty doctor` inside it, and only if that passes, starts the trader and the dashboard.
 Run the same command after every change: the containers restart on the new code, and `data/` on the
 server is never sent or deleted. `--to` picks the folder on the server (default: the project's name,
 in your home), `--dry-run` prints the commands, and `--no-check` skips the doctor step. It needs
@@ -77,7 +78,7 @@ changes: commit first, and a run's commit names exactly what it ran.
 What runs, in two containers sharing `data/`, each restarted on failure and on reboot:
 
 - **trader**: `quanty paper experiments/main.toml --feeds feeds.toml`, or `quanty live … --arm` when
-  `.env` sets `QUANTY_MODE=live`. Recordings, ledgers and the order journal live in `data/`.
+  the server's `.env` (its keys file) sets `QUANTY_MODE=live`. Recordings, ledgers and the order journal live in `data/`.
 - **dashboard**: `quanty ui`, published on the server's `127.0.0.1:8765` only.
 
 On the server, `docker compose logs -f trader` follows the trader (from the project folder there).
@@ -121,10 +122,21 @@ the dashboard offers **Copy for the file** for each change, the lines to paste b
 
 ### API keys on a server
 
-Your keys travel in `.env`, which `.dockerignore` keeps out of the image; compose passes them to the
-containers at run time. Keep the Kalshi key itself in `.env` (`KALSHI_SECRET_KEY`, as `quanty init`
-writes it), not a `KALSHI_PRIVATE_KEY_PATH` to a file on your laptop, which wouldn't exist there;
-`quanty doctor` flags it.
+Keys travel apart from code. Make API keys for the server alone at each venue (so you can revoke
+them without touching your laptop's or another server's), write them in `.env.server` in the
+project, in the same form as `.env` (`git` ignores both), and send them once:
+
+```sh
+uv run quanty keys root@203.0.113.7 --file .env.server
+```
+
+That writes them over SSH as the server's `.env`, owner-only; it prints the names it set, never the
+values. Run it again to rotate keys: running containers restart on the new ones. `quanty deploy`
+never sends or deletes the server's `.env`, and `.dockerignore` keeps it out of the image (compose
+passes it to the containers at run time). Settings for that server go in the same file:
+`QUANTY_MODE=live` to run armed, `QUANTY_UI_PASSWORD` for the dashboard's login. Keep the Kalshi key
+itself in the file (`KALSHI_SECRET_KEY`), not a `KALSHI_PRIVATE_KEY_PATH` to a file on your laptop,
+which wouldn't exist there; `quanty doctor` flags it.
 
 ## Fly.io
 
@@ -136,7 +148,7 @@ from the project folder:
 ```sh
 fly apps create my-quanty                        # a name unique on Fly; the same as app = in fly.toml
 fly volumes create data --size 10 --region iad
-grep -E '^[A-Z_]+=.' .env | fly secrets import   # your keys, as Fly secrets
+grep -E '^[A-Z_]+=.' .env.server | fly secrets import   # the server's own keys, as Fly secrets
 fly deploy --ha=false
 ```
 
@@ -152,10 +164,12 @@ been run on a Fly account yet: if a `fly` command disagrees with it, Fly's error
 
 ## Reaching the dashboard from anywhere
 
-The dashboard has an optional login. Set a password (only a salted hash is stored, in `.env`):
+The dashboard has an optional login. Set a password (only a salted hash is stored) in the server's
+keys file, and send it:
 
 ```sh
-uv run quanty password --write
+uv run quanty password --write --file .env.server
+uv run quanty keys root@203.0.113.7 --file .env.server
 ```
 
 With a password set, every page, API call and live update needs signing in first; sessions last 7

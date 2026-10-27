@@ -137,3 +137,45 @@ def test_recordings_come_home_for_the_hours_asked_and_nothing_else(tmp_path: Pat
         "kalshi/2026-10-25/21.jsonl.gz",
         "kalshi/2026-10-25/22.jsonl.gz",
     ]
+
+
+def test_deploy_never_sends_keys_and_needs_them_on_the_server(tmp_path: Path) -> None:
+    create(tmp_path / "bot", Answers(), vendor=False)
+    _, rsync, remote = commands("me@srv", tmp_path / "bot", "bot")
+    assert "--exclude=.env" in rsync and "--exclude=.env.*" in rsync and "--delete-excluded" not in rsync
+    first = remote[2].split(" && ")[1]
+    assert first.startswith("{ test -f .env ||") and "quanty keys" in first and "exit 4" in first
+    (tmp_path / "bot" / ".env").unlink()
+    commands("me@srv", tmp_path / "bot", "bot")  # no local keys needed to deploy
+
+
+def test_keys_go_to_the_server_once_apart_from_the_code(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from quanty import deploy
+
+    (tmp_path / "bot").mkdir()
+    keys = tmp_path / "bot" / ".env.server"
+    keys.write_text("# the server's own\nKALSHI_KEY_ID=abc\nKALSHI_SECRET_KEY=-----BEGIN-----\nOTHER=1\n")
+    assert deploy.check_keys(keys) == ["KALSHI_KEY_ID", "KALSHI_SECRET_KEY"]
+    sent: dict[str, object] = {}
+
+    def run(cmd: list[str], **kw: object) -> subprocess.CompletedProcess[bytes]:
+        sent.update(cmd=cmd, input=kw.get("input"))
+        return subprocess.CompletedProcess(cmd, 0)
+
+    monkeypatch.setattr(subprocess, "run", run)
+    res = CliRunner().invoke(
+        cli.app, ["keys", "me@srv", "--file", str(keys), "--path", str(tmp_path / "bot")]
+    )
+    assert res.exit_code == 0, res.output
+    assert "KALSHI_KEY_ID, KALSHI_SECRET_KEY" in res.output and "abc" not in res.output  # names, never values
+    cmd = sent["cmd"]
+    assert isinstance(cmd, list) and cmd[:2] == ["ssh", "me@srv"]
+    assert (
+        "umask 077" in cmd[2] and "mv .env.new .env" in cmd[2] and cmd[2].startswith("mkdir -p bot && cd bot")
+    )
+    assert sent["input"] == keys.read_bytes()  # through ssh's stdin, never a command line
+    empty = tmp_path / "empty.env"
+    empty.write_text("NOTHING=1\n")
+    assert CliRunner().invoke(cli.app, ["keys", "me@srv", "--file", str(empty)]).exit_code == 2

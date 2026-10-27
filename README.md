@@ -40,6 +40,7 @@ files to deploy it:
 ```sh
 uv run quanty init my-quanty          # a few questions; --yes for the defaults
 cd my-quanty && uv run quanty list    # works there too: the first run sets everything up
+uv run quanty keys root@your-server --file .env.server   # the server's own API keys, once
 uv run quanty deploy root@your-server # to a server with Docker: trader + dashboard, restarted on failure
 ```
 
@@ -106,6 +107,7 @@ paper trading, shadow trading and live trading; [Deploying](docs/deploying.md) c
 | `quanty doctor` | check a project before trading: config, keys, clock, venues, leftovers (read-only; also the dashboard's Health page) |
 | `quanty list`, `params` | strategies quanty can find, and their parameters |
 | `quanty mcp` | the dashboard as tools for an AI agent (Claude Code): summarize, rank, edit params, halt, switch (`--ssh you@server` for a server's) |
+| `quanty keys` | put a server's own API keys in place, apart from the code (deploys never send keys) |
 | `quanty password` | set the dashboard's login (a salted hash in `.env`) |
 
 ## Layout
