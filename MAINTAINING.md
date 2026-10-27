@@ -23,17 +23,17 @@ so no API token is stored anywhere.
 
 ### A release
 
-1. Set the version in `src/quanty/__init__.py` (`__version__ = "0.2.0"`; it's the only place) and
-   note the changes in `CHANGELOG.md` under that version, dated the day it's tagged (the first,
-   0.1.0, waits there as "unreleased"). While at 0.x, a new minor version may break things: projects
-   depend on `quanty-py>=0.1.0,<0.2`, so they move to 0.2 on purpose (edit the bound, then
-   `quanty upgrade`).
+1. Every release is the next minor version (0.3.0, then 0.4.0; no patch releases). Set it in
+   `src/quanty/__init__.py` (`__version__ = "0.4.0"`; it's the only place) and move `CHANGELOG.md`'s
+   "Unreleased" notes under it, dated the day it's tagged, with what a project does to upgrade.
+   Projects depend on one minor version (`quanty-py>=0.3.0,<0.4`), so they move on purpose (edit
+   the bound, then `quanty upgrade`).
 2. Try it on TestPyPI first: Actions → release → Run workflow. It builds, checks the packages
    (`twine check --strict`), installs the wheel in a clean environment and runs a demo, then
    publishes to TestPyPI. Check it as a user would:
 
    ```sh
-   v=0.2.0   # the version being released
+   v=0.4.0   # the version being released
    whl=$(curl -s https://test.pypi.org/simple/quanty-py/ | grep -oE "https://[^\"#]*quanty_py-$v-py3-none-any.whl" | head -1)
    uv venv /tmp/try && uv pip install --python /tmp/try "quanty-py @ $whl"   # its dependencies from PyPI
    /tmp/try/bin/quanty demo --ui
@@ -42,7 +42,7 @@ so no API token is stored anywhere.
    The wheel by its URL: with quanty-py on PyPI, uv takes it only from there (it won't mix
    indexes for one package), and TestPyPI's own copies of other packages can be junk.
 
-3. Tag and push: `git tag v0.2.0 && git push origin v0.2.0`. The workflow checks the tag matches
+3. Tag and push: `git tag v0.4.0 && git push origin v0.4.0`. The workflow checks the tag matches
    `__version__`, builds and checks again, and publishes to PyPI once `pypi` is approved.
 
 Versions can't be reused on PyPI: a broken release is fixed by the next version (and the bad one

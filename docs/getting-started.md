@@ -48,7 +48,7 @@ It holds `strategies/<name>.py` (a skeleton aimed at your first series), `experi
 below runs there. It's a git
 repository with a first commit (`.env` and `data/` are ignored): keep it private and push it
 somewhere backed up, since your strategies are your edge. quanty itself is just a dependency of it:
-its `pyproject.toml` asks for `quanty-py` within the current release line (`>=0.2.0,<0.3` for 0.2), and
+its `pyproject.toml` asks for `quanty-py` within the current release line (`>=0.3.0,<0.4` for 0.3), and
 `uv.lock` pins the exact version, the same on your machine and on a server. In the project,
 `quanty` runs that version, whatever version of the command you installed: it hands the command to
 the project's own (`uv run quanty`, which also works without the command installed). The first run

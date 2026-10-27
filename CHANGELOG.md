@@ -1,13 +1,16 @@
 # Changelog
 
-quanty is `quanty-py` on PyPI. While it's at 0.x, a new minor version (0.2, 0.3) may change what
-your project relies on, and says so here with what to do: the `Strategy` class and `ctx`,
-experiment and feeds files, the ledger's schema (migrated for you when a file is opened) and the
-command line. A patch version (0.1.1) never does. Projects from `quanty init` depend on one minor
-version (`quanty-py>=0.1.0,<0.2`), so moving to the next is your choice: raise the bound in
+quanty is `quanty-py` on PyPI. Every release is a new minor version (0.2, 0.3, ...). While it's at
+0.x, a release may change what your project relies on, and says so here with what to do: the
+`Strategy` class and `ctx`, experiment and feeds files, the ledger's schema (migrated for you when a
+file is opened) and the command line. Projects from `quanty init` depend on one minor version
+(`quanty-py>=0.3.0,<0.4`), so moving to the next is your choice: raise the bound in
 `pyproject.toml`, then `quanty upgrade`.
 
-## Unreleased
+## 0.3.0 (2026-10-27)
+
+Upgrading from 0.2: change the bound to `quanty-py>=0.3.0,<0.4`, then `quanty upgrade`. Nothing
+else changes for a project.
 
 - Reload (`quanty reload`, or the dashboard) applies simulated brokers' settings (latency, queue
   model) to orders from then on, and adds new simulated or shadow brokers, so a strategy can be
