@@ -9,6 +9,11 @@ version (`quanty-py>=0.1.0,<0.2`), so moving to the next is your choice: raise t
 
 ## Unreleased
 
+- Extensions: your own data feeds, signals and venues, from a project's `extensions/` folder or an
+  installed package's `quanty.extensions` entry point; recorded, replayed, health-checked and
+  checked by `quanty doctor` like the built-in ones. See docs/extending.md.
+- `quanty doctor` asks each venue for its own key and rate-limit checks (`OrderAPI.key_warning`,
+  `limits`, `key_env`).
 - `quanty demo` trades 100 contracts a time (`--param size=` still sets it).
 
 ## 0.1.0 (2026-10-27)

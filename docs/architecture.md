@@ -91,6 +91,10 @@ competes with trading for one core, so a session can leave it to a separate `qua
 `--no-record`: deployed projects run it that way, each process with its own feed connections and
 its own core.
 
+Feeds, venues and signals beyond these come from extensions: a project's `extensions/` folder or
+installed packages, found the way strategies are (see [Extending](extending.md)). Everything below
+applies to them unchanged.
+
 Discovery responses are recorded in the same stream as books and trades. A replay therefore sees
 markets open, strikes appear and results arrive in the order they did live, which matters for
 strategies that act on the strike or on time left.

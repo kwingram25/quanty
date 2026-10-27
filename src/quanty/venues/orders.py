@@ -17,7 +17,7 @@ import httpx
 
 from quanty.core.orders import Order
 from quanty.core.types import Action, Market, Side, Tif
-from quanty.venues.auth import KalshiSigner, PolymarketSigner
+from quanty.venues.auth import KalshiSigner, PolymarketSigner, keys
 
 EXPIRE_BEFORE_CLOSE_S = 2  # resting orders end this long before their market closes
 CLIENT_PREFIX = "quanty-"  # on client order ids, where the venue takes one (Kalshi)
@@ -112,6 +112,7 @@ def has_keys(api: "OrderAPI") -> bool:
 class OrderAPI(ABC):
     venue: str
     base_url: str
+    key_env: ClassVar[str] = ""  # the .env name of the key itself, for `quanty doctor`'s advice
 
     @property
     @abstractmethod
@@ -148,6 +149,16 @@ class OrderAPI(ABC):
         any of them that settled can be told apart from a position that's missing."""
         raise NotImplementedError(f"{self.venue}: reading positions isn't supported")
 
+    # for `quanty doctor`, beside its own checks (keys sign, balance reads, clock agrees)
+
+    def key_warning(self) -> tuple[str, str] | None:
+        """A problem with keys that do sign, as (what's wrong, how to fix it); None if there's none."""
+        return None
+
+    async def limits(self, client: httpx.AsyncClient) -> str:
+        """The account's request limits, in a line (a VenueError or httpx error is reported as such)."""
+        return "not reported by this venue"
+
     async def _send(self, client: httpx.AsyncClient, method: str, path: str, **kw: Any) -> dict[str, Any]:
         headers = self.signer.headers(method, path)
         if "json" in kw:
@@ -164,6 +175,7 @@ class PolymarketOrders(OrderAPI):
 
     venue = "polymarket_us"
     label = "Polymarket US"
+    key_env = "POLYMARKET_SECRET_KEY"
     base_url = "https://api.polymarket.us"
     INTENTS: ClassVar[dict[tuple[Side, Action], str]] = {
         (Side.YES, Action.BUY): "ORDER_INTENT_BUY_LONG",
@@ -180,6 +192,9 @@ class PolymarketOrders(OrderAPI):
         if self._signer is None:
             self._signer = PolymarketSigner.from_env()
         return self._signer
+
+    async def limits(self, client: httpx.AsyncClient) -> str:
+        return "25 requests/s per IP address, shared by every key on it"
 
     def place_request(self, order: Order, market: Market) -> VenueRequest:
         yes_price = order.price if order.side is Side.YES else 1 - order.price
@@ -302,6 +317,7 @@ class KalshiOrders(OrderAPI):
 
     venue = "kalshi"
     label = "Kalshi"
+    key_env = "KALSHI_SECRET_KEY"
     base_url = "https://api.elections.kalshi.com"
     PATH = "/trade-api/v2/portfolio/events/orders"
     READ_PATH = "/trade-api/v2/portfolio/orders"
@@ -315,6 +331,22 @@ class KalshiOrders(OrderAPI):
         if self._signer is None:
             self._signer = KalshiSigner.from_env()
         return self._signer
+
+    def key_warning(self) -> tuple[str, str] | None:
+        if keys().kalshi_private_key_path is None:
+            return None
+        why = (
+            "key read from a file (KALSHI_PRIVATE_KEY_PATH), which won't exist on a server or in a container"
+        )
+        return why, "put the key itself in .env as KALSHI_SECRET_KEY"
+
+    async def limits(self, client: httpx.AsyncClient) -> str:
+        res = await self._send(client, "GET", "/trade-api/v2/account/limits")
+        read, write = res.get("read") or {}, res.get("write") or {}
+        return (
+            f"tier {res.get('usage_tier', '?')}: reads {read.get('refill_rate', '?')}/s, "
+            f"writes {write.get('refill_rate', '?')}/s (tokens; most requests cost 1-2)"
+        )
 
     def place_request(self, order: Order, market: Market) -> VenueRequest:
         buys_yes, yes_price = order.in_yes()
@@ -427,4 +459,9 @@ class KalshiOrders(OrderAPI):
 
 
 def default_apis() -> dict[str, OrderAPI]:
-    return {api.venue: api for api in (PolymarketOrders(), KalshiOrders())}
+    """Venue -> its order API: the built-in venues, then extensions' (quanty.extensions)."""
+    from quanty import extensions
+
+    built_in = {api.venue: api for api in (PolymarketOrders(), KalshiOrders())}
+    extra = [(cls.venue, cls()) for cls in extensions.classes(OrderAPI) if "venue" in vars(cls)]  # type: ignore[type-abstract]
+    return extensions.register("venue", built_in, extra)

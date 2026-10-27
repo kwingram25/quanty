@@ -27,6 +27,7 @@ change to `web/`.
 | `src/quanty/brokers/` | `sim` (simulated fills), `shadow` (orders checked by the venue, not placed), `live` |
 | `src/quanty/venues/` | Kalshi and Polymarket US: market data, order APIs, signing; `fake.py` is a fake exchange |
 | `src/quanty/feeds/` | recording, replay, feed health |
+| `src/quanty/extensions.py` | feeds, venues and signals from a project's `extensions/` or packages' `quanty.extensions` entry points ([docs/extending.md](docs/extending.md)) |
 | `src/quanty/control.py` | dashboard commands to running sessions (halt, arm, edit params, switch live, reload, …) |
 | `src/quanty/reconcile.py` | a live session's start: what it holds for real against the venues' positions |
 | `src/quanty/sweep.py` | backtests the dashboard starts: one strategy over a grid of its params, on recent recordings |

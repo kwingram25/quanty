@@ -18,10 +18,9 @@ from typing import Literal
 
 import httpx
 
-from quanty.venues.orders import OrderAPI, VenueError
+from quanty.venues.orders import OrderAPI, VenueError, default_apis
 
 Status = Literal["ok", "warn", "fail", "skip"]
-VENUES = {"kalshi": "Kalshi", "polymarket_us": "Polymarket US"}
 DRIFT_WARN_S, DRIFT_FAIL_S = 2.0, 5.0  # signed requests carry a timestamp the venue checks
 
 
@@ -121,14 +120,19 @@ def _config(out: list[Check], project: Path, experiments: list[Path], feeds: Pat
                 detail = "Polymarket US BTC markets settle on cfbenchmarks:BRTI; no feed here streams it"
                 fix = 'add [feeds.kalshi] with index_ids = ["BRTI"] (needs Kalshi keys)'
                 out.append(Check(sec, "index data", "warn", detail, fix))
-    return venues & set(VENUES)
+    try:
+        known = set(default_apis())
+    except (ImportError, ValueError) as exc:
+        out.append(Check(sec, "extensions", "fail", str(exc).splitlines()[0], "fix the extension it names"))
+        return set()
+    return venues & known
 
 
 # --- keys ---
 
 
 def _keys(out: list[Check], project: Path, venues: set[str]) -> None:
-    from quanty.venues.auth import KalshiSigner, PolymarketSigner, keys
+    from quanty.venues.auth import keys
 
     sec = "Keys"
     keys.cache_clear()  # read this project's .env, not one read earlier
@@ -145,40 +149,30 @@ def _keys(out: list[Check], project: Path, venues: set[str]) -> None:
                 "" if private else "chmod 600 .env",
             )
         )
+    apis = default_apis() if venues else {}  # fresh: their signers read the keys just cleared
     for venue in sorted(venues):
-        signer = KalshiSigner if venue == "kalshi" else PolymarketSigner
+        api = apis[venue]
+        label = api.label or venue
         try:
-            signer.from_env()
+            api.signer  # noqa: B018 - reads and checks the keys
         except RuntimeError as exc:
-            out.append(Check(sec, VENUES[venue], "fail", str(exc), "add the key to .env"))
+            out.append(Check(sec, label, "fail", str(exc), "add the key to .env"))
         except OSError as exc:
-            out.append(
-                Check(
-                    sec,
-                    VENUES[venue],
-                    "fail",
-                    f"can't read the key file: {exc.strerror or exc}",
-                    "put the key itself in .env as KALSHI_SECRET_KEY",
-                )
+            detail = f"can't read the key file: {exc.strerror or exc}"
+            fix = (
+                f"put the key itself in .env as {api.key_env}"
+                if api.key_env
+                else "put the key itself in .env"
             )
+            out.append(Check(sec, label, "fail", detail, fix))
         except (ValueError, TypeError) as exc:
-            out.append(
-                Check(sec, VENUES[venue], "fail", f"key isn't valid: {exc}", "re-copy it from the venue")
-            )
+            out.append(Check(sec, label, "fail", f"key isn't valid: {exc}", "re-copy it from the venue"))
         else:
-            if venue == "kalshi" and keys().kalshi_private_key_path is not None:
-                out.append(
-                    Check(
-                        sec,
-                        VENUES[venue],
-                        "warn",
-                        "key read from a file (KALSHI_PRIVATE_KEY_PATH), "
-                        "which won't exist on a server or in a container",
-                        "put the key itself in .env as KALSHI_SECRET_KEY",
-                    )
-                )
-                continue
-            out.append(Check(sec, VENUES[venue], "ok", "keys present and well-formed"))
+            warning = api.key_warning()
+            if warning is not None:
+                out.append(Check(sec, label, "warn", *warning))
+            else:
+                out.append(Check(sec, label, "ok", "keys present and well-formed"))
     pw = keys().quanty_ui_password
     if pw is None:
         out.append(Check(sec, "dashboard login", "ok", "off (local use; see docs/deploying.md to expose it)"))
@@ -206,8 +200,6 @@ async def _venues(
 ) -> list[Check]:
     if not venues:
         return [Check("Venues", "venues", "skip", "no venue in the experiments or feeds.toml")]
-    from quanty.venues.orders import default_apis
-
     apis = apis or default_apis()
     async with httpx.AsyncClient(timeout=10, transport=transport) as client:
         results = await asyncio.gather(*(_probe(client, v, apis[v]) for v in sorted(venues)))
@@ -215,7 +207,7 @@ async def _venues(
 
 
 async def _probe(client: httpx.AsyncClient, venue: str, api: OrderAPI) -> list[Check]:
-    sec, label = "Venues", VENUES[venue]
+    sec, label = "Venues", api.label or venue
     out: list[Check] = []
     t0 = time.perf_counter()
     try:
@@ -248,12 +240,10 @@ async def _probe(client: httpx.AsyncClient, venue: str, api: OrderAPI) -> list[C
         rtt = (time.perf_counter() - t0) * 1000
         out.append(Check(sec, label, "ok", f"keys accepted, {rtt:.0f} ms; balance ${bal.cash:,.2f}"))
     out.append(await _clock(client, api.base_url, label))
-    if venue == "kalshi":
-        out.append(await _kalshi_limits(client, api))
-    else:
-        out.append(
-            Check(sec, f"{label} rate limit", "ok", "25 requests/s per IP address, shared by every key on it")
-        )
+    try:
+        out.append(Check(sec, f"{label} rate limit", "ok", await api.limits(client)))
+    except (VenueError, httpx.HTTPError) as exc:
+        out.append(Check(sec, f"{label} rate limit", "skip", f"couldn't read the account's limits ({exc})"))
     return out
 
 
@@ -277,21 +267,6 @@ async def _clock(client: httpx.AsyncClient, base_url: str, label: str) -> Check:
         status,
         f"{abs(drift):.1f} s {word} the venue",
         "" if status == "ok" else "turn on network time sync (signed requests carry a timestamp)",
-    )
-
-
-async def _kalshi_limits(client: httpx.AsyncClient, api: OrderAPI) -> Check:
-    try:
-        res = await api._send(client, "GET", "/trade-api/v2/account/limits")
-    except (VenueError, httpx.HTTPError) as exc:
-        return Check("Venues", "Kalshi rate limit", "skip", f"couldn't read the account's limits ({exc})")
-    read, write = res.get("read") or {}, res.get("write") or {}
-    return Check(
-        "Venues",
-        "Kalshi rate limit",
-        "ok",
-        f"tier {res.get('usage_tier', '?')}: reads {read.get('refill_rate', '?')}/s, "
-        f"writes {write.get('refill_rate', '?')}/s (tokens; most requests cost 1-2)",
     )
 
 

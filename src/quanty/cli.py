@@ -177,7 +177,9 @@ def demo(
     """
     ui = ui or live
     try:
-        instances = [{"id": strategy, "strategy": strategy, "params": _params(param or [])}]
+        instances: list[dict[str, Any]] = [
+            {"id": strategy, "strategy": strategy, "params": _params(param or [])}
+        ]
         if ui and not param and strategy == "example_favorite":
             instances = [
                 {"id": f"fav_{round(c * 100)}", "strategy": strategy, "params": {"min_conf": c}}

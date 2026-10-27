@@ -78,4 +78,4 @@ def test_experiment_signal_config() -> None:
         experiment.parse({**base, "signals": [{"kind": "magic", "name": "v", "key": "k"}]})
     with pytest.raises(ValueError, match="halflife_s"):
         experiment.parse({**base, "signals": [{"kind": "ewma", "name": "v", "key": "k"}]})
-    assert set(signals.KINDS) == {"last", "ewma", "realized_vol"}
+    assert set(signals.kinds()) == {"last", "ewma", "realized_vol"}

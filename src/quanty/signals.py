@@ -13,7 +13,9 @@ data rebuilds exactly the values seen live. Configure them in an experiment:
 import math
 from abc import ABC, abstractmethod
 from collections import deque
-from typing import Annotated, ClassVar, Literal
+from collections.abc import Mapping
+from functools import cache
+from typing import Any, ClassVar, Literal
 
 from pydantic import Field, PositiveFloat
 
@@ -141,15 +143,33 @@ class RealizedVol(Signal):
         self._sum_sq = max(self._sum_sq, 0.0)
 
 
-AnySignalConfig = Annotated[LastConfig | EwmaConfig | RealizedVolConfig, Field(discriminator="kind")]
-KINDS: dict[str, type[Signal]] = {"last": Last, "ewma": Ewma, "realized_vol": RealizedVol}
+def kind_of(cls: type[Signal]) -> str | None:
+    """A signal class's kind: the default of its config's `kind` field."""
+    field = cls.config_type.model_fields.get("kind")
+    return field.default if field is not None and isinstance(field.default, str) else None
 
 
-def make(config: LastConfig | EwmaConfig | RealizedVolConfig) -> Signal:
-    match config:
-        case LastConfig():
-            return Last(config)
-        case EwmaConfig():
-            return Ewma(config)
-        case RealizedVolConfig():
-            return RealizedVol(config)
+@cache
+def kinds() -> dict[str, type[Signal]]:
+    """Signal kind -> class: the built-in ones, then extensions' (quanty.extensions)."""
+    from quanty import extensions
+
+    built_in = {kind_of(cls) or "": cls for cls in (Last, Ewma, RealizedVol)}
+    extra = [(k, cls) for cls in extensions.classes(Signal) if (k := kind_of(cls)) is not None]  # type: ignore[type-abstract]
+    return extensions.register("signal kind", built_in, extra)
+
+
+def config(raw: Mapping[str, Any], where: str = "signals") -> SignalConfig:
+    """A [[signals]] table, validated by its kind's config."""
+    kind = raw.get("kind")
+    cls = kinds().get(kind) if isinstance(kind, str) else None
+    if cls is None:
+        raise ValueError(f"{where}.kind: unknown signal kind {kind!r} (known: {', '.join(sorted(kinds()))})")
+    return cls.config_type.from_config(raw, where)
+
+
+def make(config: SignalConfig) -> Signal:
+    for cls in kinds().values():
+        if type(config) is cls.config_type:
+            return cls(config)
+    raise ValueError(f"no signal kind takes {type(config).__name__}")

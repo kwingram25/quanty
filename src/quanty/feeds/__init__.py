@@ -11,10 +11,14 @@ from quanty.feeds.coinbase import Coinbase
 
 @cache
 def kinds() -> dict[str, type[Feed]]:
-    """Feed kind -> class. Built on first use: venues build on feeds, so they can't be imported here."""
+    """Feed kind -> class: the built-in feeds and venues, then extensions' (quanty.extensions).
+    Built on first use: venues build on feeds, so they can't be imported here."""
+    from quanty import extensions
     from quanty.venues import Kalshi, PolymarketUS
 
-    return {cls.kind: cls for cls in (Coinbase, Binance, Kalshi, PolymarketUS)}
+    built_in = {cls.kind: cls for cls in (Coinbase, Binance, Kalshi, PolymarketUS)}
+    extra = [(cls.kind, cls) for cls in extensions.classes(Feed) if "kind" in vars(cls)]  # type: ignore[type-abstract]
+    return extensions.register("feed kind", built_in, extra)
 
 
 def __getattr__(name: str) -> Any:

@@ -92,6 +92,7 @@ paper trading, shadow trading and live trading; [Deploying](https://github.com/k
 - [Architecture](https://github.com/kwingram25/quanty/blob/main/docs/architecture.md): how the pieces fit, and why one file runs everywhere
 - [Live trading](https://github.com/kwingram25/quanty/blob/main/docs/live-trading.md): the safety layers, restarts, and what to do before `--arm`
 - [Deploying](https://github.com/kwingram25/quanty/blob/main/docs/deploying.md): servers (DigitalOcean, AWS, Fly.io), the dashboard over HTTPS, editing on a server, working with an AI agent
+- [Extending](https://github.com/kwingram25/quanty/blob/main/docs/extending.md): your own data feeds, signals and venues, from your project or a package
 
 ## Commands
 
@@ -122,6 +123,7 @@ paper trading, shadow trading and live trading; [Deploying](https://github.com/k
 | `brokers/` | simulated (with `QueueModel`), shadow and live brokers |
 | `feeds/` | transports, Coinbase and Binance adapters, recording, replay, health |
 | `venues/` | Kalshi and Polymarket US; order APIs; the fake exchange |
+| `extensions.py` | finding feeds, venues and signals in a project's `extensions/` and in installed packages |
 | `ui/`, `control.py`, `web/` | the dashboard's API and live stream, the command channel to running sessions, and the React app |
 | `signals.py`, `synthetic.py` | derived values rebuilt identically in replay; deterministic synthetic markets |
 | `promote.py`, `pull.py`, `sweep.py` | moving strategies between brokers in a file; bringing a server's changes and recordings home; the dashboard's backtests |

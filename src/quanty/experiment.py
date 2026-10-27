@@ -32,7 +32,17 @@ from pathlib import Path
 from types import ModuleType
 from typing import Annotated, Any, Literal, Self
 
-from pydantic import Discriminator, Field, NonNegativeInt, PositiveFloat, PositiveInt, Tag, model_validator
+from pydantic import (
+    Discriminator,
+    Field,
+    NonNegativeInt,
+    PositiveFloat,
+    PositiveInt,
+    SerializeAsAny,
+    Tag,
+    field_validator,
+    model_validator,
+)
 
 from quanty.brokers.live import LiveBroker
 from quanty.brokers.shadow import ShadowBroker
@@ -43,7 +53,8 @@ from quanty.core.fees import FeeModel
 from quanty.core.risk import Limits
 from quanty.core.strategy import Strategy
 from quanty.core.validate import ConfigModel
-from quanty.signals import AnySignalConfig, Signal
+from quanty.signals import Signal, SignalConfig
+from quanty.signals import config as signal_config
 from quanty.signals import make as make_signal
 
 
@@ -134,7 +145,14 @@ class Experiment(ConfigModel):
     limits: Limits = Limits()
     brokers: dict[str, BrokerConfig] = Field(default_factory=_default_brokers, min_length=1)
     instances: list[InstanceSpec] = Field(min_length=1)
-    signals: list[AnySignalConfig] = Field(default_factory=list)
+    signals: list[SerializeAsAny[SignalConfig]] = Field(default_factory=list)  # by kind, extensions' too
+
+    @field_validator("signals", mode="before")
+    @classmethod
+    def _signal_kinds(cls, raw: Any) -> Any:
+        if not isinstance(raw, list):
+            return raw
+        return [signal_config(s, f"signals.{i}") if isinstance(s, dict) else s for i, s in enumerate(raw)]
 
     @model_validator(mode="before")
     @classmethod
