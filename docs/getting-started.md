@@ -127,7 +127,10 @@ uv run quanty record --config feeds.toml --data data
 A Kalshi series that lists a wide ladder of strikes each hour (KXBTCD, BTC above $X, has dozens)
 can be followed near the money only: `near_money = { KXBTCD = 2 }` under `[feeds.kalshi]`
 subscribes to each hour's strikes still in play (YES bid under 99¢, ask over 1¢) and two either
-side. Every strike is still discovered and recorded; the others just get no books.
+side. Every strike is still discovered and recorded; the others just get no books. Adding
+`top_only = ["KXBTCD"]` follows those strikes by their best bid and ask only (Kalshi's ticker
+channel, about once a second) instead of full order books: far fewer messages, for strategies that
+only take the best price.
 
 Every message is stored exactly as received (`data/<feed>/<date>/<hour>.jsonl.gz`), with receive
 timestamps. Replays parse the same bytes in the same order, so a backtest on recordings sees what

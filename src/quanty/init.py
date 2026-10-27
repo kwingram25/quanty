@@ -531,8 +531,17 @@ ENV QUANTY_IN_IMAGE=1
 ENTRYPOINT ["quanty"]
 """
 
-COMPOSE = """# docker compose up -d --build: the trader and the dashboard, sharing data/, restarted on failure
+COMPOSE = """# docker compose up -d --build: the recorder, the trader and the dashboard, sharing data/,
+# restarted on failure. Recording and trading run apart, each on its own core, so the trader's loop
+# never waits on writing and compressing every message.
 services:
+  recorder:
+    build: .
+    env_file: .env
+    volumes: [./data:/app/data]
+    command: ["record", "--config", "feeds.toml", "--data", "data"]
+    restart: unless-stopped
+
   trader:
     build: .
     env_file: .env
@@ -542,8 +551,8 @@ services:
     command:
       - >-
         if [ "$${QUANTY_MODE:-paper}" = live ];
-        then exec quanty live experiments/main.toml --feeds feeds.toml --data data --arm;
-        else exec quanty paper experiments/main.toml --feeds feeds.toml --data data; fi
+        then exec quanty live experiments/main.toml --feeds feeds.toml --data data --arm --no-record;
+        else exec quanty paper experiments/main.toml --feeds feeds.toml --data data --no-record; fi
     restart: unless-stopped
 
   dashboard:

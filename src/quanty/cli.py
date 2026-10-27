@@ -259,6 +259,13 @@ ExpArg = Annotated[Path, typer.Argument(help="Experiment config (TOML)", exists=
 UiOpt = Annotated[bool, typer.Option("--ui", help="Also serve the dashboard (a separate process)")]
 UiHostOpt = Annotated[str, typer.Option(help="Dashboard interface, with --ui")]
 UiPortOpt = Annotated[int, typer.Option(help="Dashboard port, with --ui")]
+RecordOpt = Annotated[
+    bool,
+    typer.Option(
+        "--record/--no-record",
+        help="Record the feeds too; --no-record when a separate `quanty record` does (its own core)",
+    ),
+]
 
 
 @app.command()
@@ -272,6 +279,7 @@ def paper(
     ui: UiOpt = False,
     ui_host: UiHostOpt = "127.0.0.1",
     ui_port: UiPortOpt = 8765,
+    record: RecordOpt = True,
 ) -> None:
     """Paper trade: run an experiment's strategies on live feeds with simulated fills (no orders).
 
@@ -280,7 +288,7 @@ def paper(
     and warmup_s in the experiment replays recent recordings first.
     """
     with _dashboard(data, ui_host, ui_port) if ui else contextlib.nullcontext():
-        _session("paper", path, feeds, data, ledger, duration, window, armed=False)
+        _session("paper", path, feeds, data, ledger, duration, window, armed=False, record=record)
 
 
 @app.command()
@@ -295,6 +303,7 @@ def live(
     ui: UiOpt = False,
     ui_host: UiHostOpt = "127.0.0.1",
     ui_port: UiPortOpt = 8765,
+    record: RecordOpt = True,
 ) -> None:
     """A session that may trade real money (needs --arm): strategies on the live broker place orders
     on the venues, within its caps.
@@ -305,7 +314,7 @@ def live(
     if not arm:
         raise _fail(ValueError("quanty live places real orders: pass --arm to confirm"))
     with _dashboard(data, ui_host, ui_port) if ui else contextlib.nullcontext():
-        _session("live", path, feeds, data, ledger, duration, window, armed=True)
+        _session("live", path, feeds, data, ledger, duration, window, armed=True, record=record)
 
 
 @contextlib.contextmanager
@@ -745,6 +754,7 @@ def _session(
     window: float,
     *,
     armed: bool,
+    record: bool = True,
 ) -> None:
     try:
         exp = experiment.load(path)
@@ -794,7 +804,13 @@ def _session(
     controller.experiment = path.resolve()  # the dashboard's "Save to file" writes edits here
     controller.rebuild = lambda: (experiment.load(path), _strategies())  # "reload"
     session = RecordSession(
-        feed_objs, data, data / "quanty.sqlite", window_s=window, trader=trader, controller=controller
+        feed_objs,
+        data,
+        data / "quanty.sqlite" if record else None,  # the recorder keeps the feed metrics then
+        window_s=window,
+        trader=trader,
+        controller=controller,
+        record=record,
     )
     ids = [i.id for i in instances]
 

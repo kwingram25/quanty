@@ -56,14 +56,17 @@ class RecordSession:
         window_s: float = 60,
         trader: "Trader | None" = None,
         controller: "Controller | None" = None,
+        record: bool = True,
     ) -> None:
-        """trader: an engine to drive with the live events (paper/shadow/live); None = record only."""
+        """trader: an engine to drive with the live events (paper/shadow/live); None = record only.
+        record: write the raw messages to disk (off when a separate recorder does, on its own core)."""
         self.trader = trader
         self.controller = controller  # applies UI commands to the trader (quanty.control)
         if controller is not None:
             controller.feeds = self.status  # the dashboard shows each platform's connection
         self.feeds = dict(feeds)
         self.recorder = Recorder(root)
+        self.record = record
         self.db: Engine | None = db.connect(db_path) if db_path else None
         self.window_ms = int(window_s * 1000)
         start = now_ms()
@@ -71,7 +74,8 @@ class RecordSession:
         self._logged_errors: set[str] = set()
 
     def sink(self, item: Raw | Link) -> None:
-        self.recorder.write(item)
+        if self.record:
+            self.recorder.write(item)
         health = self.health[item.feed]
         if isinstance(item, Link):
             health.on_link(item)

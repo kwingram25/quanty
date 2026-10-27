@@ -260,3 +260,51 @@ def test_kalshi_sequence_spans_series() -> None:
     assert k.parse(raw(k_delta(other, "yes", "0.40", "1", seq=2))) == []
     events = k.parse(raw(k_delta(TK, "yes", "0.41", "1", seq=3)))
     assert not any(isinstance(e, Status) for e in events)
+
+
+def test_kalshi_top_only_series_follow_the_ticker_channel_as_one_level_books() -> None:
+    import asyncio
+    import json as js
+
+    k = kalshi(series=["KXBTC15M", "KXBTCD"], top_only=["KXBTCD"])
+    ladder = "KXBTCD-26OCT2803-T80999.99"
+    subs = {
+        m["params"]["channels"][0]: m["params"]["market_tickers"]
+        for m in map(js.loads, k.subscribe_messages(frozenset({TK, ladder})))
+    }
+    assert subs == {"orderbook_delta": [TK], "trade": sorted([TK, ladder]), "ticker": [ladder]}
+
+    def tick(bid: str, bid_q: str, ask: str, ask_q: str) -> str:
+        msg = {"market_ticker": ladder, "market_id": "x", "price_dollars": "0.97", "yes_bid_dollars": bid,
+               "yes_ask_dollars": ask, "yes_bid_size_fp": bid_q, "yes_ask_size_fp": ask_q,
+               "ts_ms": T0}  # fmt: skip
+        return js.dumps({"type": "ticker", "sid": 4, "msg": msg})
+
+    (b,) = k.parse(raw(tick("0.9700", "35.00", "0.9900", "120.00")))
+    assert isinstance(b, Book) and b.market_id == f"kalshi:{ladder}"
+    assert b.bids == ((0.97, 35.0),) and b.asks == ((0.99, 120.0),) and b.src_ts == T0
+    assert k.parse(raw(tick("0.9700", "35.00", "0.9900", "120.00"))) == []  # unchanged: nothing new
+    (empty,) = k.parse(raw(tick("0.0000", "0.00", "1.0000", "0.00")))  # an empty book (bid 0, ask 1)
+    assert isinstance(empty, Book) and empty.bids == () and empty.asks == ()
+
+    class WS:
+        def __init__(self) -> None:
+            self.sent: list[str] = []
+
+        async def send(self, text: str) -> None:
+            self.sent.append(text)
+
+    ws = WS()
+    k.on_connected(ws)  # type: ignore[arg-type]
+    other = "KXBTCD-26OCT2803-T81249.99"
+    assert asyncio.run(k.update_in_place(frozenset({other}), frozenset())) is False  # no sids yet
+    for ch, sid in (("orderbook_delta", 1), ("trade", 2), ("ticker", 3)):
+        k.keep(js.dumps({"type": "subscribed", "msg": {"channel": ch, "sid": sid}}))
+    assert asyncio.run(k.update_in_place(frozenset({other}), frozenset({TK})))
+    sent = [js.loads(s)["params"] for s in ws.sent]
+    assert {(p["sid"], p["action"], tuple(p["market_tickers"])) for p in sent} == {
+        (3, "add_markets", (other,)),  # the ladder strike: ticker and trades
+        (2, "add_markets", (other,)),
+        (1, "delete_markets", (TK,)),  # the 15m market: book and trades
+        (2, "delete_markets", (TK,)),
+    }

@@ -99,6 +99,10 @@ class SimBroker(Broker):
         self._arrived: list[Order] = []  # next_event mode: arrived, waiting for the next event
         self.fees = dict(fees or {})
         self._fee: dict[str, FeeModel] = {}
+        # each market's latest book as it came (cheap to keep), and the levels built from it on first
+        # use, which fills then consume until the next book replaces them: a broker sees every book,
+        # but only markets it trades need levels
+        self._latest: dict[str, Book] = {}
         self._books: dict[str, tuple[list[_Level], list[_Level]]] = {}
         self._pending: dict[str, Order] = {}
         self._working: dict[str, _Working] = {}
@@ -110,7 +114,7 @@ class SimBroker(Broker):
         self._pending[order.id] = order
         if self.queue.measure_at == "decision":
             buys_yes, yes_px = order.in_yes()
-            bids, asks = self._books.get(order.market_id, ([], []))
+            bids, asks = self._levels(order.market_id)
             same = bids if buys_yes else asks
             self._queue_at_decision[order.id] = sum(lv.size for lv in same if abs(lv.price - yes_px) < EPS)
         self.emit(_Arrive(ts=self.engine.now + self.latency_ms, broker=self.name, order_id=order.id))
@@ -141,12 +145,11 @@ class SimBroker(Broker):
                 m = event.market
                 self._fee[m.id] = m.fee or self.fees.get(m.venue, NoFee())
             case Book():
-                self._books[event.market_id] = (
-                    [_Level(p, s) for p, s in event.bids],
-                    [_Level(p, s) for p, s in event.asks],
-                )
+                self._latest[event.market_id] = event
+                self._books.pop(event.market_id, None)  # rebuilt from it when next needed
                 self._match_arrived(event.market_id)
-                self._book_moved(event.market_id)
+                if self._working:
+                    self._book_moved(event.market_id)
             case MarketTrade():
                 self._match_arrived(event.market_id)
                 self._trade(event)
@@ -172,7 +175,7 @@ class SimBroker(Broker):
             return
         buys_yes, yes_px = order.in_yes()
         w = _Working(order, order.qty, buys_yes, yes_px)
-        bids, asks = self._books.get(order.market_id, ([], []))
+        bids, asks = self._levels(order.market_id)
         opposite, same = (asks, bids) if buys_yes else (bids, asks)
         if order.post_only and opposite and w.marketable(opposite[0].price):
             self._emit_update(order, OrderStatus.REJECTED, 0, "post-only order would take")
@@ -198,8 +201,11 @@ class SimBroker(Broker):
         levels[:] = [lv for lv in levels if lv.size > EPS]
 
     def _book_moved(self, market_id: str) -> None:
-        bids, asks = self._books[market_id]
-        for w in self._resting(market_id):
+        resting = self._resting(market_id)
+        if not resting:
+            return
+        bids, asks = self._levels(market_id)
+        for w in resting:
             opposite, same = (asks, bids) if w.buys_yes else (bids, asks)
             if self.queue.credit_cancels:
                 here = sum(lv.size for lv in same if abs(lv.price - w.yes_price) < EPS)
@@ -209,6 +215,8 @@ class SimBroker(Broker):
                 self._finish_if_filled(w)
 
     def _trade(self, t: MarketTrade) -> None:
+        if not self._working:
+            return
         left = t.qty
         for w in self._resting(t.market_id):
             if left <= EPS:
@@ -238,6 +246,15 @@ class SimBroker(Broker):
             self._update(w, OrderStatus.EXPIRED)
 
     # --- helpers ---
+
+    def _levels(self, market_id: str) -> tuple[list[_Level], list[_Level]]:
+        """The market's book as levels fills can consume, built from its latest book on first use."""
+        got = self._books.get(market_id)
+        if got is None:
+            b = self._latest.get(market_id)
+            got = ([_Level(p, s) for p, s in b.bids], [_Level(p, s) for p, s in b.asks]) if b else ([], [])
+            self._books[market_id] = got
+        return got
 
     def _resting(self, market_id: str) -> list[_Working]:
         """Resting orders in a market, most aggressive price first, then oldest."""

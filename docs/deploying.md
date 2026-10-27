@@ -67,7 +67,7 @@ uv run quanty deploy root@203.0.113.7          # or ubuntu@… on AWS, or a name
 ```
 
 `quanty deploy` copies the project to the server (never `.env`, `.env.*` or `data/`; it stops if the
-server has no keys yet), builds the image there, runs `quanty doctor` inside it, and only if that passes, starts the trader and the dashboard.
+server has no keys yet), builds the image there, runs `quanty doctor` inside it, and only if that passes, starts the recorder, the trader and the dashboard.
 Run the same command after every change: the containers restart on the new code, and `data/` on the
 server is never sent or deleted. `--to` picks the folder on the server (default: the project's name,
 in your home), `--dry-run` prints the commands, and `--no-check` skips the doctor step. It needs
@@ -75,9 +75,12 @@ in your home), `--dry-run` prints the commands, and `--no-check` skips the docto
 image has no `.git`), so runs there say which code they ran, and warns when you have uncommitted
 changes: commit first, and a run's commit names exactly what it ran.
 
-What runs, in two containers sharing `data/`, each restarted on failure and on reboot:
+What runs, in three containers sharing `data/`, each restarted on failure and on reboot:
 
-- **trader**: `quanty paper experiments/main.toml --feeds feeds.toml`, or `quanty live … --arm` when
+- **recorder**: `quanty record --config feeds.toml`, writing the raw feeds into `data/` (for
+  warm-ups, backtests and `quanty pull --recordings`) and the feed health the dashboard shows.
+- **trader**: `quanty paper experiments/main.toml --feeds feeds.toml --no-record` (its own feed
+  connections; the recorder records), or `quanty live … --arm` when
   the server's `.env` (its keys file) sets `QUANTY_MODE=live`. Recordings, ledgers and the order journal live in `data/`.
 - **dashboard**: `quanty ui`, published on the server's `127.0.0.1:8765` only.
 

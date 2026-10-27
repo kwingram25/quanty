@@ -51,6 +51,11 @@ class KalshiConfig(VenueConfig):
     maker_fee_rate: NonNegativeFloat = Field(
         0.0, description="Quadratic maker fee coefficient (series-dependent)"
     )
+    top_only: tuple[str, ...] = Field(
+        (),
+        description="Series followed by their best bid and ask only (Kalshi's ticker channel, about once a "
+        "second) instead of the full order book: far fewer messages, e.g. for a wide strike ladder",
+    )
     near_money: dict[str, NonNegativeInt] = Field(
         {},
         description="Strike ladders: series -> n, subscribe only to each event's strikes still in play "
@@ -101,7 +106,7 @@ class Kalshi(VenueFeed):
     config: KalshiConfig
     default_url = f"wss://api.elections.kalshi.com{WS_PATH}"
     default_rest = "https://api.elections.kalshi.com/trade-api/v2"
-    channels: ClassVar[tuple[str, ...]] = ("orderbook_delta", "trade")
+    channels: ClassVar[tuple[str, ...]] = ("orderbook_delta", "trade", "ticker")
 
     def __init__(self, name: str, config: FeedConfig) -> None:
         super().__init__(name, config)
@@ -130,8 +135,9 @@ class Kalshi(VenueFeed):
     def subscribe_messages(self, ids: frozenset[str]) -> list[str]:
         self._sids = {}
         msgs = [
-            self._command("subscribe", {"channels": [ch], "market_tickers": sorted(ids)})
-            for ch in self.channels
+            self._command("subscribe", {"channels": [ch], "market_tickers": sorted(tickers)})
+            for ch, tickers in self._by_channel(ids).items()
+            if tickers
         ]
         if self.config.index_ids:
             msgs.append(
@@ -141,6 +147,12 @@ class Kalshi(VenueFeed):
                 )
             )
         return msgs
+
+    def _by_channel(self, ids: frozenset[str]) -> dict[str, frozenset[str]]:
+        """Each market's channels: full books, or the ticker (best bid and ask) for top_only series;
+        trades for all."""
+        top = frozenset(t for t in ids if t.split("-", 1)[0] in self.config.top_only)
+        return {"orderbook_delta": ids - top, "trade": ids, "ticker": top}
 
     def _command(self, cmd: str, params: dict[str, Any]) -> str:
         self._cmd += 1
@@ -158,10 +170,11 @@ class Kalshi(VenueFeed):
 
     async def update_in_place(self, added: frozenset[str], removed: frozenset[str]) -> bool:
         ws = self._ws
-        if ws is None or set(self._sids) != set(self.channels):
-            return False
+        adds, drops = self._by_channel(added), self._by_channel(removed)
+        if ws is None or any((adds[ch] or drops[ch]) and ch not in self._sids for ch in self.channels):
+            return False  # a channel it needs isn't open on this connection: resubscribe instead
         for ch in self.channels:
-            for action, tickers in (("add_markets", added), ("delete_markets", removed)):
+            for action, tickers in (("add_markets", adds[ch]), ("delete_markets", drops[ch])):
                 if tickers:
                     params = {"sid": self._sids[ch], "market_tickers": sorted(tickers), "action": action}
                     await ws.send(self._command("update_subscription", params))
@@ -267,6 +280,8 @@ class Kalshi(VenueFeed):
             return self._parse_book(raw, msg)
         if kind == "trade":
             return self._parse_trade(raw, msg["msg"])
+        if kind == "ticker":
+            return self._parse_ticker(raw, msg["msg"])
         if kind == "cfbenchmarks_value_5hz":
             body = msg["msg"]
             key = f"cfbenchmarks:{body['index_id']}"
@@ -324,12 +339,32 @@ class Kalshi(VenueFeed):
                 side[p] = q
             else:
                 side.pop(p, None)
+            n = self.config.book_depth  # each side's best levels are its highest prices
+            if len(side) >= n and p < side.keys()[-n]:
+                return []  # below the top book_depth levels: the book emitted doesn't change
         out: list[Event] = []
         book = self._book(raw.t, body.get("ts_ms"), ticker)
         if not same_book(self._last_book.get(ticker), book):
             self._last_book[ticker] = book
             out.append(book)
         return out
+
+    def _parse_ticker(self, raw: Raw, body: dict[str, Any]) -> list[Event]:
+        """A top_only market's best bid and ask (with sizes) as a one-level book."""
+        ticker = body["market_ticker"]
+        bid, ask = float(body.get("yes_bid_dollars") or 0), float(body.get("yes_ask_dollars") or 0)
+        bid_q, ask_q = float(body.get("yes_bid_size_fp") or 0), float(body.get("yes_ask_size_fp") or 0)
+        book = Book(
+            ts=raw.t,
+            src_ts=body.get("ts_ms"),
+            market_id=f"{VENUE}:{ticker}",
+            bids=((round(bid, 4), bid_q),) if bid > 0 and bid_q > 0 else (),
+            asks=((round(ask, 4), ask_q),) if 0 < ask < 1 and ask_q > 0 else (),
+        )
+        if same_book(self._last_book.get(ticker), book):
+            return []
+        self._last_book[ticker] = book
+        return [book]
 
     def _book(self, t: int, src: int | None, ticker: str) -> Book:
         yes, no = self._books[ticker]

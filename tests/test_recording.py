@@ -82,3 +82,16 @@ def test_truncated_file_yields_what_it_can(tmp_path: Path) -> None:
     got = list(read(tmp_path, "a", T0, T0 + HOUR_MS))
     assert 0 < len(got) <= 100
     assert gzip.decompress(data).decode().count("\n") == 100
+
+
+def test_a_session_that_doesnt_record_writes_no_files(tmp_path: Path) -> None:
+    from quanty import feeds
+    from quanty.feeds.session import RecordSession
+
+    feed = feeds.make("coinbase", {})
+    for record, want in ((False, []), (True, ["coinbase"])):
+        root = tmp_path / str(record)
+        s = RecordSession({"coinbase": feed}, root, None, record=record)
+        s.sink(Raw("coinbase", 1_700_000_000_000, '{"type":"heartbeat"}'))
+        s.recorder.close()
+        assert sorted(p.name for p in root.glob("*")) == want
