@@ -74,7 +74,10 @@ class RecordSession:
         if controller is not None:
             controller.feeds = self.status  # the dashboard shows each platform's connection
         self.feeds = dict(feeds)
-        self.recorder = Recorder(root, share=trader is not None)  # a session defers to a recorder
+        markers = {n: f.data_marker for n, f in self.feeds.items() if f.holds_data and f.data_marker}
+        self.recorder = Recorder(
+            root, share=trader is not None, data_markers=markers
+        )  # a session defers to a recorder
         self.record = record
         self.keep_days = keep_days
         self._next_prune = 0

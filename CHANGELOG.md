@@ -9,8 +9,11 @@ file is opened) and the command line. Projects from `quanty init` depend on one 
 
 ## Unreleased
 
-- Restarts are quicker. A data-only warm-up skips messages that can't hold data before decoding
-  them, and doesn't read feeds that hold none (Polymarket US): about 3 times faster. A session
+- Restarts are quicker. The recorder also writes each hour's data messages (Kalshi's index values,
+  among its books) to a small file beside the hour's (`<HH>.data.jsonl.gz`, about 2% of it), and a
+  data-only warm-up reads those: about 13 times faster, once hours have them (older ones are read
+  whole). It skips messages that can't hold data before decoding them, and doesn't read feeds that
+  hold none (Polymarket US). A session
   connects its feeds while it warms up: what arrives meanwhile builds its books and markets (orders
   off), and it trades from the next event, where it waited for the warm-up before.
 - The generated Dockerfile installs from `pyproject.toml`, `uv.lock` and `vendor/` before copying

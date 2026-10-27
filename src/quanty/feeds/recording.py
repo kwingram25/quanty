@@ -7,6 +7,10 @@ Layout: <root>/<feed>/<YYYY-MM-DD>/<HH>.jsonl.gz (UTC). One line per item:
 
 Inline messages are sliced back out byte for byte, so parsers see exactly what was received.
 Files are append-only and safe to reopen after a restart (gzip members concatenate).
+
+Beside an hour's file, <HH>.data.jsonl.gz holds the same lines for just its messages that can hold
+data (a feed's data_marker: Kalshi's index values among its books), so a warm-up that only needs
+data reads megabytes rather than the hour's every message.
 """
 
 import fcntl
@@ -30,6 +34,12 @@ log = structlog.get_logger("quanty.record")
 
 def hour_path(root: Path, feed: str, t: int) -> Path:
     return root / feed / time.strftime("%Y-%m-%d/%H.jsonl.gz", time.gmtime(t / 1000))
+
+
+def data_path(path: Path) -> Path:
+    """The hour's data file: its messages that can hold data (Feed.data_marker), all of them from the
+    hour's start, for warm-ups that need only data. Not every hour has one (older recordings)."""
+    return path.with_name(path.name.replace(".jsonl.gz", ".data.jsonl.gz"))
 
 
 def encode(item: Raw | Link) -> str:
@@ -64,10 +74,16 @@ class Recorder:
     killed one). A second recorder of it is refused, or with share=True (a trading session) leaves
     that feed to the other process, checking each minute whether it has stopped, to take over."""
 
-    def __init__(self, root: Path, share: bool = False) -> None:
+    def __init__(
+        self, root: Path, share: bool = False, data_markers: Mapping[str, str] | None = None
+    ) -> None:
+        """data_markers: feed -> the text its messages that can hold data contain (Feed.data_marker);
+        those are written to a small file beside each hour's too (data_path), for quick warm-ups."""
         self.root = root
         self.share = share
+        self.data_markers = dict(data_markers or {})
         self._files: dict[str, tuple[Path, IO[str]]] = {}
+        self._data: dict[str, IO[str] | None] = {}  # feed -> this hour's data file, if it has one
         self._locks: dict[str, IO[bytes]] = {}
         self._elsewhere: dict[str, int] = {}  # feed recorded by another process -> when to try again
 
@@ -107,19 +123,30 @@ class Recorder:
         if cur is None or cur[0] != path:
             if cur:
                 cur[1].close()
+            if (old := self._data.pop(item.feed, None)) is not None:
+                old.close()
             path.parent.mkdir(parents=True, exist_ok=True)
+            # a data file only for an hour it has from its start: begun with the hour, or carried on
+            data = data_path(path)
+            if item.feed in self.data_markers and (not path.exists() or data.exists()):
+                self._data[item.feed] = cast(IO[str], gzip.open(data, "at", compresslevel=6))  # noqa: SIM115
             cur = (path, cast(IO[str], gzip.open(path, "at", compresslevel=6)))  # noqa: SIM115 - kept open for the hour
             self._files[item.feed] = cur
-        cur[1].write(encode(item))
+        line = encode(item)
+        cur[1].write(line)
+        d = self._data.get(item.feed)
+        if d is not None and isinstance(item, Raw) and self.data_markers[item.feed] in item.text:
+            d.write(line)
 
     def flush(self) -> None:
-        for _, f in self._files.values():
+        for f in [*(f for _, f in self._files.values()), *(d for d in self._data.values() if d)]:
             f.flush()
 
     def close(self) -> None:
-        for _, f in self._files.values():
+        for f in [*(f for _, f in self._files.values()), *(d for d in self._data.values() if d)]:
             f.close()
         self._files.clear()
+        self._data.clear()
         for fd in self._locks.values():
             fd.close()  # releases the lock
         self._locks.clear()
@@ -140,6 +167,8 @@ def read(root: Path, feed: str, start: int, end: int, contains: str | None = Non
         path = hour_path(root, feed, hour)
         if not path.exists():
             continue
+        if contains is not None and data_path(path).exists():
+            path = data_path(path)  # the same lines, without the rest of the hour to decompress
         for line in _lines(path, contains):
             try:
                 item = decode(feed, line)

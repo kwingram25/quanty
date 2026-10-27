@@ -198,3 +198,53 @@ def test_a_session_leaves_a_feed_to_its_recorder_and_takes_over_when_it_stops(tm
     session.close()
     got = [(i.t, i.text) for i in read(tmp_path, "kalshi", t, t + HOUR_MS) if isinstance(i, Raw)]
     assert got == [(t, '{"by":"recorder"}'), (t + 61_000, '{"by":"session"}')]
+
+
+def test_an_hours_data_lines_also_go_to_its_data_file(tmp_path: Path) -> None:
+    from quanty.feeds.recording import data_path, hour_path
+
+    marker = '"cfbenchmarks_value'
+    book = '{"type":"orderbook_delta","seq":1}'
+    tick = '{"type":"cfbenchmarks_value_5hz","msg":{"value_usd":1}}'
+    rec = Recorder(tmp_path, data_markers={"kalshi": marker})
+    for i in range(6):
+        rec.write(Raw("kalshi", T0 + i, tick if i % 3 == 0 else book))
+    rec.write(Link("kalshi", T0 + 7, "down", "gone"))
+    rec.close()
+    main, data = hour_path(tmp_path, "kalshi", T0), data_path(hour_path(tmp_path, "kalshi", T0))
+    assert len(gzip.decompress(main.read_bytes()).splitlines()) == 7
+    lines = gzip.decompress(data.read_bytes()).decode().splitlines()
+    assert [decode("kalshi", line).t for line in lines] == [T0, T0 + 3]  # data lines only
+    got = list(read(tmp_path, "kalshi", T0, T0 + HOUR_MS, contains=marker))
+    assert [(r.t, getattr(r, "text", "")) for r in got] == [(T0, tick), (T0 + 3, tick)]
+    data.unlink()  # an older hour without one reads the whole file, to the same result
+    assert list(read(tmp_path, "kalshi", T0, T0 + HOUR_MS, contains=marker)) == got
+    assert span(tmp_path, "kalshi") == (T0, T0 + HOUR_MS) and recorded_feeds(tmp_path) == ["kalshi"]
+
+
+def test_a_data_file_only_for_an_hour_it_has_from_the_start(tmp_path: Path) -> None:
+    from quanty.feeds.recording import data_path, hour_path
+
+    marker, tick = "tick", '{"tick":1}'
+    old = Recorder(tmp_path)  # a recorder from before data files, mid-hour
+    old.write(Raw("kalshi", T0 + 1, tick))
+    old.close()
+    rec = Recorder(tmp_path, data_markers={"kalshi": marker})
+    rec.write(Raw("kalshi", T0 + 2, tick))  # this hour started without one: none now either
+    rec.write(Raw("kalshi", T0 + HOUR_MS + 1, tick))  # the next hour, from its start
+    rec.close()
+    assert not data_path(hour_path(tmp_path, "kalshi", T0)).exists()
+    assert [r.t for r in read(tmp_path, "kalshi", T0, T0 + 2 * HOUR_MS, contains=marker)] == [
+        T0 + 1,
+        T0 + 2,
+        T0 + HOUR_MS + 1,
+    ]  # nothing lost: the first hour comes from its full file
+    again = Recorder(tmp_path, data_markers={"kalshi": marker})  # restarted within the second hour
+    again.write(Raw("kalshi", T0 + HOUR_MS + 2, tick))
+    again.close()
+    lines = (
+        gzip.decompress(data_path(hour_path(tmp_path, "kalshi", T0 + HOUR_MS)).read_bytes())
+        .decode()
+        .splitlines()
+    )
+    assert [decode("kalshi", line).t for line in lines] == [T0 + HOUR_MS + 1, T0 + HOUR_MS + 2]  # kept up

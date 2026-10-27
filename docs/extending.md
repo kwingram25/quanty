@@ -121,7 +121,8 @@ Optional extras on the class:
 - `parser_version` (bump it when `parse()` changes what it emits);
 - `replayable = False` (for a source that can't be backfilled);
 - for a warm-up that only needs data: `data_marker` (a fixed string every message that can hold data
-  contains, so the rest is skipped before it's decoded), `holds_data = False` (no message does: the
+  contains: the recorder also writes those to a small file beside each hour's, which a warm-up reads
+  instead), `holds_data = False` (no message does: the
   feed isn't read at all), or `carries_data()` (a cheap text test, for anything else);
 - for a WebSocket: `subscriptions()`, `keep()` (drop protocol noise before recording) and
   `headers()` (auth).

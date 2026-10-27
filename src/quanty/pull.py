@@ -91,8 +91,9 @@ def recordings_command(
     first = (now - int(hours * 3_600_000)) // 3_600_000 * 3_600_000
     wanted = sorted(
         {
-            time.strftime("*/%Y-%m-%d/%H.jsonl.gz", time.gmtime(t / 1000))
+            time.strftime(f"*/%Y-%m-%d/%H{kind}.jsonl.gz", time.gmtime(t / 1000))
             for t in range(first, now + 1, 3_600_000)
+            for kind in ("", ".data")  # the hour, and its data file where it has one
         }
     )
     return [
