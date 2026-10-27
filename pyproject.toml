@@ -1,12 +1,26 @@
 [project]
-name = "quanty"
-version = "0.0.1"
+# installed as quanty-py (the name "quanty" on PyPI is another project); imported and run as quanty
+name = "quanty-py"
+dynamic = ["version"]  # quanty.__version__, in src/quanty/__init__.py
 description = "Self-hosted framework for recording, backtesting, paper and live trading of repeated prediction markets"
 readme = "README.md"
 license = "MIT"
 license-files = ["LICENSE"]
 authors = [{ name = "Keith Ingram" }]
 requires-python = ">=3.12"
+keywords = ["trading", "prediction markets", "kalshi", "polymarket", "backtesting", "paper trading"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Financial and Insurance Industry",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: MacOS",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Office/Business :: Financial :: Investment",
+    "Typing :: Typed",
+]
 dependencies = [
     "alembic>=1.13",
     "cryptography>=43",
@@ -29,6 +43,11 @@ dependencies = [
     "websockets>=13",
 ]
 
+[project.urls]
+Repository = "https://github.com/kwingram25/quanty"
+Documentation = "https://github.com/kwingram25/quanty/tree/main/docs"
+Issues = "https://github.com/kwingram25/quanty/issues"
+
 [project.scripts]
 quanty = "quanty.cli:app"
 
@@ -44,8 +63,15 @@ dev = [
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
+[tool.hatch.version]
+path = "src/quanty/__init__.py"
+
 [tool.hatch.build.targets.wheel]
 packages = ["src/quanty"]
+
+[tool.hatch.build.targets.sdist]
+# what building and testing the Python package needs: the dashboard ships built, inside src/
+include = ["/src/quanty", "/tests", "/docs", "/README.md", "/LICENSE", "/pyproject.toml"]
 
 [tool.ruff]
 line-length = 110

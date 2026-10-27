@@ -5,11 +5,11 @@ private git repository with a strategy skeleton, its experiment and the files to
 [Getting started](../docs/getting-started.md#2-start-your-project).
 
 This folder is for trying things in a clone of quanty itself. Everything here except this README
-and `_template.py` is ignored by git, so it never shows in `git status` or conflicts with
+is ignored by git, so it never shows in `git status` or conflicts with
 `git pull`, but it isn't versioned or backed up either.
 
 ```sh
-cp strategies/_template.py strategies/my_idea.py   # then edit the placeholders
+cp src/quanty/strategies/_template.py strategies/my_idea.py   # then edit the placeholders
 ```
 
 Every `*.py` file here whose name doesn't start with `_` is a strategy, named after its file. A file

@@ -66,9 +66,9 @@ def test_missing_local_folder_is_fine(tmp_path: Path) -> None:
     assert plugins.discover([], include_examples=False, local=tmp_path / "none") == {}
 
 
-def test_repo_template_is_not_a_strategy() -> None:
-    repo_local = Path(__file__).parents[1] / "strategies"
-    assert "_template" not in plugins.discover([], include_examples=False, local=repo_local)
+def test_the_template_ships_in_the_package_and_is_not_a_strategy() -> None:
+    assert (plugins.EXAMPLES / "_template.py").is_file()
+    assert "_template" not in plugins.discover([], include_examples=True, local=None)
 
 
 def test_python_paths_make_helper_packages_importable(tmp_path: Path) -> None:

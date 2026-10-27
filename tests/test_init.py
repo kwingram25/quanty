@@ -17,7 +17,8 @@ def test_init_writes_a_working_project(tmp_path: Path) -> None:
             "compose.yaml"} <= set(written)  # fmt: skip
     assert stat.S_IMODE((proj / ".env").stat().st_mode) == 0o600  # keys: owner only
     assert (
-        "pyproject.toml" in written and 'dependencies = ["quanty"]' in (proj / "pyproject.toml").read_text()
+        "pyproject.toml" in written
+        and 'dependencies = ["quanty-py>=' in (proj / "pyproject.toml").read_text()
     )
     assert ".env" in (proj / ".dockerignore").read_text()  # never baked into the image
     found = plugins.discover([proj / "strategies"], include_examples=False, local=None)
@@ -122,7 +123,7 @@ def test_upgrade_refreshes_marked_files_and_keeps_your_own(
     from quanty.init import MARK, upgrade
 
     dest = tmp_path / "bot"
-    create(dest, Answers(), vendor=False)
+    create(dest, Answers(), vendor=True)  # vendored: upgrade builds from this checkout
     real = subprocess.run
 
     def run(cmd: list[str], **kw: object) -> subprocess.CompletedProcess[str]:
@@ -144,7 +145,7 @@ def test_upgrade_refreshes_marked_files_and_keeps_your_own(
     (dest / ".dockerignore").write_text(".env\ndata/\n.git/\n__pycache__/\n.venv/\n")  # from before marks
     root = Path(__file__).parents[1]
     what, refreshed, kept = upgrade(dest, root)
-    assert what.startswith("quanty ") and list((dest / "vendor").glob("quanty-*.whl"))
+    assert what.startswith("quanty ") and len(list((dest / "vendor").glob("quanty_py-*.whl"))) == 1
     assert not (dest / "vendor" / ".gitignore").exists()
     assert "README.md" in refreshed and "stale" not in readme.read_text()
     assert ".dockerignore" in refreshed and MARK in (dest / ".dockerignore").read_text()  # adopted
@@ -152,3 +153,57 @@ def test_upgrade_refreshes_marked_files_and_keeps_your_own(
     assert strategy.read_text().endswith("# my edge\n")  # strategies are never touched
     with pytest.raises(ValueError, match="isn't a quanty checkout"):
         upgrade(dest, tmp_path)
+
+
+def test_upgrade_moves_a_project_from_before_the_rename(tmp_path: Path) -> None:
+    import tomllib
+
+    from quanty.init import _point_at
+
+    (tmp_path / "pyproject.toml").write_text(
+        '[project]\nname = "bot"\ndependencies = ["quanty", "numpy>=2"]  # mine\n\n'
+        "[tool.uv]\npackage = false\n\n[tool.uv.sources]\n"
+        'quanty = { path = "vendor/quanty-0.0.1-py3-none-any.whl" }\n'
+    )
+    _point_at(tmp_path, "vendor/quanty_py-0.1.0-py3-none-any.whl")
+    text = (tmp_path / "pyproject.toml").read_text()
+    got = tomllib.loads(text)
+    assert got["project"]["dependencies"] == ["numpy>=2", "quanty-py"]
+    assert got["tool"]["uv"]["sources"] == {"quanty-py": {"path": "vendor/quanty_py-0.1.0-py3-none-any.whl"}}
+    assert "# mine" in text and got["tool"]["uv"]["package"] is False  # the rest kept
+
+
+def test_a_new_project_depends_on_this_release_line_on_pypi(tmp_path: Path) -> None:
+    import tomllib
+
+    import quanty
+
+    create(tmp_path / "bot", Answers(), vendor=False)
+    got = tomllib.loads((tmp_path / "bot" / "pyproject.toml").read_text())
+    major, minor = quanty.__version__.split(".")[:2]
+    assert got["project"]["dependencies"] == [f"quanty-py>={quanty.__version__},<{major}.{int(minor) + 1}"]
+    assert "sources" not in got["tool"]["uv"]  # nothing vendored, nothing from GitHub
+    assert "pip install --system -r pyproject.toml" in (tmp_path / "bot" / "Dockerfile").read_text()
+
+
+def test_upgrade_on_pypi_takes_the_latest_release_and_its_templates(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import subprocess
+
+    from quanty.init import upgrade
+
+    dest = tmp_path / "bot"
+    create(dest, Answers(), vendor=False)
+    ran: list[list[str]] = []
+
+    def run(cmd: list[str], **kw: object) -> subprocess.CompletedProcess[str]:
+        ran.append(cmd)
+        out = "refreshed: README.md\nkept: \n" if "--refresh-only" in cmd else "0.2.0\n"
+        return subprocess.CompletedProcess(cmd, 0, out, "")
+
+    monkeypatch.setattr(subprocess, "run", run)
+    what, refreshed, kept = upgrade(dest, None)  # no checkout needed
+    assert ["uv", "lock", "-q", "--upgrade-package", "quanty-py"] in ran and ["uv", "sync", "-q"] in ran
+    assert ["uv", "run", "quanty", "upgrade", "--refresh-only"] in ran  # the new release's templates
+    assert what == "quanty 0.2.0 from PyPI" and refreshed == ["README.md"] and kept == []

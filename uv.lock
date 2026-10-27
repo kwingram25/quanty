@@ -1227,8 +1227,7 @@ wheels = [
 ]
 
 [[package]]
-name = "quanty"
-version = "0.0.1"
+name = "quanty-py"
 source = { editable = "." }
 dependencies = [
     { name = "alembic" },

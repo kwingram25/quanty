@@ -28,7 +28,9 @@ from pathlib import Path
 import quanty
 
 REPO = "https://github.com/kwingram25/quanty"
-TEMPLATE = Path(__file__).resolve().parents[2] / "strategies" / "_template.py"  # in a source checkout
+PACKAGE = "quanty-py"  # quanty's name on PyPI ("quanty" there is another project)
+WHEELS = "quanty*.whl"  # a vendored wheel: quanty_py-<version>-... (quanty-<version>-... before the rename)
+TEMPLATE = Path(__file__).parent / "strategies" / "_template.py"  # in the package
 
 DEFAULT_SERIES = {"kalshi": ["KXBTC15M"], "polymarket_us": ["btc_updown_15m"]}
 PM_SERIES = {
@@ -156,32 +158,53 @@ def git_init(dest: Path) -> str:
     return "made a git repository with a first commit: push it to a private remote to back it up"
 
 
-def upgrade(dest: Path, source: Path) -> tuple[str, list[str], list[str]]:
-    """Bring a project onto the quanty in `source` (a checkout): a new vendored wheel, the lock and
-    environment updated, and the generated files that still carry MARK refreshed from the new
-    templates. Strategies, experiments, feeds, keys and anything without MARK are never touched.
-    Returns (what was installed, files refreshed, files kept because they're your own now)."""
+def vendored(dest: Path) -> bool:
+    """Whether a project installs quanty from a wheel in vendor/ (else from PyPI)."""
+    return any((dest / "vendor").glob(WHEELS))
+
+
+def upgrade(dest: Path, source: Path | None) -> tuple[str, list[str], list[str]]:
+    """Bring a project onto a newer quanty, then refresh its generated files (see `refresh`). A
+    vendored project needs `source`, a quanty checkout to build the new wheel from (its
+    pyproject.toml is pointed at the new wheel, quanty-py); one on PyPI moves to the latest release
+    its pyproject.toml allows, and its files are refreshed by that release's own templates.
+    Returns (what it's on now, files refreshed, files kept because they're your own now)."""
     if not (dest / "pyproject.toml").exists() or not (dest / "experiments").is_dir():
         raise ValueError(f"{dest.resolve()} isn't a quanty project (no pyproject.toml and experiments/)")
-    if not (source / "pyproject.toml").exists() or not (source / "src" / "quanty").is_dir():
+    if not vendored(dest):
+        _uv(dest, ["lock", "-q", "--upgrade-package", PACKAGE], ["sync", "-q"])
+        done = subprocess.run(["uv", "run", "quanty", "upgrade", "--refresh-only"], cwd=dest,
+                              capture_output=True, text=True)  # fmt: skip
+        if done.returncode:
+            raise ValueError(f"refreshing with the new release: {done.stderr.strip()[-300:]}")
+        version = subprocess.run(["uv", "run", "python", "-c", "import quanty; print(quanty.__version__)"],
+                                 cwd=dest, capture_output=True, text=True).stdout.strip()  # fmt: skip
+        lines = done.stdout.splitlines()
+        got = {k: v.split(", ") for k, _, v in (line.partition(": ") for line in lines) if v}
+        return f"quanty {version} from PyPI", got.get("refreshed", []), got.get("kept", [])
+    if source is None or not (source / "pyproject.toml").exists() or not (source / "src" / "quanty").is_dir():
         raise ValueError(f"{source} isn't a quanty checkout")
     with tempfile.TemporaryDirectory() as tmp:  # built aside: a failed build leaves the old wheel
         built = _vendor(source, Path(tmp))
         if not built:
             raise ValueError(f"couldn't build a wheel from {source} (is uv installed?)")
         vendor = dest / "vendor"
-        vendor.mkdir(exist_ok=True)
-        for old in vendor.glob("quanty-*.whl"):
+        for old in vendor.glob(WHEELS):
             old.unlink()
         for name in built:
             shutil.move(Path(tmp) / Path(name).name, vendor / Path(name).name)
     (vendor / ".gitignore").unlink(missing_ok=True)
-    for cmd in (["uv", "lock", "-q", "--upgrade-package", "quanty"], ["uv", "sync", "-q"]):
-        done = subprocess.run(cmd, cwd=dest, capture_output=True, text=True)
-        if done.returncode:
-            raise ValueError(f"{' '.join(cmd)}: {done.stderr.strip()[-300:]}")
+    _point_at(dest, built[0])
+    _uv(dest, ["lock", "-q", "--upgrade-package", PACKAGE], ["sync", "-q"])
     commit = subprocess.run(["git", "-C", str(source), "rev-parse", "--short=12", "HEAD"],
                             capture_output=True, text=True).stdout.strip()  # fmt: skip
+    refreshed, kept = refresh(dest)
+    return f"quanty {quanty.__version__} at {commit or source}", refreshed, kept
+
+
+def refresh(dest: Path) -> tuple[list[str], list[str]]:
+    """Rewrite the generated files that still carry MARK from this quanty's templates; strategies,
+    experiments, feeds, keys and anything without MARK are never touched. (refreshed, kept)."""
     a = _answers_of(dest)
     fresh, plain = files(a, _slug(dest)), _files(a, _slug(dest))
     refreshed, kept = [], []
@@ -195,7 +218,34 @@ def upgrade(dest: Path, source: Path) -> tuple[str, list[str], list[str]]:
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text(fresh[rel])
             refreshed.append(rel)
-    return f"quanty {quanty.__version__} at {commit or source}", refreshed, kept
+    return refreshed, kept
+
+
+def _point_at(dest: Path, wheel: str) -> None:
+    """Make pyproject.toml depend on quanty-py from `wheel` (also moving a project from before the
+    rename, which depended on "quanty"), keeping its other contents and comments."""
+    import tomlkit
+
+    path = dest / "pyproject.toml"
+    doc = tomlkit.parse(path.read_text())
+    deps = doc["project"]["dependencies"]
+    keep = [d for d in deps if re.split(r"[<>=!~ @\[;]", str(d), maxsplit=1)[0] not in ("quanty", PACKAGE)]
+    deps.clear()
+    for d in [*keep, PACKAGE]:
+        deps.append(d)
+    uv = doc.setdefault("tool", tomlkit.table()).setdefault("uv", tomlkit.table())
+    sources = uv.setdefault("sources", tomlkit.table())
+    sources.pop("quanty", None)
+    sources[PACKAGE] = tomlkit.inline_table()
+    sources[PACKAGE]["path"] = wheel
+    path.write_text(tomlkit.dumps(doc))
+
+
+def _uv(dest: Path, *commands: list[str]) -> None:
+    for args in commands:
+        done = subprocess.run(["uv", *args], cwd=dest, capture_output=True, text=True)
+        if done.returncode:
+            raise ValueError(f"uv {' '.join(args)}: {done.stderr.strip()[-300:]}")
 
 
 def _answers_of(dest: Path) -> Answers:
@@ -220,7 +270,7 @@ def _answers_of(dest: Path) -> Answers:
 
 def _vendor(checkout: Path, into: Path) -> list[str]:
     into.mkdir(exist_ok=True)
-    for old in into.glob("quanty-*.whl"):
+    for old in into.glob(WHEELS):
         old.unlink()
     try:
         subprocess.run(
@@ -232,7 +282,7 @@ def _vendor(checkout: Path, into: Path) -> list[str]:
     except (OSError, subprocess.SubprocessError):
         return []
     (into / ".gitignore").unlink(missing_ok=True)  # uv build ignores its output; the wheel is committed
-    return [f"vendor/{w.name}" for w in into.glob("quanty-*.whl")]
+    return [f"vendor/{w.name}" for w in into.glob(WHEELS)]
 
 
 def _slug(dest: Path) -> str:
@@ -240,21 +290,20 @@ def _slug(dest: Path) -> str:
 
 
 def _pyproject(dest: Path, wheel: str | None) -> str:
-    """A uv project depending on quanty (the vendored wheel, else GitHub), so `uv run quanty` just works."""
-    name = _slug(dest)
-    source = f'{{ path = "{wheel}" }}' if wheel else f'{{ git = "{REPO}" }}'
+    """A uv project depending on quanty (a vendored wheel, else this release line on PyPI), so
+    `uv run quanty` just works."""
+    major, minor = (int(x) for x in quanty.__version__.split(".")[:2])
+    dep = f'"{PACKAGE}"' if wheel else f'"{PACKAGE}>={quanty.__version__},<{major}.{minor + 1}"'
+    sources = f'\n[tool.uv.sources]\n{PACKAGE} = {{ path = "{wheel}" }}\n' if wheel else ""
     return f"""[project]
-name = "{name}"
+name = "{_slug(dest)}"
 version = "0.1.0"
 requires-python = ">=3.12"
-dependencies = ["quanty"]
+dependencies = [{dep}]
 
 [tool.uv]
 package = false   # your strategies are loaded from strategies/, not installed
-
-[tool.uv.sources]
-quanty = {source}
-"""
+{sources}"""
 
 
 def _env(a: Answers) -> str:
@@ -365,7 +414,7 @@ max_order_qty = 10
 
 
 def _strategy(name: str, series: str) -> str:
-    text = TEMPLATE.read_text() if TEMPLATE.exists() else FALLBACK_TEMPLATE
+    text = TEMPLATE.read_text()
     cls = "".join(part.capitalize() for part in name.split("_")) or "MyStrategy"
     text = text.replace(
         '"""Strategy template: copy to strategies/<name>.py and fill in the TODOs.',
@@ -612,21 +661,18 @@ On Fly.io, `fly.toml` runs the same project on one machine with a volume for `da
 services that wipe the disk on redeploy (App Platform, ECS/Fargate, Cloud Run, Render) don't fit:
 quanty keeps its state in `data/`. The full guide, per provider: {REPO}/blob/main/docs/deploying.md
 
-quanty is installed in the image from `vendor/*.whl` if there is one, otherwise from {REPO}
-(which needs access if the repository is private). Refresh the wheel from a quanty checkout with
-`uv build --wheel -o vendor <path to quanty>`.
+The image installs quanty from `vendor/` if this project vendors a wheel, otherwise the version
+`pyproject.toml` asks for from PyPI (`quanty-py`). `uv run quanty upgrade` moves to a newer one.
 """
 
 
 DOCKERFILE = """FROM python:3.12-slim
 COPY --from=ghcr.io/astral-sh/uv:0.5.11 /uv /usr/local/bin/uv
 WORKDIR /app
-# quanty: a wheel in vendor/ when there is one, else from GitHub
-ARG QUANTY_SOURCE="quanty @ git+https://github.com/kwingram25/quanty"
+# quanty: the wheel in vendor/ when the project vendors one, else what pyproject.toml asks of PyPI
 COPY . .
-RUN if ls vendor/quanty-*.whl >/dev/null 2>&1; then uv pip install --system vendor/quanty-*.whl; \\
-    else apt-get update && apt-get install -y --no-install-recommends git \\
-    && uv pip install --system "$QUANTY_SOURCE"; fi
+RUN if ls vendor/quanty*.whl >/dev/null 2>&1; then uv pip install --system vendor/quanty*.whl; \\
+    else uv pip install --system -r pyproject.toml; fi
 # this image's copy of the project is replaced on every deploy: the dashboard offers to copy
 # edited params for the experiment file instead of writing them here
 ENV QUANTY_IN_IMAGE=1
@@ -772,33 +818,3 @@ CLAUDE_SETTINGS = """{
   }
 }
 """
-
-FALLBACK_TEMPLATE = '''"""Strategy template: copy to strategies/<name>.py and fill in the TODOs."""
-
-from pydantic import Field
-
-from quanty.core import Book, Context, Params, Side, Strategy, Tif
-
-
-class MyParams(Params):
-    min_edge: float = Field(0.02, ge=0, description="Buy when the model beats the price by this much")
-    size: int = Field(1, gt=0, description="Contracts per order")
-
-
-class MyStrategy(Strategy[MyParams]):
-    params_type = MyParams
-    series = ("TODO_venue:TODO_series",)
-    description = "TODO: one line on what this strategy does"
-
-    def fair_yes(self, ctx: Context, market_id: str) -> float | None:
-        """TODO: your model. Probability that YES wins, or None to skip."""
-        return None
-
-    def on_book(self, ctx: Context, book: Book) -> None:
-        fair = self.fair_yes(ctx, book.market_id)
-        if fair is None or ctx.orders(book.market_id):
-            return
-        ask = book.ask(Side.YES)
-        if ask is not None and fair - ask >= self.params.min_edge:
-            ctx.buy(book.market_id, Side.YES, ask, self.params.size, tif=Tif.IOC)
-'''
