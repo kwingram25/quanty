@@ -667,7 +667,7 @@ The image installs quanty from `vendor/` if this project vendors a wheel, otherw
 
 
 DOCKERFILE = """FROM python:3.12-slim
-COPY --from=ghcr.io/astral-sh/uv:0.5.11 /uv /usr/local/bin/uv
+COPY --from=ghcr.io/astral-sh/uv:0.13.1 /uv /usr/local/bin/uv
 WORKDIR /app
 # quanty: the wheel in vendor/ when the project vendors one, else what pyproject.toml asks of PyPI
 COPY . .
