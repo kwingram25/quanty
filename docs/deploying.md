@@ -46,20 +46,20 @@ Each step skips what's already done, so it's safe to run again. Or paste the pro
 does the same minus Tailscale on first boot.
 
 **DigitalOcean.** Create → Droplets. A New York or San Francisco region; Ubuntu 24.04; a Basic
-Droplet with 2 GB; your SSH key; under *Advanced options*, *Add initialization scripts*, paste
-`deploy/cloud-init.yaml`. For data that outlives the Droplet, add a Volume while creating it with
+Droplet with 2 GB; your SSH key (or, instead of `quanty server`, paste `deploy/cloud-init.yaml` under *Advanced
+options*, *Add initialization scripts*). For data that outlives the Droplet, add a Volume while creating it with
 *Automatically format & mount*: it appears at `/mnt/<volume name>`, and you deploy onto it with
 `--to /mnt/<volume name>/my-quanty` in step 2. Optionally add a Cloud Firewall allowing only SSH
 in. You log in as `root`.
 
 **AWS EC2.** Launch instance in `us-east-1` (or another US region): Ubuntu Server 24.04 LTS,
-`t3.small`, your key pair, a security group allowing SSH from your IP only, 30 GB gp3 storage, and
-under *Advanced details*, *User data*, paste `deploy/cloud-init.yaml`. Attach an Elastic IP if you
+`t3.small`, your key pair, a security group allowing SSH from your IP only, 30 GB gp3 storage (or
+`deploy/cloud-init.yaml` under *Advanced details*, *User data*, instead of `quanty server`). Attach an Elastic IP if you
 want the address to survive stopping the instance. You log in as `ubuntu`. The disk is deleted when
 the instance is *terminated* (not when stopped).
 
 **AWS Lightsail** is the simpler, fixed-price version: Create instance → Linux/Unix → OS Only →
-Ubuntu 24.04, *Add launch script* and paste `deploy/cloud-init.yaml`, a 2 GB plan. Its firewall
+Ubuntu 24.04, a 2 GB plan (or paste `deploy/cloud-init.yaml` as its launch script). Its firewall
 opens HTTP by default: remove that rule, keep SSH. You log in as `ubuntu`.
 
 **Hetzner, Linode, GCP and others** have the same field, called *user data*, *cloud config* or

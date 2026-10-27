@@ -585,11 +585,13 @@ A quanty project: your strategy, its configuration, and what's needed to deploy 
 
 ## Deploy
 
-Any Linux server with Docker (a DigitalOcean Droplet, AWS EC2 or Lightsail, Hetzner, ...): create it
-with `deploy/cloud-init.yaml` pasted as its "user data". Give the server API keys of its own (made
-for it at each venue, so they can be revoked alone) in `.env.server`, written like `.env`, then
-from this folder:
+Any Ubuntu server (a DigitalOcean Droplet, AWS EC2 or Lightsail, Hetzner, ...): create it with
+your SSH key, then set it up from this folder (Docker, firewall, swap, updates; `--tailscale` also
+serves the dashboard to your Tailscale devices), or paste `deploy/cloud-init.yaml` as its "user data"
+when creating it. Give the server API keys of its own (made for it at each venue, so they can be
+revoked alone) in `.env.server`, written like `.env`, then:
 
+    uv run quanty server root@your-server --tailscale       # once; safe to run again
     uv run quanty keys root@your-server --file .env.server   # once; again to rotate them
     uv run quanty deploy root@your-server
 
@@ -663,8 +665,8 @@ services:
     ports: ["127.0.0.1:8765:8765"]   # the server's localhost only: reach it with an SSH tunnel, or...
     restart: unless-stopped
 
-  # ...from anywhere over HTTPS: set a password (`uv run quanty password --write`), point a domain at
-  # this server, put it below, and uncomment. Caddy gets and renews the certificate itself.
+  # ...from anywhere over HTTPS: set a password (`uv run quanty password --server you@host`), point a
+  # domain at this server, put it below, and uncomment. Caddy gets and renews the certificate itself.
   # https:
   #   image: caddy:2
   #   command: caddy reverse-proxy --from dashboard.example.com --to dashboard:8765

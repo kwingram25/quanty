@@ -46,11 +46,12 @@ carry on its run:
   overwritten.
 - **Resting orders are resolved.** Live brokers read their order journal and cancel what a previous
   session left resting on the venue.
-- **Warm-up, if the experiment asks.** With `warmup_s = 14400` at the top of the experiment, a
-  session first replays the last four hours of its own recordings with orders off, so models and
-  signals that need history start warm. It takes a while for long warm-ups (the replay runs
-  through every book update), and it rebuilds what strategies learn from the markets, not what
-  they learned from their own fills.
+- **Warm-up, as the strategies need.** A strategy that declares `warmup_s` (say 4 hours of an
+  index, for its model) gets that much of the recordings replayed first, with orders off, so it
+  trades warm from the first event; index values only, unless it asks for books too, so hours
+  replay in seconds (see [Writing strategies](strategies.md#state-across-restarts)). It rebuilds
+  what strategies learn from the markets, not what they learned from their own fills. A new
+  server has no recordings yet: until it has recorded that long, those strategies can't trade.
 
 - **Positions are checked against the venue.** An armed session reads each venue's positions
   where the run holds or has traded something for real, and compares. Where the venue holds less
@@ -71,7 +72,7 @@ next reports their result, within its results window.
 - **It does not reconcile positions with the venue on start.** A restart sees its own journal
   and ledger, not orders or positions placed elsewhere.
 - **The dashboard isn't public by default.** It listens on localhost: reach it through an SSH
-  tunnel, or set a password (`quanty password --write`) and put it behind HTTPS (see
+  tunnel, or set a password (`quanty password --server you@host`) and put it behind HTTPS (see
   [Deploying](deploying.md)).
 
 ## Venue notes
