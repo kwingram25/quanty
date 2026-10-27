@@ -27,26 +27,25 @@ takes a few seconds while it starts.
 
 ## Try it
 
-With [uv](https://docs.astral.sh/uv/), nothing to install first (quanty is `quanty-py` on PyPI;
-the `quanty` there is an unrelated project):
+Install the `quanty` command with [uv](https://docs.astral.sh/uv/) (quanty is `quanty-py` on
+PyPI; the `quanty` there is an unrelated project):
 
 ```sh
-uvx --from quanty-py quanty demo --ui     # backtest four variants on synthetic markets, open the dashboard
-uvx --from quanty-py quanty demo --live   # or watch them paper trade in real time, with the controls
+uv tool install quanty-py
+quanty demo --ui          # backtest four variants on synthetic markets, open the dashboard
+quanty demo --live        # or watch them paper trade in real time, with the controls
 ```
 
-No keys, no setup. To start your own project, with a strategy skeleton, configs, API keys and the
-files to deploy it:
+No keys, no setup (and to try it without installing anything: `uvx --from quanty-py quanty demo --ui`).
+To start your own project, with a strategy skeleton, configs, API keys and the files to deploy it:
 
 ```sh
-uvx --from quanty-py quanty init my-quanty   # a few questions; --yes for the defaults
-cd my-quanty && uv run quanty list           # the project depends on quanty-py: the first run installs it
-uv run quanty server root@your-server        # a fresh Ubuntu server: Docker, firewall, swap, updates
-uv run quanty keys root@your-server --file .env.server   # the server's own API keys, once
-uv run quanty deploy root@your-server        # trader + dashboard, restarted on failure
+quanty init my-quanty                     # a few questions; --yes for the defaults
+cd my-quanty && quanty list               # in a project, quanty runs the version the project pins
+quanty server root@your-server            # a fresh Ubuntu server: Docker, firewall, swap, updates
+quanty keys root@your-server --file .env.server   # the server's own API keys, once
+quanty deploy root@your-server            # trader + dashboard, restarted on failure
 ```
-
-(`pip install quanty-py` works too, for the `quanty` command without uv; projects use uv.)
 
 [Getting started](docs/getting-started.md) goes step by step from experiments to recording real data,
 paper trading, shadow trading and live trading; [Deploying](docs/deploying.md) covers servers.

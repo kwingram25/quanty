@@ -116,7 +116,7 @@ def init(
     typer.echo(f"created {path}/: " + ", ".join(written))
     if git:
         typer.echo(project.git_init(path))
-    typer.echo(f"next: cd {path} && uv run quanty list   (then see README.md)")
+    typer.echo(f"next: cd {path} && quanty list   (then see README.md)")
 
 
 @app.command("list")
@@ -570,7 +570,7 @@ def pull(
             if got:
                 start = time.strftime("%Y-%m-%d %H:%M", time.gmtime(got[0] / 1000))
                 typer.echo(f"  {feed}: from {start} UTC, {size:.0f} MB here")
-        typer.echo(f"backtest on them: uv run quanty backtest experiments/main.toml --data {data}")
+        typer.echo(f"backtest on them: quanty backtest experiments/main.toml --data {data}")
 
 
 @app.command()

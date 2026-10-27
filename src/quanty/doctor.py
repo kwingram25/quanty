@@ -191,7 +191,7 @@ def _keys(out: list[Check], project: Path, venues: set[str]) -> None:
                 "dashboard login",
                 "fail",
                 "QUANTY_UI_PASSWORD isn't a hash",
-                "uv run quanty password --write",
+                "quanty password --write",
             )
         )
 

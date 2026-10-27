@@ -5,10 +5,9 @@ clock offset between us and the source, so watch it relative to its usual level;
 (source clock ahead of ours) are counted, not recorded in the histogram.
 """
 
+from collections import Counter
 from dataclasses import dataclass
 from typing import Literal
-
-from hdrh.histogram import HdrHistogram
 
 from quanty.core.events import Event
 from quanty.feeds.base import FeedConfig, Link, Raw
@@ -49,7 +48,7 @@ class FeedHealth:
         self._reset()
 
     def _reset(self) -> None:
-        self._hist = HdrHistogram(1, MAX_LAG_MS, 3)
+        self._lags: Counter[int] = Counter()  # lag in ms -> how many: exact, and few distinct values
         self._messages = self._events = self._errors = self._negative = 0
         self._gaps = self._max_gap = self._reconnects = 0
 
@@ -73,7 +72,7 @@ class FeedHealth:
                 if lag < 0:
                     self._negative += 1
                 else:
-                    self._hist.record_value(min(max(lag, 1), MAX_LAG_MS))
+                    self._lags[min(max(lag, 1), MAX_LAG_MS)] += 1
 
     def on_link(self, link: Link) -> None:
         if link.state == "down" and self.up:
@@ -92,14 +91,21 @@ class FeedHealth:
 
     def window(self, end: int) -> Window:
         """Close the current window at `end` and start the next one."""
-        h, n = self._hist, self._hist.get_total_count()
+        lags = sorted(self._lags.items())
+        n = sum(c for _, c in lags)
 
         def pct(p: float) -> float | None:
-            return float(h.get_value_at_percentile(p)) if n else None
+            """The smallest lag with at least p% of them at or below it."""
+            need, seen = max(1, int(p / 100 * n + 0.5)), 0
+            for lag, c in lags:
+                seen += c
+                if seen >= need:
+                    return float(lag)
+            return None
 
         w = Window(
             self.name, self._window_start, end, self._messages, self._events, self._errors, n,
-            pct(50), pct(90), pct(99), float(h.get_max_value()) if n else None, self._negative,
+            pct(50), pct(90), pct(99), float(lags[-1][0]) if n else None, self._negative,
             self._gaps, self._max_gap, self._reconnects,
         )  # fmt: skip
         self._window_start = end

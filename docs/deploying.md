@@ -3,12 +3,12 @@
 `quanty init` creates a project folder that runs the same on your laptop and on a server:
 
 ```sh
-uvx --from quanty-py quanty init my-quanty   # strategy, feeds.toml, experiments/main.toml, .env, Docker and deploy files
+quanty init my-quanty     # strategy, feeds.toml, experiments/main.toml, .env, Docker and deploy files
 ```
 
-Inside the project, `uv run quanty …` works with nothing installed first: the project's
-`pyproject.toml` depends on quanty (`quanty-py` from PyPI, the exact version pinned in `uv.lock`),
-and the first `uv run` sets up `.venv/`.
+(`uv tool install quanty-py` installs the command.) The project's `pyproject.toml` depends on
+quanty (`quanty-py` from PyPI, the exact version pinned in `uv.lock`). Inside the project, `quanty …`
+runs that version (as `uv run quanty …` does), and so does the server's image.
 
 ## Where it can run
 
@@ -35,7 +35,7 @@ Whatever the provider: **Ubuntu 24.04 LTS**, 2 GB of memory (1 GB works, with th
 your machine:
 
 ```sh
-uv run quanty server root@203.0.113.7 --tailscale   # --tailscale: the dashboard on your tailnet
+quanty server root@203.0.113.7 --tailscale   # --tailscale: the dashboard on your tailnet
 ```
 
 It installs Docker (from Docker's signed apt repository), turns on the firewall with only SSH open,
@@ -91,8 +91,8 @@ Hillsboro.
 From the project folder on your machine, the server's keys first, then the code:
 
 ```sh
-uv run quanty keys root@203.0.113.7 --file .env.server   # once (see "API keys on a server")
-uv run quanty deploy root@203.0.113.7          # or ubuntu@… on AWS, or a name from ~/.ssh/config
+quanty keys root@203.0.113.7 --file .env.server   # once (see "API keys on a server")
+quanty deploy root@203.0.113.7          # or ubuntu@… on AWS, or a name from ~/.ssh/config
 ```
 
 `quanty deploy` copies the project to the server (never `.env`, `.env.*` or `data/`; it stops if the
@@ -131,7 +131,7 @@ from anywhere instead, see [below](#reaching-the-dashboard-from-anywhere).
 
 The Dockerfile installs the quanty `pyproject.toml` asks for from PyPI (`quanty-py`), or the wheel
 in `vendor/` for a project that vendors one (`quanty init` does when run from a quanty source
-checkout). To move to a newer quanty: `uv run quanty upgrade` in the project, commit, and deploy
+checkout). To move to a newer quanty: `quanty upgrade` in the project, commit, and deploy
 again (for a vendored project, from the checkout: `uv run --project ~/code/quanty quanty upgrade`).
 
 ### Editing strategies on a server
@@ -145,7 +145,7 @@ says so itself), because the next deploy replaces those files.
 To bring the changes home:
 
 ```sh
-uv run quanty pull root@203.0.113.7     # writes them into experiments/*.toml here; review and commit
+quanty pull root@203.0.113.7     # writes them into experiments/*.toml here; review and commit
 ```
 
 `quanty deploy` does the same first, so a deploy never undoes what you changed on the dashboard
@@ -160,7 +160,7 @@ them without touching your laptop's or another server's), write them in `.env.se
 project, in the same form as `.env` (`git` ignores both), and send them once:
 
 ```sh
-uv run quanty keys root@203.0.113.7 --file .env.server
+quanty keys root@203.0.113.7 --file .env.server
 ```
 
 That writes them over SSH as the server's `.env`, owner-only; it prints the names it set, never the
@@ -198,7 +198,7 @@ error message is the authority.
 
 **Privately, from your own devices (a phone too): Tailscale.** It joins the server and your devices
 in a private network; nothing opens to the internet, and there's no domain or certificate to run. On
-the server, `uv run quanty server root@203.0.113.7 --tailscale` sets it up (step 1). By hand
+the server, `quanty server root@203.0.113.7 --tailscale` sets it up (step 1). By hand
 (Ubuntu): install it from Tailscale's repository (https://tailscale.com/download/linux), then:
 
 ```sh
@@ -217,7 +217,7 @@ The dashboard has an optional login. Set a password (only a salted hash is store
 keys file, and send it:
 
 ```sh
-uv run quanty password --server root@203.0.113.7   # saves it in .env.server and sends that file
+quanty password --server root@203.0.113.7   # saves it in .env.server and sends that file
 ```
 
 With a password set, every page, API call and live update needs signing in first; sessions last 7
@@ -252,7 +252,7 @@ WantedBy=multi-user.target
 
 and the same with `ExecStart=/srv/my-quanty/.venv/bin/quanty ui --data data` for
 `quanty-ui.service`. Then `systemctl enable --now quanty-trader quanty-ui`. After copying a change
-(or `uv run quanty upgrade` at home), `uv sync --frozen` again and `systemctl restart quanty-trader`.
+(or `quanty upgrade` at home), `uv sync --frozen` again and `systemctl restart quanty-trader`.
 
 ## Before going live
 
@@ -276,7 +276,7 @@ only runs what you deploy. `quanty mcp` gives it the server's dashboard as tools
 tunnel it opens itself:
 
 ```sh
-claude mcp add quanty-server -- uv run quanty mcp --ssh root@your-server
+claude mcp add quanty-server -- quanty mcp --ssh root@your-server
 ```
 
 Then "how are the strategies doing?", "rank the variants", "try fav_90 with min_conf 0.85 to 0.95

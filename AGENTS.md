@@ -34,7 +34,7 @@ change to `web/`.
 | `src/quanty/version.py` | the code a run ran (git commit, or what `quanty deploy` sent; a hash per strategy file) |
 | `src/quanty/mcp.py` | `quanty mcp`: the dashboard's API as MCP tools for an AI agent |
 | `src/quanty/ui/` | FastAPI back end (`api.py`, `queries.py`, `auth.py`); `web/` is its React front end |
-| `src/quanty/cli.py` | the `quanty` command; `init.py`, `deploy.py`, `doctor.py` behind its subcommands; `engine_tools.py` (paper twins in a running session) |
+| `src/quanty/cli.py` | the `quanty` command (entered through `launch.py`, which hands a project's commands to the project's own quanty); `init.py`, `deploy.py`, `doctor.py` behind its subcommands; `engine_tools.py` (paper twins in a running session) |
 | `src/quanty/strategies/` | example strategies, and `_template.py`, the template `quanty init` starts a strategy from |
 | `src/quanty/db/migrations/` | Alembic migrations for the ledger |
 

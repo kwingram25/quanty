@@ -48,8 +48,8 @@ yanked on PyPI), never by re-uploading.
 Publishing makes the source public (a PyPI package ships it), the same step as making this
 repository public. Before that:
 
-- **The docs install from PyPI** (`uvx --from quanty-py quanty ...`), so until the first release
-  their install commands fail; from a checkout, `uv run quanty ...` stands in for them. Image links
+- **The docs install from PyPI** (`uv tool install quanty-py`), so until the first release
+  their install commands fail; from a checkout, `uv run quanty ...` stands in for `quanty ...`. Image links
   in the README become absolute
   (`https://raw.githubusercontent.com/kwingram25/quanty/main/docs/images/...`), since PyPI doesn't
   serve the repository's files (while the repository is private, those links don't load).

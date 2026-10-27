@@ -35,6 +35,14 @@ def test_window_stats_and_reset() -> None:
     assert (nxt.start, nxt.messages, nxt.lag_p50, nxt.reconnects) == (3000, 0, None, 0)
 
 
+def test_lag_percentiles() -> None:
+    h = FeedHealth("f", FeedConfig(kind="x"), start=0)
+    for lag in [*range(100, 0, -1), 0]:  # 1..100 ms in any order, and a zero (counted as 1 ms)
+        h.on_raw(Raw("f", 10_000, "m"), [trade(10_000, 10_000 - lag)])
+    w = h.window(20_000)
+    assert (w.lag_count, w.lag_p50, w.lag_p90, w.lag_p99, w.lag_max) == (101, 50, 90, 99, 100)
+
+
 def test_no_cadence_never_stale() -> None:
     h = FeedHealth("f", FeedConfig(kind="x", expect_every_s=None), start=0)
     h.on_raw(Raw("f", 0, "m"), [])

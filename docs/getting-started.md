@@ -4,17 +4,18 @@ From nothing installed to a strategy trading live, one step at a time. Each step
 stop wherever you like.
 
 **Requirements:** [uv](https://docs.astral.sh/uv/) (it fetches Python 3.12 if you don't have it).
-quanty is `quanty-py` on PyPI; the `quanty` there is an unrelated project. Recording and trading on
+Recording and trading on
 Kalshi or Polymarket US need API keys; everything up to step 4 doesn't.
 
 ## 1. See it work
 
 ```sh
-uvx --from quanty-py quanty demo --ui
+uv tool install quanty-py      # the quanty command (quanty-py on PyPI; the `quanty` there is another project)
+quanty demo --ui
 ```
 
-`uvx` runs quanty without installing it. To type just `quanty` instead, `uv tool install quanty-py`
-(`uv tool upgrade quanty-py` later); the commands in this step work either way.
+`uv tool upgrade quanty-py` updates it later. To try quanty without installing anything,
+`uvx --from quanty-py quanty demo --ui` runs the same thing.
 
 This backtests four variants of the example strategy on 6 hours of synthetic 5-minute up/down
 markets (`fav_90_stop` is `fav_90` with a stop loss, to compare), prints a summary, and opens the dashboard on the result. The synthetic markets are
@@ -29,8 +30,8 @@ are still synthetic. "New day" starts over on a freshly generated day; the heade
 `quanty demo --live --seed N` replays it.
 
 ```sh
-uvx --from quanty-py quanty demo --hours 24 --seed 3 --param min_conf=0.97   # one variant, your parameters
-uvx --from quanty-py quanty params example_favorite                          # what you can change
+quanty demo --hours 24 --seed 3 --param min_conf=0.97   # one variant, your parameters
+quanty params example_favorite                          # what you can change
 ```
 
 ## 2. Start your project
@@ -38,17 +39,20 @@ uvx --from quanty-py quanty params example_favorite                          # w
 Your strategies, configs and keys live in a project of your own:
 
 ```sh
-uvx --from quanty-py quanty init ~/code/my-quanty   # a few questions (strategy name, venues, keys); --yes for defaults
+quanty init ~/code/my-quanty     # a few questions (strategy name, venues, keys); --yes for defaults
 cd ~/code/my-quanty
 ```
 
 It holds `strategies/<name>.py` (a skeleton aimed at your first series), `experiments/main.toml`,
-`feeds.toml`, `.env` (your keys, readable only by you) and the files to deploy it. `uv run quanty`
-works in it with nothing installed first, and every command below runs there. It's a git
+`feeds.toml`, `.env` (your keys, readable only by you) and the files to deploy it. Every command
+below runs there. It's a git
 repository with a first commit (`.env` and `data/` are ignored): keep it private and push it
 somewhere backed up, since your strategies are your edge. quanty itself is just a dependency of it:
 its `pyproject.toml` asks for `quanty-py` within the current release line (`>=0.1.0,<0.2`), and
-`uv.lock` pins the exact version, the same on your machine and on a server.
+`uv.lock` pins the exact version, the same on your machine and on a server. In the project,
+`quanty` runs that version, whatever version of the command you installed: it hands the command to
+the project's own (`uv run quanty`, which also works without the command installed). The first run
+sets up the project's `.venv/`.
 
 Every run records the code it ran with each strategy: the project's commit (marked when files
 differed from it) and a hash of the strategy's file, which changes with any edit. The dashboard
@@ -60,13 +64,13 @@ An experiment is a TOML file: which strategies, with which parameters, on which 
 which risk limits.
 
 ```sh
-uv run quanty backtest experiments/main.toml --ledger data/backtest/first.sqlite
-uv run quanty ui --data data           # the run is now on the dashboard
+quanty backtest experiments/main.toml --ledger data/backtest/first.sqlite
+quanty ui --data data           # the run is now on the dashboard
 ```
 
 Without `--data`, a backtest runs on built-in synthetic markets: 5-minute up/down windows. A
 strategy written for a venue's series doesn't trade there (the backtest says so);
-`uv run quanty demo --strategy <name>` points it at the synthetic markets to try its logic, and
+`quanty demo --strategy <name>` points it at the synthetic markets to try its logic, and
 step 5 backtests on real recordings.
 
 ```toml
@@ -102,12 +106,12 @@ Your strategy is `strategies/<name>.py` in the project (fill in the TODOs; more 
 files there). See [Writing strategies](strategies.md).
 
 ```sh
-uv run quanty list                      # it's found (an import error shows here)
-uv run quanty params <name>             # and its params
-uv run quanty demo --strategy <name>    # a quick run on synthetic markets
+quanty list                      # it's found (an import error shows here)
+quanty params <name>             # and its params
+quanty demo --strategy <name>    # a quick run on synthetic markets
 ```
 
-When quanty itself updates, `uv run quanty upgrade` in the project moves it to the newest release
+When quanty itself updates, `quanty upgrade` in the project moves it to the newest release
 its `pyproject.toml` allows (a new minor version, which may change things, is yours to take: raise
 the bound first), updates the lock, and refreshes the generated files that still start with their
 "Generated by quanty init" line (Dockerfile, compose.yaml, README.md,
@@ -132,15 +136,15 @@ strategy_paths = ["~/code/my-strategies/strategies"]
 Public crypto feeds need no keys:
 
 ```sh
-uv run quanty record --feed coinbase --feed binance --data data      # Ctrl-C to stop
-uv run quanty feeds health --data data
+quanty record --feed coinbase --feed binance --data data      # Ctrl-C to stop
+quanty feeds health --data data
 ```
 
 For Kalshi and Polymarket US, your keys are in the project's `.env` (`quanty init` asked for them;
-`uv run quanty doctor` checks them) and its `feeds.toml` chooses the series:
+`quanty doctor` checks them) and its `feeds.toml` chooses the series:
 
 ```sh
-uv run quanty record --config feeds.toml --data data
+quanty record --config feeds.toml --data data
 ```
 
 A Kalshi series that lists a wide ladder of strikes each hour (KXBTCD, BTC above $X, has dozens)
@@ -165,14 +169,14 @@ timestamps. Replays parse the same bytes in the same order, so a backtest on rec
 a live run would have seen:
 
 ```sh
-uv run quanty replay --data data --show 5
-uv run quanty backtest experiments/main.toml --data data --start "2026-10-21 00:00" --end "2026-10-22 00:00"
+quanty replay --data data --show 5
+quanty backtest experiments/main.toml --data data --start "2026-10-21 00:00" --end "2026-10-22 00:00"
 ```
 
 ## 6. Paper trade
 
 ```sh
-uv run quanty paper experiments/main.toml --feeds feeds.toml --data data --ui
+quanty paper experiments/main.toml --feeds feeds.toml --data data --ui
 ```
 
 Strategies run in real time on live feeds; fills are simulated by the same broker model as
@@ -204,7 +208,7 @@ max_notional = 10     # largest single order, $
 (`quanty init` asks for them.) Then start the session armed, with everything still on paper:
 
 ```sh
-uv run quanty live experiments/main.toml --feeds feeds.toml --data data --arm --ui
+quanty live experiments/main.toml --feeds feeds.toml --data data --arm --ui
 ```
 
 An armed session only trades real money for strategies you move onto `live`, and moving them
@@ -221,7 +225,7 @@ Go live stays off, with the reason, until the caps are set (edit them, then **Re
 experiment**: caps apply without a restart) and in a session started without `--arm`
 (`quanty paper` can never place a real order). Each switch is written into the experiment file; on a
 server it's kept with the run instead, and `quanty pull` brings it home. From a terminal on the same
-machine, `uv run quanty promote my_strategy --to live --now` does the same as Go live, and without
+machine, `quanty promote my_strategy --to live --now` does the same as Go live, and without
 `--now` it edits the file for the next session (asking for the caps if they aren't set).
 
 **Many variants.** A `grid` in an `[[instances]]` entry makes one instance per combination:
@@ -233,7 +237,7 @@ strategy = "example_favorite"
 grid = { min_conf = [0.9, 0.95, 0.97], enter_last_s = [30, 60] }   # six instances
 ```
 
-Add, change or remove variants in the file while a session runs, then `uv run quanty reload` (or
+Add, change or remove variants in the file while a session runs, then `quanty reload` (or
 **Reload experiment** on the dashboard): new instances start, removed ones retire (no new entries;
 what they hold finishes), changed params and brokers apply. New brokers, limits and feeds, and
 edited strategy code, take a restart. The **Variants** tab ranks every strategy for promotion by what

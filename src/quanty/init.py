@@ -315,7 +315,7 @@ def _env(a: Answers) -> str:
     lines = [
         "# API keys for the venues this project trades. Never commit this file.",
         "",
-        "# Dashboard login (off when unset): `uv run quanty password --write` sets it",
+        "# Dashboard login (off when unset): `quanty password --write` sets it",
         "# QUANTY_UI_PASSWORD=",
         "",
     ]
@@ -392,7 +392,7 @@ def _experiment(a: Answers) -> str:
     else:  # commented out: set both to go live
         qty, notional = "# max_qty = 5", "# max_notional = 5"
     caps = f"{qty:<22}# largest single order, contracts\n{notional:<22}# largest single order, $"
-    return f"""# What runs: `uv run quanty live experiments/main.toml --feeds feeds.toml --arm`
+    return f"""# What runs: `quanty live experiments/main.toml --feeds feeds.toml --arm`
 # (or `quanty paper`, which never places a real order). Every experiment has three brokers:
 # sim simulates fills (paper), shadow also checks every order with the venue without placing it,
 # live places real orders. Strategies start where `broker =` says (sim if it's left out); the
@@ -615,26 +615,29 @@ A quanty project: your strategy, its configuration, and what's needed to deploy 
 
 ## Next steps
 
-1. **Write the strategy** in `strategies/{a.strategy}.py` (the TODOs). `uv run quanty list` should show it
-   (the first `uv run` sets up everything it needs in `.venv/`; nothing to install beforehand).
-2. **Check your keys** in `.env` with `uv run quanty doctor` (config, keys, clock, each venue; read-only),
+Commands here are `quanty ...`: with the command installed (`uv tool install quanty-py`), it runs
+this project's own quanty, the version `uv.lock` pins, as a server does. Without it,
+`quanty ...` is the same. The first run sets up `.venv/`.
+
+1. **Write the strategy** in `strategies/{a.strategy}.py` (the TODOs). `quanty list` should show it.
+2. **Check your keys** in `.env` with `quanty doctor` (config, keys, clock, each venue; read-only),
    then record some data and look at it:
-   `uv run quanty record --config feeds.toml --data data` (Ctrl-C to stop),
-   then `uv run quanty ui --data data`.
-3. **Backtest** on what you recorded: `uv run quanty backtest experiments/main.toml --data data`.
+   `quanty record --config feeds.toml --data data` (Ctrl-C to stop),
+   then `quanty ui --data data`.
+3. **Backtest** on what you recorded: `quanty backtest experiments/main.toml --data data`.
 4. **Paper trade** live markets with simulated fills, with the dashboard alongside:
-   `uv run quanty paper experiments/main.toml --feeds feeds.toml --data data --ui` (it records too,
+   `quanty paper experiments/main.toml --feeds feeds.toml --data data --ui` (it records too,
    or leaves that to a recorder still running from step 2).
    Many variants: a `grid` in an `[[instances]]` entry makes one per combination
-   (`grid = {{ min_conf = [0.9, 0.95] }}`); after editing the file, `uv run quanty reload` starts and
+   (`grid = {{ min_conf = [0.9, 0.95] }}`); after editing the file, `quanty reload` starts and
    retires them without a restart. The dashboard's **Variants** tab ranks them for promotion, and
    backtests new values of a strategy's params on the recent recordings.
 5. **Shadow, then live**: set the live broker's caps in `experiments/main.toml` (`[brokers.live]`
    `max_qty` and `max_notional`, the largest single order), then run the session armed, everything
-   still on paper: `uv run quanty live experiments/main.toml --feeds feeds.toml --data data --arm --ui`.
+   still on paper: `quanty live experiments/main.toml --feeds feeds.toml --data data --arm --ui`.
    On the dashboard, a strategy's **Shadow** has every order checked by the venue, **Go live** places
    real orders from its next market (with a paper twin beside it, for **Compare**), and **Back to
-   paper** steps back, all without a restart. `uv run quanty promote <id> --to live --now` does it from
+   paper** steps back, all without a restart. `quanty promote <id> --to live --now` does it from
    a terminal.
 
 ## Deploy
@@ -647,9 +650,9 @@ firewall and alerts with OpenTofu (instructions at its top). Give the server API
 (made for it at each venue, so they can be revoked alone) in `.env.server`, written like `.env`,
 then:
 
-    uv run quanty server root@your-server --tailscale       # once; safe to run again
-    uv run quanty keys root@your-server --file .env.server   # once; again to rotate them
-    uv run quanty deploy root@your-server
+    quanty server root@your-server --tailscale       # once; safe to run again
+    quanty keys root@your-server --file .env.server   # once; again to rotate them
+    quanty deploy root@your-server
 
 Keys travel apart from code: `quanty deploy` never sends `.env` or `.env.*`, and won't start a
 server that has no keys. It copies this folder (never `data/`), checks it with `quanty doctor` on the
@@ -662,14 +665,14 @@ http://127.0.0.1:8765.
 
 This folder stays the source of truth. Dashboard changes on the server (param edits, going live or
 back to paper) are kept there with the run, and `quanty deploy` first writes them into these files;
-`uv run quanty pull root@your-server` does that on its own. Review and commit them.
+`quanty pull root@your-server` does that on its own. Review and commit them.
 
 On Fly.io, `fly.toml` runs the same project on one machine with a volume for `data/`. Managed container
 services that wipe the disk on redeploy (App Platform, ECS/Fargate, Cloud Run, Render) don't fit:
 quanty keeps its state in `data/`. The full guide, per provider: {REPO}/blob/main/docs/deploying.md
 
-The image installs quanty from `vendor/` if this project vendors a wheel, otherwise the version
-`pyproject.toml` asks for from PyPI (`quanty-py`). `uv run quanty upgrade` moves to a newer one.
+The image installs what `uv.lock` pins (quanty from PyPI, `quanty-py`, or the wheel in `vendor/` if
+this project vendors one). `quanty upgrade` moves to a newer quanty: commit, then deploy.
 """
 
 
@@ -721,7 +724,7 @@ services:
     ports: ["127.0.0.1:8765:8765"]   # the server's localhost only: reach it with an SSH tunnel, or...
     restart: unless-stopped
 
-  # ...from anywhere over HTTPS: set a password (`uv run quanty password --server you@host`), point a
+  # ...from anywhere over HTTPS: set a password (`quanty password --server you@host`), point a
   # domain at this server, put it below, and uncomment. Caddy gets and renews the certificate itself.
   # https:
   #   image: caddy:2
@@ -740,7 +743,7 @@ CLOUD_INIT = """#cloud-config
 # It installs Docker and lets the login user run it, turns on the firewall with only SSH open, adds
 # 2 GB of swap (the image build needs it on a 1 GB server), and keeps security updates automatic.
 # Ports Docker publishes skip the firewall: compose.yaml publishes the dashboard on 127.0.0.1 only
-# (and 80/443 if you enable its https service). Then, from the project: uv run quanty deploy you@server
+# (and 80/443 if you enable its https service). Then, from the project: quanty deploy you@server
 package_update: true
 packages: [ca-certificates, curl, rsync, ufw, unattended-upgrades]
 runcmd:
@@ -786,7 +789,7 @@ DIGITALOCEAN = """# DigitalOcean with OpenTofu (or Terraform): a Droplet for thi
 # in DIGITALOCEAN_TOKEN:
 #   cd deploy && tofu init
 #   tofu apply -var ssh_key="the name of your SSH key in DigitalOcean" -var alert_email=you@example.com
-# It prints the server's address; then uv run quanty server, keys and deploy as usual (README.md).
+# It prints the server's address; then quanty server, keys and deploy as usual (README.md).
 # Variables can also go in deploy/terraform.tfvars (`region = "sfo3"`, ...). Its state, which says
 # what it made, is kept in deploy/: keep it (it isn't committed or deployed) to change or remove them.
 

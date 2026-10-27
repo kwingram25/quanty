@@ -327,33 +327,6 @@ wheels = [
 ]
 
 [[package]]
-name = "hdrhistogram"
-version = "0.10.8"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "pbr" },
-    { name = "setuptools" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/c9/2c/d4aa1fe047867f9412068ff3070976d3a4749bcb01774fb00c57507e1804/hdrhistogram-0.10.8.tar.gz", hash = "sha256:88986eea184d1330c53fca98adf58799339a23ac27f488887b0423c7ce569c34", size = 63676, upload-time = "2026-10-12T19:19:47.827Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/6b/31/c296b63d5a4a557240a20a41f53e97690a070aa5c8de97f76ab8e9e3a85d/hdrhistogram-0.10.8-cp312-cp312-macosx_11_0_arm64.whl", hash = "sha256:3d5fa523be49773ca0a810db0f87cc449cbed83a54d3b1d1f826b01ed11cb5de", size = 37119, upload-time = "2026-10-12T19:19:30.638Z" },
-    { url = "https://files.pythonhosted.org/packages/92/91/80a831b0435999bfda7b3812ba3ec3714504af03988d05a4d9201a40b173/hdrhistogram-0.10.8-cp312-cp312-manylinux1_x86_64.manylinux_2_28_x86_64.manylinux_2_5_x86_64.whl", hash = "sha256:f9d6433aa4844e937e49394e4a0dc4ffbb564a9847a6d10b4a77a5d41bc9eb6b", size = 47839, upload-time = "2026-10-12T19:19:31.685Z" },
-    { url = "https://files.pythonhosted.org/packages/0b/86/32293a062e96ce404ea99c3ee47c9351dbbdbf6e7af8ea8baf344b63a2aa/hdrhistogram-0.10.8-cp312-cp312-musllinux_1_2_x86_64.whl", hash = "sha256:2320d0347baa82ef177d9cfb0edc8b914b710339ede62b8630e1e37ce65dbdd5", size = 47635, upload-time = "2026-10-12T19:19:33.013Z" },
-    { url = "https://files.pythonhosted.org/packages/49/92/ec370bfebc100e0d77a0c3418b16b19f07351eca2acef44a59efdb7016ca/hdrhistogram-0.10.8-cp312-cp312-win32.whl", hash = "sha256:9858bbc42e218f60888b8cb50bf304ab26c5a684c3f8fe5100c6ff8573ab52d4", size = 39841, upload-time = "2026-10-12T19:19:34.331Z" },
-    { url = "https://files.pythonhosted.org/packages/94/c6/27462c3168e8e79e1dc8be8ce87f8f974c5332443f6f7dd9634d75216609/hdrhistogram-0.10.8-cp312-cp312-win_amd64.whl", hash = "sha256:dbf03e45b68039015cfd0f62a3e7c18de614fa07d5373520ce461a384508d2c0", size = 40294, upload-time = "2026-10-12T19:19:35.432Z" },
-    { url = "https://files.pythonhosted.org/packages/1e/4b/8c62dc7050b5ff1bd3986b9fa56db2103d1c640413269af8ae7e40c7b0f4/hdrhistogram-0.10.8-cp313-cp313-macosx_11_0_arm64.whl", hash = "sha256:5c92d55b1d9eac51e10809a7d9023036a741f928eed5516cc90e428633c4909d", size = 37110, upload-time = "2026-10-12T19:19:36.529Z" },
-    { url = "https://files.pythonhosted.org/packages/2d/bb/59f198685e77ef630048d4346680660fa8baa88da97a938049b3976aeefd/hdrhistogram-0.10.8-cp313-cp313-manylinux1_x86_64.manylinux_2_28_x86_64.manylinux_2_5_x86_64.whl", hash = "sha256:687abd745bb23a7cc94b4936247742b520029e22dc41376305fe16a158723e57", size = 47860, upload-time = "2026-10-12T19:19:37.824Z" },
-    { url = "https://files.pythonhosted.org/packages/ff/65/db6704c48a4378b4e71421c3abb3da55534c348b228055f4e9a3a8925a91/hdrhistogram-0.10.8-cp313-cp313-musllinux_1_2_x86_64.whl", hash = "sha256:51df89b8b27950bdd0f83833a44718cdcea178d2904b22eed4cf485df63c1e51", size = 47654, upload-time = "2026-10-12T19:19:39.106Z" },
-    { url = "https://files.pythonhosted.org/packages/77/64/b0f70721b9a1fe3d42da936cb401a4825fb37cb435312158eb771afde6ce/hdrhistogram-0.10.8-cp313-cp313-win32.whl", hash = "sha256:107c36bb0ab43adedf93585ec438ce513598f159c29cf203f49f66f33e4072b6", size = 39838, upload-time = "2026-10-12T19:19:40.194Z" },
-    { url = "https://files.pythonhosted.org/packages/5c/6a/605d47ca67d1cd0bebdfb6014dc84112b75d16fd5246f27f49d6470b956a/hdrhistogram-0.10.8-cp313-cp313-win_amd64.whl", hash = "sha256:6c1a1fd25bed4de5f698064ee472cd0acc1f0e06615837d8041fc6a0cbaa551e", size = 40281, upload-time = "2026-10-12T19:19:41.257Z" },
-    { url = "https://files.pythonhosted.org/packages/c4/bf/5465456853e0912932999aafc55aac49983558502170e761672807de7914/hdrhistogram-0.10.8-cp314-cp314-macosx_11_0_arm64.whl", hash = "sha256:2231b29ae8ef07fd71f48946a67c76d49985126f7ee023bb6de628fb6e526ec0", size = 37114, upload-time = "2026-10-12T19:19:42.333Z" },
-    { url = "https://files.pythonhosted.org/packages/a5/1e/8e8c6f2c7d6337924e41a85b86a4209ee07d7826cf9d4ea810ea7a7ba671/hdrhistogram-0.10.8-cp314-cp314-manylinux1_x86_64.manylinux_2_28_x86_64.manylinux_2_5_x86_64.whl", hash = "sha256:1e1f1d435c572fbe41055929619b3f2f47bee5634024e351892743ddbd3d5d8c", size = 47900, upload-time = "2026-10-12T19:19:43.392Z" },
-    { url = "https://files.pythonhosted.org/packages/95/ae/ba88dfbb18095fe578c39d346cded93a8b4efa6240e19ed6343224ff66ff/hdrhistogram-0.10.8-cp314-cp314-musllinux_1_2_x86_64.whl", hash = "sha256:346bbc534dec7ec01fa1bf9c620602ea70e03c669a1411c65f54a8be692d4b80", size = 47699, upload-time = "2026-10-12T19:19:44.558Z" },
-    { url = "https://files.pythonhosted.org/packages/89/b3/161740e882b0803cfa5ec8f6f6357b8cf277d527c203b72b2af247199bf9/hdrhistogram-0.10.8-cp314-cp314-win32.whl", hash = "sha256:82de3b2f0e4822386ec03380648a93cfd5e859094b9aee77171d370ee9930fda", size = 40028, upload-time = "2026-10-12T19:19:45.685Z" },
-    { url = "https://files.pythonhosted.org/packages/7d/ee/584f6aa4461c1d17a02dff373fa7d2bd89321107c6b171e5c7c15c006038/hdrhistogram-0.10.8-cp314-cp314-win_amd64.whl", hash = "sha256:b2e29c7d870027a15b5e9aa0a845e3a6cb3668d00fa3b19a9a6e8f94aab5a582", size = 40507, upload-time = "2026-10-12T19:19:46.71Z" },
-]
-
-[[package]]
 name = "httpcore"
 version = "1.0.9"
 source = { registry = "https://pypi.org/simple" }
@@ -985,18 +958,6 @@ wheels = [
 ]
 
 [[package]]
-name = "pbr"
-version = "7.1.3"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "setuptools" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/6b/8d/ce438c28c7958e33184e8ac851ea2225b47a41e5e9e708fa3bddba631135/pbr-7.1.3.tar.gz", hash = "sha256:9a4a85b84e906337708009af0b5f5cdabeeb72d4dc213c9e97974da54fd9acc5", size = 140100, upload-time = "2026-10-07T10:38:15.526Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/bb/a2/79a926b7ab54b247c3419bfa00cfbeb78ad495d21c6d787c978c6261623d/pbr-7.1.3-py2.py3-none-any.whl", hash = "sha256:6583e878a1d97cb135fdc509811f31b9235905cde8d4dacd3dbadf9efc45d745", size = 136717, upload-time = "2026-10-07T10:38:14.069Z" },
-]
-
-[[package]]
 name = "pluggy"
 version = "1.7.0"
 source = { registry = "https://pypi.org/simple" }
@@ -1233,7 +1194,6 @@ dependencies = [
     { name = "alembic" },
     { name = "cryptography" },
     { name = "fastapi" },
-    { name = "hdrhistogram" },
     { name = "httpx" },
     { name = "jinja2" },
     { name = "mcp" },
@@ -1264,7 +1224,6 @@ requires-dist = [
     { name = "alembic", specifier = ">=1.13" },
     { name = "cryptography", specifier = ">=43" },
     { name = "fastapi", specifier = ">=0.115" },
-    { name = "hdrhistogram", specifier = ">=0.10" },
     { name = "httpx", specifier = ">=0.27" },
     { name = "jinja2", specifier = ">=3.1" },
     { name = "mcp", specifier = ">=2.3" },
@@ -1448,15 +1407,6 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/2c/d4/c3b74e1b4808438ea7f14bb914478025e2d51261f60774a54a0fa222ec46/ruff-0.17.2-py3-none-win32.whl", hash = "sha256:6bce7d1f5165701ae18f5df85c65afe78cddfa6c5fb4b9bdb0014d60388f3edd", size = 9870537, upload-time = "2026-10-22T18:37:52.486Z" },
     { url = "https://files.pythonhosted.org/packages/1c/9a/c7da96c2c96d20704cf9027f7a5121da272a8c05f1d1531ba949e3b3df04/ruff-0.17.2-py3-none-win_amd64.whl", hash = "sha256:1b59d447f197bef9ef48a22ba1a6016137753c6099e9bac9c36eb566e422424c", size = 10282826, upload-time = "2026-10-22T18:37:55.2Z" },
     { url = "https://files.pythonhosted.org/packages/81/60/a3604c79cb02777b6cb84da894104021986f06c4bc41375102cc95049a32/ruff-0.17.2-py3-none-win_arm64.whl", hash = "sha256:195ad918027f817c119310ca89a42d347887dfc28934aaa869325e9c5dc9d962", size = 9827036, upload-time = "2026-10-22T18:37:58.031Z" },
-]
-
-[[package]]
-name = "setuptools"
-version = "84.2.1"
-source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/70/b3/c19426f783614d625699a4b247faf628ea9ab1db228674491767b417f9e1/setuptools-84.2.1.tar.gz", hash = "sha256:3ff8b3b5492a0aa66960f4419365a86b84e013070d4313e4d4a6894f5d64d6bc", size = 1230289, upload-time = "2026-10-20T19:01:37.742Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/ef/55/6dc6d6bb953bdfc52519a0059592c52b6e3b8ad51cf8256dffceb55b0610/setuptools-84.2.1-py3-none-any.whl", hash = "sha256:ca140b45d5325a9478f880e351484f62fef15f336462e449ca0c03c873d589c2", size = 876263, upload-time = "2026-10-20T19:01:35.678Z" },
 ]
 
 [[package]]
