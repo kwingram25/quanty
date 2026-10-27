@@ -179,3 +179,14 @@ def test_keys_go_to_the_server_once_apart_from_the_code(
     empty = tmp_path / "empty.env"
     empty.write_text("NOTHING=1\n")
     assert CliRunner().invoke(cli.app, ["keys", "me@srv", "--file", str(empty)]).exit_code == 2
+
+
+def test_keys_refuse_a_dollar_compose_would_substitute(tmp_path: Path) -> None:
+    from quanty import deploy
+
+    f = tmp_path / ".env.server"
+    f.write_text("KALSHI_KEY_ID=abc\nQUANTY_UI_PASSWORD=scrypt$16384$8$1$salt$digest\n")
+    with pytest.raises(ValueError, match="single quotes"):
+        deploy.check_keys(f)
+    f.write_text("KALSHI_KEY_ID=abc\nQUANTY_UI_PASSWORD='scrypt$16384$8$1$salt$digest'\n")
+    assert deploy.check_keys(f) == ["KALSHI_KEY_ID", "QUANTY_UI_PASSWORD"]

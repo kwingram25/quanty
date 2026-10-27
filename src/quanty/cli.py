@@ -704,7 +704,8 @@ def password(
     pw = typer.prompt("Dashboard password", hide_input=True, confirmation_prompt=True)
     if len(pw) < 8:
         raise _fail(ValueError("use at least 8 characters"))
-    line = f"QUANTY_UI_PASSWORD={hash_password(pw)}"
+    # single-quoted: Docker Compose substitutes $NAME in .env values, and the hash is full of `$`
+    line = f"QUANTY_UI_PASSWORD='{hash_password(pw)}'"
     if not write:
         typer.echo(line)
         return

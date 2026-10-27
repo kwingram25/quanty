@@ -76,6 +76,8 @@ def test_password_command_writes_env(tmp_path: Path, monkeypatch: pytest.MonkeyP
         lines[0] == "KALSHI_KEY_ID=abc"
         and len([x for x in lines if x.startswith("QUANTY_UI_PASSWORD=")]) == 1
     )
-    assert verify_password("long enough pw", lines[-1].split("=", 1)[1])
+    value = lines[-1].split("=", 1)[1]
+    assert value.startswith("'") and value.endswith("'")  # quoted: Compose would substitute its `$`s
+    assert verify_password("long enough pw", value.strip("'"))
     short = CliRunner().invoke(cli.app, ["password"], input="short\nshort\n")
     assert short.exit_code == 2

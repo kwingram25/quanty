@@ -68,6 +68,11 @@ def check_keys(path: Path) -> list[str]:
         k, sep, v = line.partition("=")
         if sep and not k.lstrip().startswith("#") and k.strip() and v.strip():
             names.append(k.strip())
+            if "$" in v and not (v.strip().startswith("'") and v.strip().endswith("'")):
+                raise ValueError(
+                    f"{path}: {k.strip()} contains `$`, which Docker Compose would substitute as a variable "
+                    "(a QUANTY_UI_PASSWORD hash ends up blank): put the value in single quotes"
+                )
     if not set(names) & set(KEY_NAMES):
         raise ValueError(f"{path} sets none of {', '.join(KEY_NAMES)}")
     return names
