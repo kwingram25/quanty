@@ -165,7 +165,8 @@ uv run quanty paper experiments/main.toml --feeds feeds.toml --data data --ui
 
 Strategies run in real time on live feeds; fills are simulated by the same broker model as
 backtests. Recording continues alongside, and the ledger is written as it goes
-(`data/session/<experiment>.sqlite`). The dashboard shows it live and adds controls (halt, resume,
+(`data/session/<experiment>.sqlite`). One process records a feed into a data folder at a time: stop
+a `quanty record` from step 5 first, or keep it running and add `--no-record` here. The dashboard shows it live and adds controls (halt, resume,
 kill switch), and a strategy's params, such as its size, can be edited from its details without a
 restart. Its **Health** page runs `quanty doctor`'s checks. To do the same from a conversation with
 an AI agent, `quanty mcp` gives Claude Code the dashboard's tools (a project from `quanty init` has
