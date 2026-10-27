@@ -57,6 +57,8 @@ repository public. Before that:
   serve the repository's files (while the repository is private, those links don't load).
 - **The git history**, reviewed once more: it was started fresh, and gitleaks and the private-name
   guard run on every commit, but read it before the world does.
+- **Private vulnerability reporting turned on** (Settings → Security), which `SECURITY.md` points
+  reporters to, with secret scanning and push protection (free once public).
 - **The repository made public**, so the PyPI page's links and the public demo's GitHub link work.
 
 ## The public demo
