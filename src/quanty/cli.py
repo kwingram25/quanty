@@ -188,6 +188,9 @@ def demo(
             )
         if live and not param and strategy == "example_favorite":  # the live demo also has range markets
             instances.append({"id": "temp_buckets", "strategy": "example_bucket", "params": {}})
+        for inst in instances:  # the demo trades 100 contracts a time, unless --param size= says otherwise
+            if inst["strategy"] in ("example_favorite", "example_bucket"):
+                inst["params"].setdefault("size", 100)
         if (own := _synthetic_series(strategy, live)) is not None:
             instances[0]["series"] = own
         raw = {"brokers": {"sim": {"kind": "sim", "latency_ms": latency_ms}}, "instances": instances}
