@@ -112,3 +112,43 @@ def test_polymarket_projects_say_where_the_index_comes_from(tmp_path: Path) -> N
     assert '# index_ids = ["BRTI"]' in (tmp_path / "pm" / "feeds.toml").read_text()
     create(tmp_path / "both", Answers(venues=["kalshi", "polymarket_us"]), vendor=False)
     assert "# index_ids" not in (tmp_path / "both" / "feeds.toml").read_text()  # Kalshi's feed has it
+
+
+def test_upgrade_refreshes_marked_files_and_keeps_your_own(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import subprocess
+
+    from quanty.init import MARK, upgrade
+
+    dest = tmp_path / "bot"
+    create(dest, Answers(), vendor=False)
+    real = subprocess.run
+
+    def run(cmd: list[str], **kw: object) -> subprocess.CompletedProcess[str]:
+        if cmd[:2] in (["uv", "lock"], ["uv", "sync"]):  # no network here
+            return subprocess.CompletedProcess(cmd, 0, "", "")
+        return real(cmd, **kw)  # type: ignore[call-overload, no-any-return]
+
+    monkeypatch.setattr(subprocess, "run", run)
+    readme, compose, strategy = (
+        dest / "README.md",
+        dest / "compose.yaml",
+        dest / "strategies" / "my_strategy.py",
+    )
+    assert MARK in readme.read_text().splitlines()[0]
+    assert (dest / "deploy" / "cloud-init.yaml").read_text().startswith("#cloud-config\n")  # still first
+    readme.write_text(readme.read_text() + "\nstale\n")  # an older template's text
+    compose.write_text("services: {}  # my own compose, its generated line deleted\n")
+    strategy.write_text(strategy.read_text() + "\n# my edge\n")
+    (dest / ".dockerignore").write_text(".env\ndata/\n.git/\n__pycache__/\n.venv/\n")  # from before marks
+    root = Path(__file__).parents[1]
+    what, refreshed, kept = upgrade(dest, root)
+    assert what.startswith("quanty ") and list((dest / "vendor").glob("quanty-*.whl"))
+    assert not (dest / "vendor" / ".gitignore").exists()
+    assert "README.md" in refreshed and "stale" not in readme.read_text()
+    assert ".dockerignore" in refreshed and MARK in (dest / ".dockerignore").read_text()  # adopted
+    assert kept == ["compose.yaml"] and "my own compose" in compose.read_text()
+    assert strategy.read_text().endswith("# my edge\n")  # strategies are never touched
+    with pytest.raises(ValueError, match="isn't a quanty checkout"):
+        upgrade(dest, tmp_path)

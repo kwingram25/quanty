@@ -103,6 +103,7 @@ paper trading, shadow trading and live trading; [Deploying](docs/deploying.md) c
 | `quanty promote` | move an instance between paper, shadow and live in its experiment file (`--now`: while running) |
 | `quanty pull`, `changes` | bring a server's dashboard changes into your experiment files (`--recordings`: its recent recordings too, to backtest on); list what a server holds |
 | `quanty reload` | have a running session pick up its experiment file: new variants start, removed ones retire |
+| `quanty upgrade` | bring a project onto a newer quanty: its vendored wheel, lock, and the generated files you haven't edited |
 | `quanty init`, `deploy` | create a project; copy it to a Docker server (bringing its dashboard changes home first), check it there and start it |
 | `quanty doctor` | check a project before trading: config, keys, clock, venues, leftovers (read-only; also the dashboard's Health page) |
 | `quanty list`, `params` | strategies quanty can find, and their parameters |
