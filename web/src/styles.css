@@ -271,7 +271,7 @@ tbody tr:hover td { background: var(--raised); }
 }
 
 /* run page as a full-height workspace: nothing scrolls but the panels themselves */
-.run-page { max-width: none; height: calc(100vh - 52px); display: flex; flex-direction: column; padding: 14px 20px 16px; }
+.run-page { max-width: none; height: calc(100vh - 52px - var(--banner-h, 0px)); display: flex; flex-direction: column; padding: 14px 20px 16px; }
 .run-page .run-head { margin-bottom: 12px; flex: none; }
 .run-page .kpi.hero .value { font-size: 28px; }
 .workspace {

@@ -11,6 +11,7 @@ file is opened) and the command line. Projects from `quanty init` depend on one 
 
 - The dashboard's open markets drop a market as its countdown ends, rather than at the next update
   (which a slow connection, or a sped-up demo, made seconds or a demo minute late).
+- A hosted demo's banner no longer makes a run's page taller than the window.
 
 ## 0.4.0 (2026-10-27)
 

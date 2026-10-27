@@ -1,5 +1,5 @@
 import { MotionConfig } from "motion/react";
-import { StrictMode, useEffect, useState } from "react";
+import { StrictMode, useEffect, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { BrowserRouter, Link, NavLink, Route, Routes, useNavigate } from "react-router-dom";
 import { Accounts } from "./components/Accounts";
@@ -85,10 +85,10 @@ function App() {
         )}
       </div>
       {PUBLIC && (
-        <p className="demo-banner">
+        <DemoBanner>
           A demo on synthetic markets, shared by everyone viewing it: the controls work, and it starts over
           every {PUBLIC} hours. <a href={REPO} target="_blank" rel="noreferrer">quanty on GitHub</a>
-        </p>
+        </DemoBanner>
       )}
       <Routes>
         <Route path="/" element={<RunsPage />} />
@@ -99,6 +99,21 @@ function App() {
       </Routes>
     </BrowserRouter>
   );
+}
+
+/** The hosted demo's note under the top bar. Pages sized to the window (a run's) leave room for it:
+ *  its height, however many lines it wraps to, is --banner-h. */
+function DemoBanner({ children }: { children: React.ReactNode }) {
+  const ref = useRef<HTMLParagraphElement>(null);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const root = document.documentElement.style;
+    const size = new ResizeObserver(() => root.setProperty("--banner-h", `${el.offsetHeight}px`));
+    size.observe(el);
+    return () => { size.disconnect(); root.removeProperty("--banner-h"); };
+  }, []);
+  return <p className="demo-banner" ref={ref}>{children}</p>;
 }
 
 createRoot(document.getElementById("root")!).render(
