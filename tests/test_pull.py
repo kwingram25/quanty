@@ -212,3 +212,15 @@ def test_password_goes_straight_to_the_server(tmp_path: Path, monkeypatch: pytes
     assert text.startswith("KALSHI_KEY_ID=abc\n") and "QUANTY_UI_PASSWORD='scrypt$" in text
     assert sent["cmd"][:2] == ["ssh", "me@srv"] and sent["input"] == text.encode()  # type: ignore[index]
     assert "QUANTY_UI_PASSWORD" in res.output and "scrypt" not in res.output  # the name, never the hash
+
+
+def test_server_setup_script(tmp_path: Path) -> None:
+    from quanty.deploy import server_script
+
+    for tailscale in (False, True):
+        script = server_script(tailscale, "quanty-paper")
+        (tmp_path / "s.sh").write_text(script)
+        assert subprocess.run(["bash", "-n", str(tmp_path / "s.sh")]).returncode == 0  # it parses
+        assert "download.docker.com" in script and "get.docker.com" not in script  # signed packages only
+        assert "ufw allow 22/tcp" in script and "/swapfile" in script and "unattended-upgrades" in script
+        assert ("tailscale serve --bg --https=443 http://127.0.0.1:8765" in script) is tailscale

@@ -88,3 +88,74 @@ def keys_command(host: str, remote_dir: str) -> list[str]:
         " then docker compose up -d --force-recreate; fi"
     )
     return ["ssh", host, script]
+
+
+def server_script(tailscale: bool = False, hostname: str = "") -> str:
+    """Bash that prepares a fresh Ubuntu or Debian server for `quanty deploy`, safe to run again:
+    Docker (from Docker's signed apt repository), a firewall with only SSH open, swap on a small
+    machine, automatic security updates, and with tailscale, Tailscale with the dashboard served
+    to your tailnet only. Each step checks first and skips what's already there."""
+    tail = ""
+    if tailscale:
+        name = shlex.quote(hostname) if hostname else '"$(hostname)"'
+        tail = f"""
+step "Tailscale"
+if ! command -v tailscale >/dev/null; then
+  ts="https://pkgs.tailscale.com/stable/$ID/$VERSION_CODENAME"
+  curl -fsSL "$ts.noarmor.gpg" > /usr/share/keyrings/tailscale-archive-keyring.gpg
+  curl -fsSL "$ts.tailscale-keyring.list" > /etc/apt/sources.list.d/tailscale.list
+  apt-get -qq update && apt-get -qq install -y tailscale >/dev/null
+fi
+if ! tailscale status >/dev/null 2>&1; then
+  echo "approve this server in your Tailscale account (the link below), then this continues:"
+  tailscale up --hostname={name}
+fi
+if tailscale serve --bg --https=443 http://127.0.0.1:8765 >/dev/null 2>&1; then
+  name=$(tailscale status --json | sed -n 's/.*"DNSName": *"\\([^"]*\\)\\.".*/\\1/p' | head -1)
+  url="https://$name"
+  echo "dashboard: $url (your tailnet only)"
+else
+  echo "! tailscale serve failed: turn on MagicDNS and HTTPS Certificates"
+  echo "  (Tailscale admin console, DNS), then run this again"
+fi"""
+    return f"""set -euo pipefail
+export DEBIAN_FRONTEND=noninteractive
+step() {{ echo "== $*"; }}
+. /etc/os-release
+case "$ID" in
+  ubuntu|debian) ;;
+  *) echo "quanty server sets up Ubuntu or Debian; this is $ID" >&2; exit 2;;
+esac
+
+step "packages"
+apt-get -qq update && apt-get -qq install -y ca-certificates curl rsync ufw unattended-upgrades >/dev/null
+
+step "Docker"
+if ! command -v docker >/dev/null; then
+  install -m 0755 -d /etc/apt/keyrings
+  curl -fsSL "https://download.docker.com/linux/$ID/gpg" -o /etc/apt/keyrings/docker.asc
+  echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc]" \\
+    "https://download.docker.com/linux/$ID $VERSION_CODENAME stable" > /etc/apt/sources.list.d/docker.list
+  apt-get -qq update && apt-get -qq install -y docker-ce docker-ce-cli containerd.io \\
+    docker-buildx-plugin docker-compose-plugin >/dev/null
+fi
+if [ -n "${{SUDO_USER:-}}" ] && [ "$SUDO_USER" != root ]; then usermod -aG docker "$SUDO_USER"; fi
+docker --version
+
+step "firewall: SSH only (the dashboard stays on 127.0.0.1)"
+ufw allow 22/tcp >/dev/null && ufw --force enable >/dev/null && ufw status | head -1
+
+step "swap"
+mem_kb=$(awk '/MemTotal/ {{print $2}}' /proc/meminfo)
+if [ -z "$(swapon --show)" ] && [ "$mem_kb" -lt 4200000 ]; then
+  fallocate -l 2G /swapfile && chmod 600 /swapfile && mkswap /swapfile >/dev/null && swapon /swapfile
+  grep -q '^/swapfile ' /etc/fstab || echo '/swapfile none swap sw 0 0' >> /etc/fstab
+fi
+swapon --show | tail -n +2 | head -1 || true
+
+step "automatic security updates"
+systemctl enable --now unattended-upgrades >/dev/null 2>&1 || true
+systemctl is-active unattended-upgrades
+{tail}
+echo "== ready: from the project, quanty keys, then quanty deploy"
+"""

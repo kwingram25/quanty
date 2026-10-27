@@ -31,10 +31,19 @@ share that budget. (Kalshi limits per account, wherever the bots run; `quanty do
 ### 1. Create the server
 
 Whatever the provider: **Ubuntu 24.04 LTS**, 2 GB of memory (1 GB works, with the swap below),
-25 GB of disk or more (recordings grow by gigabytes a day), your SSH key, and the project's
-`deploy/cloud-init.yaml` pasted into the provider's **user data** field. That file installs Docker,
-turns on the firewall with only SSH open, adds 2 GB of swap and keeps security updates automatic;
-it's done a minute or two after the server boots.
+25 GB of disk or more (recordings grow by gigabytes a day), and your SSH key. Then set it up from
+your machine:
+
+```sh
+uv run quanty server root@203.0.113.7 --tailscale   # --tailscale: the dashboard on your tailnet
+```
+
+It installs Docker (from Docker's signed apt repository), turns on the firewall with only SSH open,
+adds 2 GB of swap on small machines and keeps security updates automatic; with `--tailscale` it
+also joins your Tailscale account (approve the link it prints) and serves the dashboard there.
+Each step skips what's already done, so it's safe to run again. Or paste the project's
+`deploy/cloud-init.yaml` into the provider's **user data** field when creating the server, which
+does the same minus Tailscale on first boot.
 
 **DigitalOcean.** Create → Droplets. A New York or San Francisco region; Ubuntu 24.04; a Basic
 Droplet with 2 GB; your SSH key; under *Advanced options*, *Add initialization scripts*, paste

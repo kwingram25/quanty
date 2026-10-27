@@ -697,6 +697,32 @@ def upgrade(
 
 
 @app.command()
+def server(
+    host: Annotated[str, typer.Argument(help="The server, as you'd give ssh: root@host, or a sudo user")],
+    tailscale: Annotated[
+        bool,
+        typer.Option("--tailscale", help="Also Tailscale, with the dashboard served to your tailnet only"),
+    ] = False,
+    hostname: Annotated[str, typer.Option(help="With --tailscale: its name on your tailnet")] = "",
+    dry_run: Annotated[bool, typer.Option("--dry-run", help="Print the script; run nothing")] = False,
+) -> None:
+    """Prepare a fresh Ubuntu or Debian server for `quanty deploy`, over SSH: Docker (signed apt
+    repository), a firewall with only SSH open, swap on small machines, automatic security updates,
+    and with --tailscale, Tailscale with the dashboard at https://<name>.<tailnet>.ts.net. Safe to
+    run again: each step skips what's already there."""
+    from quanty import deploy as dp
+
+    script = dp.server_script(tailscale, hostname)
+    if dry_run:
+        typer.echo(script)
+        return
+    run_as = "bash -s" if host.split("@")[0] == "root" else "sudo bash -s"
+    done = subprocess.run(["ssh", host, run_as], input=script.encode())
+    if done.returncode:
+        raise _fail(ValueError(f"setup stopped (exit {done.returncode}): see above; it's safe to run again"))
+
+
+@app.command()
 def keys(
     host: Annotated[str, typer.Argument(help="The server, as you'd give ssh")],
     file: Annotated[
@@ -916,6 +942,12 @@ def _now_window_ms(window_s: int = 300) -> int:
     return now - now % (window_s * 1000)
 
 
+def _span(seconds: int) -> str:
+    """4 h 10 min, 45 min, 30 s."""
+    h, m = divmod(seconds // 60, 60)
+    return " ".join([f"{h} h"] * bool(h) + [f"{m} min"] * bool(m)) or f"{seconds} s"
+
+
 def _warm_and_restore(
     trader: Engine, exp: experiment.Experiment, feeds: Path, data: Path, ledger: Path
 ) -> None:
@@ -925,7 +957,7 @@ def _warm_and_restore(
     if seconds:
         end = int(time.time() * 1000)
         typer.echo(
-            f"warming up: replaying the last {seconds / 3600:g} h of recordings in {data}/ (orders off"
+            f"warming up: replaying the last {_span(seconds)} of recordings in {data}/ (orders off"
             + (", data only)" if data_only else ")")
         )
         n = 0
@@ -1101,7 +1133,7 @@ def _backtest(
         if seconds:  # the history its strategies need, orders off: before --start, or the first hours
             warm_from = lo - seconds * 1000 if start else lo
             lo = max(lo, warm_from + seconds * 1000)
-            typer.echo(f"warming up on {seconds / 3600:g} h of recordings (orders off), trading from then")
+            typer.echo(f"warming up on {_span(seconds)} of recordings (orders off), trading from then")
             with engine.warming():
                 for ev in Replay(load_feeds(None, list(feeds)), data, warm_from, lo, data_only=data_only):
                     engine.advance(ev.ts)
