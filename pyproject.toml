@@ -46,6 +46,7 @@ dependencies = [
 Repository = "https://github.com/kwingram25/quanty"
 Documentation = "https://github.com/kwingram25/quanty/tree/main/docs"
 Issues = "https://github.com/kwingram25/quanty/issues"
+Changelog = "https://github.com/kwingram25/quanty/blob/main/CHANGELOG.md"
 
 [project.scripts]
 quanty = "quanty.launch:main"
@@ -70,7 +71,7 @@ packages = ["src/quanty"]
 
 [tool.hatch.build.targets.sdist]
 # what building and testing the Python package needs: the dashboard ships built, inside src/
-include = ["/src/quanty", "/tests", "/docs", "/README.md", "/LICENSE", "/pyproject.toml"]
+include = ["/src/quanty", "/tests", "/docs", "/README.md", "/CHANGELOG.md", "/LICENSE", "/pyproject.toml"]
 
 [tool.ruff]
 line-length = 110

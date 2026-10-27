@@ -24,7 +24,8 @@ so no API token is stored anywhere.
 ### A release
 
 1. Set the version in `src/quanty/__init__.py` (`__version__ = "0.2.0"`; it's the only place) and
-   note the changes in `CHANGELOG.md`. While at 0.x, a new minor version may break things: projects
+   note the changes in `CHANGELOG.md` under that version, dated the day it's tagged (the first,
+   0.1.0, waits there as "unreleased"). While at 0.x, a new minor version may break things: projects
    depend on `quanty-py>=0.1.0,<0.2`, so they move to 0.2 on purpose (edit the bound, then
    `quanty upgrade`).
 2. Try it on TestPyPI first: Actions → release → Run workflow. It builds, checks the packages
@@ -54,10 +55,6 @@ repository public. Before that:
   in the README become absolute
   (`https://raw.githubusercontent.com/kwingram25/quanty/main/docs/images/...`), since PyPI doesn't
   serve the repository's files (while the repository is private, those links don't load).
-- **A disclaimer** in the README and on PyPI: quanty places real-money orders; no warranty, not
-  financial advice, use at your own risk (the MIT license says the legal part).
-- **`CHANGELOG.md`**, starting at 0.1.0, and a note of what's stable at 0.x: the `Strategy` and `ctx`
-  API, experiment files and the ledger schema change only with a minor version and a note.
 - **The git history**, reviewed once more: it was started fresh, and gitleaks and the private-name
   guard run on every commit, but read it before the world does.
 - **The repository made public**, so the PyPI page's links and the public demo's GitHub link work.

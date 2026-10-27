@@ -153,6 +153,16 @@ the file, and run `uv run pytest tests/test_ledger.py`, which fails if models an
 differ. `scripts/check_private.py` blocks commits matching a denylist kept outside the repo
 (`$QUANTY_DENYLIST`, default `~/.config/quanty/denylist.txt`).
 
+## Use at your own risk
+
+quanty places real orders with real money once you set it up to. It is not financial advice, and
+nothing in it (the example strategies, the fill model, the backtests, the variant ranking) promises
+that a strategy will make money: simulated results can be better than what live trading gets, and
+software, venues and networks fail. You are responsible for what it trades for you, and for
+following your venues' rules and the laws where you live. Start on paper, then shadow, then with
+caps you'd not mind losing; [Live trading](docs/live-trading.md) explains how. quanty is provided as
+is, without warranty of any kind (see the license).
+
 ## License
 
-MIT
+MIT. Changes by version: [CHANGELOG.md](CHANGELOG.md).
