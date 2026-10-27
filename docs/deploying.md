@@ -7,8 +7,8 @@ uv run quanty init my-quanty     # strategy, feeds.toml, experiments/main.toml, 
 ```
 
 Inside the project, `uv run quanty …` works with nothing installed first: the project's
-`pyproject.toml` points at quanty (the wheel in `vendor/`, else GitHub), and the first `uv run` sets
-up `.venv/`.
+`pyproject.toml` points at quanty (`quanty-py` from PyPI, or a wheel in `vendor/` for a project made
+from a quanty checkout), and the first `uv run` sets up `.venv/`.
 
 ## Where it can run
 
@@ -109,10 +109,10 @@ from anywhere instead, see [below](#reaching-the-dashboard-from-anywhere).
 
 ### Getting quanty into the image
 
-The Dockerfile installs quanty from a wheel in `vendor/` if there is one (`quanty init` builds it when
-run from a quanty source checkout), otherwise from GitHub, which needs access while the repository
-is private. To update the wheel after pulling a newer quanty: `uv build --wheel -o vendor
-/path/to/quanty`, then deploy again.
+The Dockerfile installs quanty from the wheel in `vendor/` if the project vendors one (`quanty init`
+does when run from a quanty source checkout), otherwise the version `pyproject.toml` asks for from
+PyPI (`quanty-py`). To move to a newer quanty, `uv run quanty upgrade` in the project (for a vendored
+one, from a checkout: `uv run --project ~/code/quanty quanty upgrade`), commit, and deploy again.
 
 ### Editing strategies on a server
 
