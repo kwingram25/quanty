@@ -95,3 +95,59 @@ def test_a_session_that_doesnt_record_writes_no_files(tmp_path: Path) -> None:
         s.sink(Raw("coinbase", 1_700_000_000_000, '{"type":"heartbeat"}'))
         s.recorder.close()
         assert sorted(p.name for p in root.glob("*")) == want
+
+
+def test_one_recorder_per_feed_folder(tmp_path: Path) -> None:
+    first, second = Recorder(tmp_path), Recorder(tmp_path)
+    first.write(Raw("kalshi", 1_700_000_000_000, "{}"))
+    with pytest.raises(RuntimeError, match="already recording kalshi"):
+        second.write(Raw("kalshi", 1_700_000_000_001, "{}"))
+    second.write(Raw("coinbase", 1_700_000_000_001, "{}"))  # another feed is fine
+    first.close()
+    second.write(Raw("kalshi", 1_700_000_000_002, "{}"))  # free once the first is done
+    second.close()
+
+
+def test_a_damaged_recording_is_read_around_not_crashed_on(tmp_path: Path) -> None:
+    t = 1_700_000_000_000
+    path = tmp_path / "kalshi" / time_dir(t)
+    path.parent.mkdir(parents=True)
+    with gzip.open(path, "wt") as f:  # a good line, a damaged one, a good one
+        f.write(
+            encode(Raw("kalshi", t, "{}"))
+            + '{"t":17000000spliced"x":1}\n'
+            + encode(Raw("kalshi", t + 1, "{}"))
+        )
+    good = path.read_bytes()
+    for mtime in range(200):  # the bytes after the broken block vary (gzip stamps a time): try many
+        with path.open("wb") as raw:  # then a writer killed mid-block, and another appending after it
+            raw.write(good)
+            raw.write(gzip.compress(encode(Raw("kalshi", t + 2, "{}")).encode(), mtime=mtime)[:-12])
+            raw.write(gzip.compress(encode(Raw("kalshi", t + 3, "{}")).encode(), mtime=mtime))
+        got = [i.t for i in read(tmp_path, "kalshi", t, t + HOUR_MS)]
+        assert got[:2] == [t, t + 1]  # the damaged line skipped, and no crash at the broken block
+
+
+def time_dir(t: int) -> str:
+    import time as tm
+
+    return tm.strftime("%Y-%m-%d/%H.jsonl.gz", tm.gmtime(t / 1000))
+
+
+def test_a_session_stops_cleanly_on_sigterm(tmp_path: Path) -> None:
+    import asyncio
+    import os
+    import signal
+    import time as tm
+
+    from quanty.feeds.session import RecordSession
+
+    session = RecordSession({}, tmp_path, None)
+
+    async def main() -> float:
+        asyncio.get_running_loop().call_later(0.3, os.kill, os.getpid(), signal.SIGTERM)
+        start = tm.monotonic()
+        await session.run(duration_s=30)
+        return tm.monotonic() - start
+
+    assert asyncio.run(main()) < 3  # not the 30 s asked: SIGTERM ended it

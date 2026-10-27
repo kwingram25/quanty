@@ -4,7 +4,9 @@ With a trader attached (quanty paper), every parsed event also drives the engine
 """
 
 import asyncio
+import contextlib
 import dataclasses
+import signal
 from collections.abc import Callable, Mapping
 from pathlib import Path
 
@@ -115,7 +117,16 @@ class RecordSession:
         now = now_ms()
         return {name: h.status(now) for name, h in self.health.items()}
 
+    def stop(self) -> None:
+        """End the run at its next check (within a second), cleanly: files closed, brokers stopped."""
+        self._stopping = True
+
     async def run(self, duration_s: float | None = None, on_window: OnWindow | None = None) -> None:
+        self._stopping = False
+        # `docker stop` (and systemd) send SIGTERM: stop as cleanly as Ctrl-C, never mid-write (off the
+        # main thread, or where signal handlers don't exist, it can't be caught)
+        with contextlib.suppress(NotImplementedError, RuntimeError, ValueError):
+            asyncio.get_running_loop().add_signal_handler(signal.SIGTERM, self.stop)
         if self.trader is not None:
             for broker in self._brokers():
                 await broker.start()
@@ -127,7 +138,7 @@ class RecordSession:
         end = None if duration_s is None else now_ms() + int(duration_s * 1000)
         next_window = (now_ms() // self.window_ms + 1) * self.window_ms
         try:
-            while end is None or now_ms() < end:
+            while (end is None or now_ms() < end) and not self._stopping:
                 await asyncio.sleep(min(1.0, max(0.0, ((end or next_window) - now_ms()) / 1000)))
                 self.recorder.flush()
                 if now_ms() >= next_window:

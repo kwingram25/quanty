@@ -9,9 +9,11 @@ Inline messages are sliced back out byte for byte, so parsers see exactly what w
 Files are append-only and safe to reopen after a restart (gzip members concatenate).
 """
 
+import fcntl
 import gzip
 import heapq
 import time
+import zlib
 from collections.abc import Iterable, Iterator
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -53,13 +55,34 @@ def decode(feed: str, line: str) -> Raw | Link:
 
 
 class Recorder:
-    """Appends raw messages and link changes to hourly files. Call flush() regularly, close() at exit."""
+    """Appends raw messages and link changes to hourly files. Call flush() regularly, close() at exit.
+
+    One recorder per feed folder: two processes appending to one compressed file interleave their
+    writes and corrupt it, so each feed's folder is locked while recorded (released at exit, even a
+    killed one) and a second recorder of it is refused."""
 
     def __init__(self, root: Path) -> None:
         self.root = root
         self._files: dict[str, tuple[Path, IO[str]]] = {}
+        self._locks: dict[str, IO[bytes]] = {}
+
+    def _lock(self, feed: str) -> None:
+        folder = self.root / feed
+        folder.mkdir(parents=True, exist_ok=True)
+        fd = (folder / ".recording.lock").open("ab")
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError:
+            fd.close()
+            raise RuntimeError(
+                f"another process is already recording {feed} into {self.root}/: run one recorder per "
+                "data folder (beside `quanty record`, start sessions with --no-record)"
+            ) from None
+        self._locks[feed] = fd
 
     def write(self, item: Raw | Link) -> None:
+        if item.feed not in self._locks:
+            self._lock(item.feed)
         path = hour_path(self.root, item.feed, item.t)
         cur = self._files.get(item.feed)
         if cur is None or cur[0] != path:
@@ -78,6 +101,9 @@ class Recorder:
         for _, f in self._files.values():
             f.close()
         self._files.clear()
+        for fd in self._locks.values():
+            fd.close()  # releases the lock
+        self._locks.clear()
 
 
 def hours(start: int, end: int) -> Iterator[int]:
@@ -94,14 +120,18 @@ def read(root: Path, feed: str, start: int, end: int) -> Iterator[Raw | Link]:
         path = hour_path(root, feed, hour)
         if not path.exists():
             continue
-        with gzip.open(path, "rt") as f:
+        # errors="replace": bytes a damaged block leaves become a line that fails to decode, and is skipped
+        with gzip.open(path, "rt", errors="replace") as f:
             try:
                 for line in f:
-                    item = decode(feed, line)
+                    try:
+                        item = decode(feed, line)
+                    except (ValueError, KeyError):  # a damaged line: a writer killed mid-write
+                        continue
                     if start <= item.t < end:
                         yield item
-            except EOFError:  # the file is still being written, or the writer died mid-flush
-                pass
+            except (EOFError, zlib.error, gzip.BadGzipFile):
+                pass  # still being written, or a writer died mid-flush: the rest isn't readable
 
 
 def read_all(root: Path, feeds: Iterable[str], start: int, end: int) -> Iterator[Raw | Link]:
