@@ -1,8 +1,9 @@
 # The public demo on Fly.io: synthetic markets, shared by everyone viewing it. From the repo root:
 #   fly apps create quanty-demo          (the name must be unique on Fly; change it here too)
 #   fly deploy --config fly.demo.toml --ha=false
-# It stops when nobody's visiting and starts on the next request (a fresh day each time), and
-# restarts every 6 hours while in use (quanty demo --public --reset-hours).
+# One machine stays running (a shared CPU's baseline covers the demo; stopped, every visitor would
+# wait minutes for its history to rebuild on a throttled CPU), and it starts a fresh day every 6
+# hours (quanty demo --public --reset-hours).
 app = "quanty-demo"
 primary_region = "iad"
 
@@ -12,9 +13,9 @@ primary_region = "iad"
 [http_service]
   internal_port = 8080
   force_https = true
-  auto_stop_machines = "stop"
+  auto_stop_machines = "off"
   auto_start_machines = true
-  min_machines_running = 0
+  min_machines_running = 1
 
   [http_service.concurrency]
     type = "connections"

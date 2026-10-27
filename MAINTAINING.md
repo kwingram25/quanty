@@ -50,8 +50,8 @@ yanked on PyPI), never by re-uploading.
 https://quanty-demo.fly.dev runs `quanty demo --live --public`, the demo built for hosting:
 synthetic markets only, no keys and no account balances, a banner saying it's shared by everyone
 viewing it, and every few hours (`--reset-hours`, 6 by default) it exits so the host starts a fresh
-one. `demo.Dockerfile` and `fly.demo.toml` in this repo run it on Fly.io, where it stops when nobody
-is visiting. To update it after a change:
+one. `demo.Dockerfile` and `fly.demo.toml` in this repo run it on Fly.io, on one shared-CPU machine kept
+running (about $3 a month), with 6 hours of history so each fresh start is quick. To update it after a change:
 
 ```sh
 fly apps create quanty-demo            # the name must be unique on Fly; change it in fly.demo.toml too

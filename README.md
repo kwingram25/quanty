@@ -22,8 +22,7 @@ One strategy file runs unchanged in four modes. Only the broker behind it change
 </picture>
 
 **[Live demo](https://quanty-demo.fly.dev/)**: the dashboard on synthetic markets, shared by everyone
-viewing it (the controls work; it starts over every few hours). The first visit after a quiet spell
-takes a few seconds while it starts.
+viewing it (the controls work; it starts over every few hours).
 
 ## Try it
 

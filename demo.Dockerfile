@@ -8,4 +8,4 @@ COPY src ./src
 RUN uv sync --frozen --no-dev --no-editable && rm -rf /root/.cache
 ENV PATH="/app/.venv/bin:$PATH"
 EXPOSE 8080
-CMD ["quanty", "demo", "--live", "--public", "--port", "8080"]
+CMD ["quanty", "demo", "--live", "--public", "--history", "6", "--port", "8080"]  # 6 h: a quick start on a shared CPU
