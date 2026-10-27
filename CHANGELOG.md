@@ -9,6 +9,12 @@ file is opened) and the command line. Projects from `quanty init` depend on one 
 
 ## Unreleased
 
+- Fix: Kalshi books could go wrong for the rest of a market's life after the feed changed its
+  subscriptions. Replacing the connection keeps the old one open for a few seconds (so nothing is
+  missed), and both send on the same subscription id, numbered apart; the parser applied both to
+  one book, which then showed levels that weren't there (an ask below the bid, say), so strategies
+  passed on good trades. Each book now follows the message stream its snapshot came on, and only a
+  gap within one stream is reported (692 false gaps an hour before, 4 after).
 - Fix: the simulated queue counted contracts twice when a venue sent a book update before the
   trades that caused it: the level shrinking moved a resting order up (cancels ahead), then the
   trades moved it up again. Trades at its price within `match_trades_ms` (500 ms) of a shrink now
