@@ -17,8 +17,9 @@ so no API token is stored anywhere.
 2. On each, before the first release, add a **pending publisher** (Account → Publishing → Add a new
    pending publisher → GitHub): project `quanty-py`, owner `kwingram25`, repository `quanty`,
    workflow `release.yml`, environment `testpypi` on TestPyPI and `pypi` on PyPI.
-3. In this repository's GitHub settings → Environments, create `testpypi` and `pypi`. Give `pypi` a
-   required reviewer (you), so a stray tag can't publish without a click.
+3. In this repository's GitHub settings → Environments, `testpypi` and `pypi` (both exist). `pypi`
+   accepts only `v*` tags. Once the repository is public, also give `pypi` a required reviewer (you),
+   so a stray tag can't publish without a click (private repositories need a paid plan for that).
 
 ### A release
 
