@@ -33,11 +33,14 @@ so no API token is stored anywhere.
    publishes to TestPyPI. Check it as a user would:
 
    ```sh
-   uv venv /tmp/try && uv pip install --python /tmp/try \
-     --index-url https://test.pypi.org/simple/ --extra-index-url https://pypi.org/simple/ quanty-py
+   v=0.2.0   # the version being released
+   whl=$(curl -s https://test.pypi.org/simple/quanty-py/ | grep -oE "https://[^\"#]*quanty_py-$v-py3-none-any.whl" | head -1)
+   uv venv /tmp/try && uv pip install --python /tmp/try "quanty-py @ $whl"   # its dependencies from PyPI
    /tmp/try/bin/quanty demo --ui
-   /tmp/try/bin/quanty init /tmp/try-project --yes    # depends on quanty-py from PyPI
    ```
+
+   The wheel by its URL: with quanty-py on PyPI, uv takes it only from there (it won't mix
+   indexes for one package), and TestPyPI's own copies of other packages can be junk.
 
 3. Tag and push: `git tag v0.2.0 && git push origin v0.2.0`. The workflow checks the tag matches
    `__version__`, builds and checks again, and publishes to PyPI once `pypi` is approved.
