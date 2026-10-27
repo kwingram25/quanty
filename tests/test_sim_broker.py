@@ -80,8 +80,19 @@ def test_resting_order_waits_for_queue_then_fills() -> None:
 
 def test_queue_shrinks_when_the_level_shrinks() -> None:
     s = buy(Side.YES, 0.50, 10)
-    make(s).run([*opened(), book(1, [(0.50, 30)], []), book(2, [(0.50, 4)], []), trade(3, 0.50, 6)])
-    assert [f.qty for f in s.fills()] == [2]
+    make(s).run([*opened(), book(1, [(0.50, 30)], []), book(2, [(0.50, 4)], []), trade(900, 0.50, 6)])
+    assert [f.qty for f in s.fills()] == [2]  # cancels ahead of us: a later trade reaches us sooner
+
+
+def test_a_shrink_and_the_trades_it_shows_count_once() -> None:
+    # the venue sends the book (30 -> 4) before the trades that took the 26: they're those, not more
+    s = buy(Side.YES, 0.50, 10)
+    make(s).run([*opened(), book(1, [(0.50, 30)], []), book(2, [(0.50, 4)], []), trade(3, 0.50, 26)])
+    assert s.fills() == []  # still 4 ahead
+    s = buy(Side.YES, 0.50, 10)
+    make(s).run([*opened(), book(1, [(0.50, 30)], []), book(2, [(0.50, 4)], []), trade(3, 0.50, 26),
+                 trade(4, 0.50, 6)])  # fmt: skip
+    assert [f.qty for f in s.fills()] == [2]  # then 6 more trade: 4 ahead, 2 to us
 
 
 def test_book_moving_onto_resting_order_fills_it_at_its_price() -> None:
@@ -184,9 +195,13 @@ def run_queue(
 def test_queue_model_options() -> None:
     base = [book(1, [(0.50, 30)], [(0.53, 5)])]
     # credit_cancels: the level shrinking to 4 moves us up only when credited
-    ev = [*base, book(2, [(0.50, 4)], [(0.53, 5)]), trade(3, 0.50, 6)]
+    ev = [*base, book(2, [(0.50, 4)], [(0.53, 5)]), trade(900, 0.50, 6)]
     assert [f.qty for f in run_queue(QueueModel(), ev).fills()] == [2]
     assert run_queue(QueueModel(credit_cancels=False), ev).fills() == []
+    # match_trades_ms: a trade right after the shrink is what the shrink showed, unless 0 (counted twice)
+    ev = [*base, book(2, [(0.50, 4)], [(0.53, 5)]), trade(3, 0.50, 6)]
+    assert run_queue(QueueModel(), ev).fills() == []
+    assert [f.qty for f in run_queue(QueueModel(match_trades_ms=0), ev).fills()] == [2]
     # fill_on_cross: an offer moving onto our bid
     ev = [*base, book(2, [(0.50, 30)], [(0.50, 3)])]
     assert [f.qty for f in run_queue(QueueModel(), ev).fills()] == [3]

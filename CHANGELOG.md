@@ -9,6 +9,12 @@ file is opened) and the command line. Projects from `quanty init` depend on one 
 
 ## Unreleased
 
+- Fix: the simulated queue counted contracts twice when a venue sent a book update before the
+  trades that caused it: the level shrinking moved a resting order up (cancels ahead), then the
+  trades moved it up again. Trades at its price within `match_trades_ms` (500 ms) of a shrink now
+  count as what the shrink showed. Over a day of Polymarket US 5m windows this brings simulated
+  fills closest to live ones (154 of 166 windows filled-or-not as live). `match_trades_ms = 0` in a
+  broker's `queue` keeps the old count, to reproduce a simulator that has it.
 - The dashboard's open markets drop a market as its countdown ends, rather than at the next update
   (which a slow connection, or a sped-up demo, made seconds or a demo minute late).
 - A hosted demo's banner no longer makes a run's page taller than the window.

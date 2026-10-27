@@ -69,6 +69,9 @@ class QueueConfig(ConfigModel):
         "trade_size", description="A trade through our price fills this much"
     )
     cancel_stops_fills: bool = Field(False, description="No fills once a cancel is sent, vs until it arrives")
+    match_trades_ms: NonNegativeInt = Field(
+        500, description="Trades soon after a level shrank are what it showed, not more (0: count both)"
+    )
 
 
 class SimBrokerConfig(ConfigModel):

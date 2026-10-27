@@ -42,6 +42,10 @@ class QueueModel:
     fill_on_cross: bool = True  # the other side of the book moving onto the order fills it
     through_fill: Literal["trade_size", "full"] = "trade_size"  # a trade through our price fills this much
     cancel_stops_fills: bool = False  # no fills once a cancel is sent (optimistic), vs until it arrives
+    # with credit_cancels: trades at our price within this long after the level shrank are what the
+    # shrink showed (a venue often sends the book before its trades), not more of the queue gone.
+    # 0: every shrink is cancels and every trade more, which counts those contracts twice
+    match_trades_ms: int = 500
 
 
 @dataclass
@@ -57,6 +61,8 @@ class _Working:
     buys_yes: bool
     yes_price: float
     queue_ahead: float = 0.0
+    credited: float = 0.0  # how far the queue ahead last moved up on a level shrink...
+    credited_ts: int = 0  # ...and when: trades at our price soon after are that, not more
 
     def marketable(self, yes_px: float) -> bool:
         """Would a resting order on the other side at yes_px match us?"""
@@ -209,7 +215,12 @@ class SimBroker(Broker):
             opposite, same = (asks, bids) if w.buys_yes else (bids, asks)
             if self.queue.credit_cancels:
                 here = sum(lv.size for lv in same if abs(lv.price - w.yes_price) < EPS)
-                w.queue_ahead = min(w.queue_ahead, here)  # cancels ahead of us move us up
+                if here < w.queue_ahead - EPS:  # cancels ahead of us (or trades yet to print) move us up
+                    if self.engine.now - w.credited_ts > self.queue.match_trades_ms:
+                        w.credited = 0.0
+                    w.credited += w.queue_ahead - here
+                    w.credited_ts = self.engine.now
+                    w.queue_ahead = here
             if self.queue.fill_on_cross and w.order.id not in self._canceling:
                 self._take(w, opposite, Liquidity.MAKER, at_level_price=False)
                 self._finish_if_filled(w)
@@ -229,9 +240,13 @@ class SimBroker(Broker):
             if through and hits_us:
                 qty = w.remaining if self.queue.through_fill == "full" else min(w.remaining, left)
             elif abs(t.price - w.yes_price) < EPS and hits_us:
-                ahead = min(w.queue_ahead, left)
+                seen = 0.0  # this trade's part the level already lost, and the queue with it
+                if w.credited > EPS and self.engine.now - w.credited_ts <= self.queue.match_trades_ms:
+                    seen = min(w.credited, left)
+                    w.credited -= seen
+                ahead = min(w.queue_ahead, left - seen)
                 w.queue_ahead -= ahead
-                qty = min(w.remaining, left - ahead)
+                qty = min(w.remaining, left - seen - ahead)
             else:
                 continue
             if qty > EPS:
