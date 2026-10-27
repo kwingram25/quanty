@@ -61,13 +61,14 @@ def _to(remote_dir: str) -> str:
 
 
 def check_keys(path: Path) -> list[str]:
-    """The key names a keys file sets (never their values); refuses a file with none of them."""
+    """The names a keys file sets (never their values): API keys and settings like QUANTY_UI_PASSWORD;
+    refuses a file with none of the API keys."""
     names = []
     for line in path.read_text().splitlines():
         k, sep, v = line.partition("=")
-        if sep and k.strip() in KEY_NAMES and v.strip():
+        if sep and not k.lstrip().startswith("#") and k.strip() and v.strip():
             names.append(k.strip())
-    if not names:
+    if not set(names) & set(KEY_NAMES):
         raise ValueError(f"{path} sets none of {', '.join(KEY_NAMES)}")
     return names
 

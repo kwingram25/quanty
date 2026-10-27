@@ -157,7 +157,7 @@ def test_keys_go_to_the_server_once_apart_from_the_code(
     (tmp_path / "bot").mkdir()
     keys = tmp_path / "bot" / ".env.server"
     keys.write_text("# the server's own\nKALSHI_KEY_ID=abc\nKALSHI_SECRET_KEY=-----BEGIN-----\nOTHER=1\n")
-    assert deploy.check_keys(keys) == ["KALSHI_KEY_ID", "KALSHI_SECRET_KEY"]
+    assert deploy.check_keys(keys) == ["KALSHI_KEY_ID", "KALSHI_SECRET_KEY", "OTHER"]  # names, not values
     sent: dict[str, object] = {}
 
     def run(cmd: list[str], **kw: object) -> subprocess.CompletedProcess[bytes]:
@@ -169,7 +169,7 @@ def test_keys_go_to_the_server_once_apart_from_the_code(
         cli.app, ["keys", "me@srv", "--file", str(keys), "--path", str(tmp_path / "bot")]
     )
     assert res.exit_code == 0, res.output
-    assert "KALSHI_KEY_ID, KALSHI_SECRET_KEY" in res.output and "abc" not in res.output  # names, never values
+    assert "KALSHI_KEY_ID, KALSHI_SECRET_KEY, OTHER" in res.output and "abc" not in res.output  # never values
     cmd = sent["cmd"]
     assert isinstance(cmd, list) and cmd[:2] == ["ssh", "me@srv"]
     assert (
