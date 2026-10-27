@@ -42,13 +42,24 @@ def test_local_folder_and_nested_repo(tmp_path: Path) -> None:
     assert found["secret"].X == "nested"
 
 
-def test_config_paths_shadow_local(tmp_path: Path) -> None:
+def test_a_projects_own_strategies_shadow_config_paths(tmp_path: Path) -> None:
     local, extra = tmp_path / "strategies", tmp_path / "extra"
     local.mkdir()
     extra.mkdir()
     (local / "s.py").write_text("X = 1\n")
     (extra / "s.py").write_text("X = 2\n")
-    assert plugins.discover([extra], include_examples=False, local=local)["s"].X == 2
+    assert plugins.discover([extra], include_examples=False, local=local)["s"].X == 1  # what it deploys
+
+
+def test_strategies_import_helpers_beside_them_the_projects_first(tmp_path: Path) -> None:
+    project, other = tmp_path / "proj", tmp_path / "other"
+    for root, value in ((project, "here"), (other, "elsewhere")):
+        (root / "beside_pkg").mkdir(parents=True)
+        (root / "beside_pkg" / "__init__.py").write_text(f"WHERE = {value!r}\n")
+    (project / "strategies").mkdir()
+    (project / "strategies" / "s.py").write_text("from beside_pkg import WHERE\n")
+    got = plugins.discover([], include_examples=False, local=project / "strategies", python_paths=[other])
+    assert got["s"].WHERE == "here"
 
 
 def test_missing_local_folder_is_fine(tmp_path: Path) -> None:

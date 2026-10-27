@@ -1,9 +1,10 @@
 """Discover strategy modules from the bundled examples, ./strategies and the user's strategy_paths.
 
 Every non-underscore *.py file in a search path is a strategy module, named after its file.
-Search order, later shadowing earlier: bundled examples, ./strategies (gitignored; run from the
-repo root), its immediate subfolders (e.g. a private repo cloned into strategies/private), then
-strategy_paths from the user config.
+Search order, later shadowing earlier: bundled examples, strategy_paths from the user config, then
+./strategies and its immediate subfolders (e.g. a private repo cloned into strategies/private): a
+project's own files win, since they're what it deploys. The folder holding ./strategies (the
+project) is importable, so strategies can keep helper packages beside them (`from models import x`).
 """
 
 import importlib.util
@@ -45,12 +46,15 @@ def discover(
     local: Path | None = LOCAL,
     python_paths: list[Path] | None = None,
 ) -> dict[str, ModuleType]:
-    """Map strategy name -> module; later paths shadow earlier ones. python_paths are added to
-    sys.path first, so strategies can import their own helper packages."""
-    for extra in python_paths or ():
-        if str(extra) not in sys.path:
-            sys.path.insert(0, str(extra))
-    search = ([EXAMPLES] if include_examples else []) + (_local_paths(local) if local else []) + paths
+    """Map strategy name -> module; later paths shadow earlier ones. python_paths, and the folder
+    holding `local`, are added to sys.path first, so strategies can import their own helper packages
+    (the project's own first)."""
+    here = [local.resolve().parent] if local is not None and local.is_dir() else []
+    for extra in [*(python_paths or ()), *here]:  # the last inserted is searched first
+        if str(extra) in sys.path:
+            sys.path.remove(str(extra))
+        sys.path.insert(0, str(extra))
+    search = ([EXAMPLES] if include_examples else []) + paths + (_local_paths(local) if local else [])
     files: dict[str, Path] = {}
     for path in search:
         for file in _module_files(path):
