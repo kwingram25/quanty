@@ -101,9 +101,7 @@ def test_kalshi_sequence_gap_is_reported_and_reconnect_resets() -> None:
         isinstance(events[1], Status) and events[1].key == "kalshi:seq_gap" and "2 -> 5" not in events[1].text
     )
     assert "1 -> 5" in events[1].text
-    fresh = k.parse(raw(k_snapshot(TK, yes=[("0.44", "1")], no=[], seq=1)))  # a new subscription's snapshot
-    assert [type(e) for e in fresh] == [Book]  # a new stream, not a gap
-    assert [type(e) for e in k.parse(raw(k_delta(TK, "yes", "0.45", "2", seq=2)))] == [Book]  # it carries on
+    assert k.parse(raw(k_delta(TK, "yes", "0.44", "1", seq=1))) != []  # seq 1: a new subscription, not a gap
     k.on_link(Link("v", T0, "up"))
     assert k.parse(raw(k_delta(TK, "yes", "0.43", "1", seq=6))) == []  # no snapshot yet on this connection
 
@@ -344,20 +342,3 @@ def test_a_data_only_replay_reads_index_values_and_skips_books_unparsed(tmp_path
         "IndexValue",
         "MarketTrade",
     }
-
-
-def test_kalshi_books_ignore_a_replaced_connection_still_sending() -> None:
-    # a subscription change replaces the connection with overlap: for seconds both send on sid 1, the
-    # old one numbered far from the new; each book follows the stream its snapshot came on
-    k = kalshi()
-    k.parse(raw(k_snapshot(TK, yes=[("0.40", "10")], no=[("0.55", "3")], seq=2_116_880)))
-    k.parse(raw(k_delta(TK, "no", "0.45", "50", seq=2_116_881)))  # the old connection: a NO bid at 45c
-    k.on_link(Link("kalshi", T0, "up"))  # the new connection
-    (snap,) = k.parse(raw(k_snapshot(TK, yes=[("0.40", "10")], no=[("0.55", "3")], seq=1)))
-    assert isinstance(snap, Book) and snap.asks == ((0.45, 3.0),)  # YES asks are 1 - NO bids
-    gone = k.parse(raw(k_delta(TK, "no", "0.45", "-50", seq=2_116_882)))  # the old one, still sending
-    assert gone == []  # not applied (it would take the new book's NO bids below zero), and no gap
-    (book,) = k.parse(raw(k_delta(TK, "yes", "0.41", "5", seq=2)))  # the new one carries on
-    assert isinstance(book, Book) and book.bids[0] == (0.41, 5.0) and book.asks == ((0.45, 3.0),)
-    events = k.parse(raw(k_delta(TK, "yes", "0.42", "1", seq=9)))  # the new one skips 3..8: a real gap
-    assert any(isinstance(e, Status) and "seq 2 -> 9" in e.text for e in events)

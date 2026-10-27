@@ -24,7 +24,6 @@ from quanty.venues.base import VenueConfig, VenueFeed, Window, same_book, top
 
 VENUE = "kalshi"
 WS_PATH = "/trade-api/ws/v2"
-MAX_SEQ_GAP = 10_000  # missed messages on one stream; further apart is another connection's numbering
 _BOOK_SEQ = re.compile(r'\{\s*"type"\s*:\s*"(orderbook_\w+)"\s*,\s*"sid"\s*:\s*(\d+)\s*,\s*"seq"\s*:\s*(\d+)')
 TERM_FIELDS = (
     "floor_strike",
@@ -124,12 +123,7 @@ class Kalshi(VenueFeed):
         self._settled: set[str] = set()
         self._books: dict[str, tuple[SortedDict, SortedDict]] = {}  # ticker -> (yes bids, no bids)
         self._last_book: dict[str, Book] = {}
-        # sequences per subscription id: while a replaced connection overlaps its successor, both send
-        # the same sid, numbered apart. Each book follows the stream its snapshot came on
-        self._streams: dict[int, dict[int, int]] = {}  # sid -> stream -> its last seq
-        self._next_stream = 0
-        self._book_stream: dict[str, int] = {}  # ticker -> the stream its book is built from
-        self._msg_stream: int | None = None  # the stream of the message being parsed
+        self._seq: dict[int, int] = {}
         self._trade_ids: dict[str, None] = {}
         self._ticker_marks = tuple(f'"{s}-' for s in self.config.series)  # tickers start "<series>-"
 
@@ -275,7 +269,7 @@ class Kalshi(VenueFeed):
         if link.state == "up":  # a new connection sends fresh snapshots
             self._books.clear()
             self._last_book.clear()
-            self._book_stream.clear()  # its streams stay known: the old connection may send for seconds yet
+            self._seq.clear()
 
     def parse(self, raw: Raw) -> list[Event]:
         text = raw.text
@@ -300,26 +294,12 @@ class Kalshi(VenueFeed):
         if m is None:
             return ""
         kind, sid, seq = m[1], int(m[2]), int(m[3])
-        streams = self._streams.setdefault(sid, {})
-        # the stream this continues; a connection replaced with overlap leaves two on one sid for seconds
-        stream = next((s for s, last in streams.items() if seq == last + 1), None)
-        gap = ""
-        if stream is None:
-            # a delta a little past a stream's last: messages missed on it, its books stale till a snapshot
-            near = [s for s, last in streams.items() if last < seq <= last + MAX_SEQ_GAP]
-            if kind == "orderbook_delta" and near:
-                stream = max(near, key=lambda s: streams[s])
-                if stream in self._book_stream.values():
-                    last = streams[stream]
-                    gap = f"sid {sid}: seq {last} -> {seq}; books may be stale until the next snapshot"
-            else:  # a snapshot, or another connection's numbering: a stream of its own
-                stream = self._next_stream
-                self._next_stream += 1
-        streams[stream] = seq
-        for old in sorted(streams)[:-4]:  # streams of connections long gone
-            del streams[old]
-        self._msg_stream = stream
-        return gap
+        prev = self._seq.get(sid)
+        self._seq[sid] = seq
+        # seq 1 starts a fresh subscription (also how a reconnect shows in recordings without link events)
+        if kind == "orderbook_delta" and prev is not None and seq not in (1, prev + 1):
+            return f"sid {sid}: seq {prev} -> {seq}; books may be stale until the next snapshot"
+        return ""
 
     def _decode(self, raw: Raw, text: str) -> list[Event]:
         msg = orjson.loads(text)
@@ -380,14 +360,10 @@ class Kalshi(VenueFeed):
                 SortedDict({round(float(p), 4): float(q) for p, q in body.get("yes_dollars_fp", [])}),
                 SortedDict({round(float(p), 4): float(q) for p, q in body.get("no_dollars_fp", [])}),
             )
-            if self._msg_stream is not None:
-                self._book_stream[ticker] = self._msg_stream
         else:
             books = self._books.get(ticker)
             if books is None:
                 return []  # deltas before this connection's snapshot (e.g. a replay starting mid-stream)
-            if self._book_stream.get(ticker, self._msg_stream) != self._msg_stream:
-                return []  # the connection being replaced: this book is the new one's, from its snapshot
             side = books[0] if body["side"] == "yes" else books[1]
             p = round(float(body["price_dollars"]), 4)
             q = round(side.get(p, 0.0) + float(body["delta_fp"]), 6)
