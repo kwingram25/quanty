@@ -332,6 +332,12 @@ def test_a_data_only_replay_reads_index_values_and_skips_books_unparsed(tmp_path
     feeds_ = {"kalshi": kalshi()}
     got = list(Replay(feeds_, tmp_path, T0, T0 + 10, data_only=True))
     assert [type(e).__name__ for e in got] == ["IndexValue"]
+    rec = Recorder(tmp_path)
+    rec.write(Raw("polymarket_us", T0, '{"marketData":{"marketSlug":"x"}}'))
+    rec.close()
+    assert not list(
+        Replay({"polymarket_us": feeds.make("polymarket_us", {})}, tmp_path, T0, T0 + 10, data_only=True)
+    )
     assert {type(e).__name__ for e in Replay({"kalshi": kalshi()}, tmp_path, T0, T0 + 10)} >= {
         "IndexValue",
         "MarketTrade",

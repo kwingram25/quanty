@@ -898,13 +898,16 @@ def _session(
         spare_brokers=spares,
         code=version.project(Path.cwd()),  # the code it ran, with each strategy
     )
-    _warm_and_restore(trader, exp, feeds, data, ledger_path)
-    if armed:  # what it holds for real, against what the venues say the account holds
-        from quanty import reconcile
 
-        found = asyncio.run(reconcile.on_start(trader))
-        for f in found:
-            typer.echo(f"{'halted' if f.halts else 'note'}: {f.text()}", err=True)
+    async def ready() -> None:  # once warmed up, before the first live event trades
+        _restore(trader, ledger_path)
+        if armed:  # what it holds for real, against what the venues say the account holds
+            from quanty import reconcile
+
+            for f in await reconcile.on_start(trader):
+                typer.echo(f"{'halted' if f.halts else 'note'}: {f.text()}", err=True)
+        typer.echo("trading")
+
     run_name = f"session/{ledger_path.stem}"
     store = ControlStore(data / "control.sqlite")
     controller = Controller(store, run_name, trader, can_arm=armed)
@@ -919,6 +922,8 @@ def _session(
         controller=controller,
         record=record,
         keep_days=keep,
+        warmup=lambda: _warm(trader, exp, feeds, data),
+        on_ready=ready,
     )
     ids = [i.id for i in instances]
 
@@ -967,11 +972,9 @@ def _span(seconds: int) -> str:
     return " ".join([f"{h} h"] * bool(h) + [f"{m} min"] * bool(m)) or f"{seconds} s"
 
 
-def _warm_and_restore(
-    trader: Engine, exp: experiment.Experiment, feeds: Path, data: Path, ledger: Path
-) -> None:
+def _warm(trader: Engine, exp: experiment.Experiment, feeds: Path, data: Path) -> None:
     """Before a session trades: replay the recent recordings (orders off) for the history its
-    strategies need (or the experiment's warmup_s), then restore what the run holds from its ledger."""
+    strategies need (or the experiment's warmup_s). The session runs it while its feeds connect."""
     seconds, data_only = experiment.warmup(exp, (i.strategy for i in trader.instances.values()))
     if seconds:
         end = int(time.time() * 1000)
@@ -986,6 +989,10 @@ def _warm_and_restore(
                 trader.process(ev)
                 n += 1
         typer.echo(f"  warmed up on {n:,} events" + ("" if n else " (no recordings for that time yet)"))
+
+
+def _restore(trader: Engine, ledger: Path) -> None:
+    """What the run holds, from its ledger (after the warm-up, so replayed settlements pay nothing)."""
     got = trader.restore()
     if got["fills"]:
         typer.echo(

@@ -155,8 +155,10 @@ class PolymarketUS(VenueFeed):
         if link.state == "up":
             self._fresh.clear()
 
+    holds_data = False  # books, trades and discovery only (its strikes come with the markets)
+
     def carries_data(self, text: str) -> bool:
-        return False  # books, trades and discovery only (its strikes come with the markets)
+        return False
 
     def parse(self, raw: Raw) -> list[Event]:
         msg = orjson.loads(raw.text)

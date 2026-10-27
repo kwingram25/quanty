@@ -68,6 +68,10 @@ class Feed(ABC):
     config_type: ClassVar[type[FeedConfig]] = FeedConfig
     parser_version: ClassVar[int] = 1
     replayable: ClassVar[bool] = True  # False = the source can't be backfilled; record it or lose it
+    # for data-only replays (a model warm-up): a fixed string every message that can hold data contains,
+    # so recordings are filtered before they're decoded (None: any message may); and whether any can
+    holds_data: ClassVar[bool] = True
+    data_marker: ClassVar[str | None] = None
 
     def __init__(self, name: str, config: FeedConfig) -> None:
         self.name = name

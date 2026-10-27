@@ -7,6 +7,16 @@ file is opened) and the command line. Projects from `quanty init` depend on one 
 (`quanty-py>=0.3.0,<0.4`), so moving to the next is your choice: raise the bound in
 `pyproject.toml`, then `quanty upgrade`.
 
+## Unreleased
+
+- Restarts are quicker. A data-only warm-up skips messages that can't hold data before decoding
+  them, and doesn't read feeds that hold none (Polymarket US): about 3 times faster. A session
+  connects its feeds while it warms up: what arrives meanwhile builds its books and markets (orders
+  off), and it trades from the next event, where it waited for the warm-up before.
+- The generated Dockerfile installs from `pyproject.toml`, `uv.lock` and `vendor/` before copying
+  the project, so a deploy that changes neither rebuilds in seconds (`quanty upgrade` brings it).
+- Feeds can declare `data_marker` and `holds_data`, for data-only replays (docs/extending.md).
+
 ## 0.3.0 (2026-10-27)
 
 Upgrading from 0.2: change the bound to `quanty-py>=0.3.0,<0.4`, then `quanty upgrade`. Nothing

@@ -49,7 +49,9 @@ carry on its run:
 - **Warm-up, as the strategies need.** A strategy that declares `warmup_s` (say 4 hours of an
   index, for its model) gets that much of the recordings replayed first, with orders off, so it
   trades warm from the first event; index values only, unless it asks for books too, so hours
-  replay in seconds (see [Writing strategies](strategies.md#state-across-restarts)). It rebuilds
+  replay in seconds (see [Writing strategies](strategies.md#state-across-restarts)). The live
+  feeds connect meanwhile: what they bring during the warm-up builds books and markets too (orders
+  still off), and trading starts on the first event after. It rebuilds
   what strategies learn from the markets, not what they learned from their own fills. A new
   server has no recordings yet: until it has recorded that long, those strategies can't trade.
 

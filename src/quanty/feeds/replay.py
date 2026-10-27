@@ -1,6 +1,6 @@
 """Turn recordings back into the event stream the engine consumes."""
 
-from collections.abc import Iterator, Mapping
+from collections.abc import Iterable, Iterator, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -36,7 +36,12 @@ class Replay:
         self.health = {n: FeedHealth(n, f.config, self.start) for n, f in self.feeds.items()}
 
     def __iter__(self) -> Iterator[Event]:
-        for item in read_all(self.root, self.feeds, self.start, self.end):
+        feeds: Iterable[str] = self.feeds
+        contains = None
+        if self.data_only:  # only what can hold data, picked out of the recordings before decoding
+            feeds = [n for n, f in self.feeds.items() if f.holds_data]
+            contains = {n: self.feeds[n].data_marker for n in feeds}
+        for item in read_all(self.root, feeds, self.start, self.end, contains):
             health = self.health[item.feed]
             if isinstance(item, Link):
                 health.on_link(item)

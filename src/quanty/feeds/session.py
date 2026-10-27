@@ -7,7 +7,7 @@ import asyncio
 import contextlib
 import dataclasses
 import signal
-from collections.abc import Callable, Mapping
+from collections.abc import Awaitable, Callable, Mapping
 from pathlib import Path
 
 import structlog
@@ -60,10 +60,15 @@ class RecordSession:
         controller: "Controller | None" = None,
         record: bool = True,
         keep_days: float | None = None,
+        warmup: Callable[[], None] | None = None,
+        on_ready: Callable[[], Awaitable[None]] | None = None,
     ) -> None:
         """trader: an engine to drive with the live events (paper/shadow/live); None = record only.
         record: write the raw messages to disk (off when a separate recorder does, on its own core).
-        keep_days: delete this session's recordings older than this, checked hourly (None: keep all)."""
+        keep_days: delete this session's recordings older than this, checked hourly (None: keep all).
+        warmup: rebuilds the trader's state from recordings (Engine.warming), run in a thread while the
+        feeds connect; live events meanwhile wait, then go through warming too (no orders on old
+        events), and on_ready (restoring positions, say) runs before the first live event trades."""
         self.trader = trader
         self.controller = controller  # applies UI commands to the trader (quanty.control)
         if controller is not None:
@@ -78,6 +83,9 @@ class RecordSession:
         start = now_ms()
         self.health = {name: FeedHealth(name, f.config, start) for name, f in self.feeds.items()}
         self._logged_errors: set[str] = set()
+        self.warmup, self.on_ready = warmup, on_ready
+        self.ready = warmup is None and on_ready is None  # trading: live events reach the strategies
+        self._held: list[Event] = []  # live events while warming up
 
     def sink(self, item: Raw | Link) -> None:
         if self.record:
@@ -102,6 +110,9 @@ class RecordSession:
     def _drive(self, events: list[Event]) -> None:
         if self.trader is None:
             return
+        if not self.ready:
+            self._held.extend(events)
+            return
         for ev in events:
             self.trader.advance(ev.ts)  # due order arrivals, cancels and clock ticks first
             self.trader.process(ev)
@@ -114,8 +125,28 @@ class RecordSession:
         """Advance the engine with the wall clock, so order latency and clock ticks fire on time."""
         assert self.trader is not None
         while True:
-            self.trader.advance(now_ms())
+            if self.ready:
+                self.trader.advance(now_ms())
             await asyncio.sleep(TICK_S)
+
+    async def _prepare(self, tasks: list["asyncio.Task[None]"]) -> None:
+        """Warm up off the event loop while the feeds connect, put the live events that came in
+        meanwhile through warming as well, then trade (with the controls) from the next one."""
+        assert self.trader is not None
+        if self.warmup is not None:
+            await asyncio.to_thread(self.warmup)
+        with self.trader.warming():  # no event loop turn in here, so nothing new arrives meanwhile
+            held, self._held = self._held, []
+            for ev in held:
+                if ev.ts < self.trader.now:  # the replay had it already (the recorder got it too)
+                    continue
+                self.trader.advance(ev.ts)
+                self.trader.process(ev)
+        if self.on_ready is not None:
+            await self.on_ready()
+        self.ready = True
+        if self.controller is not None:
+            tasks.append(asyncio.create_task(self.controller.run_forever(), name="controls"))
 
     def status(self) -> dict[str, Status]:
         now = now_ms()
@@ -137,8 +168,11 @@ class RecordSession:
         tasks = [asyncio.create_task(f.run(self.sink), name=f"feed:{n}") for n, f in self.feeds.items()]
         if self.trader is not None:
             tasks.append(asyncio.create_task(self._tick(), name="engine clock"))
-        if self.controller is not None:
-            tasks.append(asyncio.create_task(self.controller.run_forever(), name="controls"))
+            if self.ready:
+                if self.controller is not None:
+                    tasks.append(asyncio.create_task(self.controller.run_forever(), name="controls"))
+            else:
+                tasks.append(asyncio.create_task(self._prepare(tasks), name="warm-up"))
         end = None if duration_s is None else now_ms() + int(duration_s * 1000)
         next_window = (now_ms() // self.window_ms + 1) * self.window_ms
         try:

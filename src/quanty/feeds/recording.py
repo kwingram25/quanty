@@ -14,7 +14,7 @@ import gzip
 import heapq
 import time
 import zlib
-from collections.abc import Iterable, Iterator
+from collections.abc import Iterable, Iterator, Mapping
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import IO, Literal, cast
@@ -133,29 +133,41 @@ def hours(start: int, end: int) -> Iterator[int]:
         t += HOUR_MS
 
 
-def read(root: Path, feed: str, start: int, end: int) -> Iterator[Raw | Link]:
-    """One feed's recorded items with start <= t < end, in recorded order."""
+def read(root: Path, feed: str, start: int, end: int, contains: str | None = None) -> Iterator[Raw | Link]:
+    """One feed's recorded items with start <= t < end, in recorded order. contains: only lines with
+    this text (link changes included only if they have it), picked out before decoding."""
     for hour in hours(start, end):
         path = hour_path(root, feed, hour)
         if not path.exists():
             continue
-        # errors="replace": bytes a damaged block leaves become a line that fails to decode, and is skipped
-        with gzip.open(path, "rt", errors="replace") as f:
+        for line in _lines(path, contains):
             try:
-                for line in f:
-                    try:
-                        item = decode(feed, line)
-                    except (ValueError, KeyError):  # a damaged line: a writer killed mid-write
-                        continue
-                    if start <= item.t < end:
-                        yield item
-            except (EOFError, zlib.error, gzip.BadGzipFile):
-                pass  # still being written, or a writer died mid-flush: the rest isn't readable
+                item = decode(feed, line)
+            except (ValueError, KeyError):  # a damaged line: a writer killed mid-write
+                continue
+            if start <= item.t < end:
+                yield item
 
 
-def read_all(root: Path, feeds: Iterable[str], start: int, end: int) -> Iterator[Raw | Link]:
-    """Several feeds merged by receive time."""
-    return heapq.merge(*(read(root, f, start, end) for f in feeds), key=lambda item: item.t)
+def _lines(path: Path, contains: str | None) -> Iterator[str]:
+    """A recording's lines; with contains, only those that have it (a substring test here is several
+    times faster than decoding every line, and than gzip | grep)."""
+    # errors="replace": bytes a damaged block leaves become a line that fails to decode, and is skipped
+    with gzip.open(path, "rt", errors="replace") as f:
+        try:
+            for line in f:
+                if contains is None or contains in line:
+                    yield line
+        except (EOFError, zlib.error, gzip.BadGzipFile):
+            pass  # still being written, or a writer died mid-flush: the rest isn't readable
+
+
+def read_all(
+    root: Path, feeds: Iterable[str], start: int, end: int, contains: Mapping[str, str | None] | None = None
+) -> Iterator[Raw | Link]:
+    """Several feeds merged by receive time; contains: per feed, as for read."""
+    its = (read(root, f, start, end, (contains or {}).get(f)) for f in feeds)
+    return heapq.merge(*its, key=lambda item: item.t)
 
 
 def recorded_feeds(root: Path) -> list[str]:
