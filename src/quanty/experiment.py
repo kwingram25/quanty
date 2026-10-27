@@ -36,7 +36,7 @@ from pydantic import Discriminator, Field, NonNegativeInt, PositiveFloat, Positi
 
 from quanty.brokers.live import LiveBroker
 from quanty.brokers.shadow import ShadowBroker
-from quanty.brokers.sim import SimBroker
+from quanty.brokers.sim import QueueModel, SimBroker
 from quanty.core.broker import Broker
 from quanty.core.engine import Instance
 from quanty.core.fees import FeeModel
@@ -47,10 +47,24 @@ from quanty.signals import AnySignalConfig, Signal
 from quanty.signals import make as make_signal
 
 
+class QueueConfig(ConfigModel):
+    """How simulated resting orders queue and fill (quanty.brokers.sim.QueueModel); the defaults are
+    the realistic model."""
+
+    measure_at: Literal["arrival", "decision"] = Field("arrival", description="When the queue ahead is read")
+    credit_cancels: bool = Field(True, description="The queue ahead shrinks when its level shrinks")
+    fill_on_cross: bool = Field(True, description="The other side moving onto the order fills it")
+    through_fill: Literal["trade_size", "full"] = Field(
+        "trade_size", description="A trade through our price fills this much"
+    )
+    cancel_stops_fills: bool = Field(False, description="No fills once a cancel is sent, vs until it arrives")
+
+
 class SimBrokerConfig(ConfigModel):
     kind: Literal["sim"] = "sim"
     latency_ms: NonNegativeInt = Field(0, description="Delay before orders and cancels reach the venue")
     arrival: Literal["at_latency", "next_event"] = "at_latency"
+    queue: QueueConfig = QueueConfig()
 
 
 class ShadowBrokerConfig(SimBrokerConfig):
@@ -238,9 +252,10 @@ def make_broker(
     if isinstance(cfg, LiveBrokerConfig):
         return LiveBroker(name, armed=armed, max_qty=cfg.max_qty, max_notional=cfg.max_notional,
                           error_limit=cfg.error_limit, poll_s=cfg.poll_s)  # fmt: skip
+    queue = QueueModel(**cfg.queue.model_dump())
     if isinstance(cfg, ShadowBrokerConfig):
-        return ShadowBroker(name, latency_ms=cfg.latency_ms, arrival=cfg.arrival, fees=fees)
-    return SimBroker(name, latency_ms=cfg.latency_ms, arrival=cfg.arrival, fees=fees)
+        return ShadowBroker(name, latency_ms=cfg.latency_ms, arrival=cfg.arrival, fees=fees, queue=queue)
+    return SimBroker(name, latency_ms=cfg.latency_ms, arrival=cfg.arrival, fees=fees, queue=queue)
 
 
 def live_brokers(exp: Experiment) -> list[str]:

@@ -114,3 +114,20 @@ def test_grids_expand_into_one_instance_per_combination(strategies: dict[str, Mo
         experiment.parse(
             {"instances": [{"id": "x", "strategy": "example_favorite", "grid": {"min_conf": []}}]}
         )
+
+
+def test_a_broker_queue_model_comes_from_the_file() -> None:
+    from quanty.brokers.sim import QueueModel, SimBroker
+    from quanty.experiment import make_broker
+
+    exp = experiment.parse(
+        {
+            **inst(),
+            "brokers": {
+                "maker": {"latency_ms": 300, "queue": {"measure_at": "decision", "fill_on_cross": False}}
+            },
+        }
+    )
+    b = make_broker("maker", exp.brokers["maker"], {})
+    assert isinstance(b, SimBroker) and b.queue == QueueModel(measure_at="decision", fill_on_cross=False)
+    assert make_broker("sim", exp.brokers["sim"], {}).queue == QueueModel()  # type: ignore[attr-defined]
