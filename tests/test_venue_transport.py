@@ -91,6 +91,42 @@ def test_kalshi_discovers_paginates_and_updates_subscriptions_in_place() -> None
     assert [i.state for i in items if isinstance(i, Link)] == ["up"]
 
 
+def test_kalshi_near_money_follows_strikes_in_play_and_their_neighbors() -> None:
+    now = now_ms()
+    quotes = {"T1": (0.99, 1.0), "T2": (0.99, 1.0), "T3": (0.97, 0.98), "T4": (0.40, 0.45),
+              "T5": (0.01, 0.02), "T6": (0.0, 0.01), "T7": (0.0, 0.01), "T8": (0.0, 1.0)}  # fmt: skip
+
+    def ladder() -> list[dict[str, Any]]:
+        return [
+            kalshi_market(f"KXL-H1-{t}", now - MIN, now + 59 * MIN, event_ticker="KXL-H1",
+                          strike_type="greater", floor_strike=1000.0 + 100 * int(t[1]),
+                          yes_bid_dollars=f"{b:.4f}", yes_ask_dollars=f"{a:.4f}")
+            for t, (b, a) in quotes.items()
+        ]  # fmt: skip
+
+    def rest(req: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"markets": ladder(), "cursor": ""})
+
+    feed = feeds.make("kalshi", {"series": ["KXL"], "near_money": {"KXL": 1}})
+    assert isinstance(feed, Kalshi)
+    recorded: list[Raw | Link] = []
+
+    async def poll() -> frozenset[str]:
+        feed._next_poll.clear()
+        async with httpx.AsyncClient(transport=mock_rest(rest)) as client:
+            await feed.discover(client, recorded.append)
+        return feed.wanted(now_ms())
+
+    # in play: T3..T5 (T1, T2 at 99¢, T6, T7 at 1¢, T8 an empty book); one neighbor each side
+    assert asyncio.run(poll()) == {f"KXL-H1-{t}" for t in ("T2", "T3", "T4", "T5", "T6")}
+    quotes.update(T3=(0.99, 1.0), T4=(0.99, 1.0), T5=(0.99, 1.0), T6=(0.97, 0.98), T7=(0.40, 0.45))
+    # the price moved up two strikes: T8 joins, and the strikes followed before stay
+    assert asyncio.run(poll()) == {f"KXL-H1-{t}" for t in ("T2", "T3", "T4", "T5", "T6", "T7", "T8")}
+    # every listed market is still recorded, followed or not, so replays see the whole ladder
+    events = [e for r in recorded if isinstance(r, Raw) for e in feed.parse(r)]
+    assert len({e.market.id for e in events if isinstance(e, MarketOpen)}) == 8
+
+
 def test_polymarket_replaces_connection_with_overlap_and_dedups_trades(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

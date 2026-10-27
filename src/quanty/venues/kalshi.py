@@ -5,12 +5,13 @@ Discovery uses the public REST API (no key); the WebSocket needs a key (KALSHI_K
 
 import json
 import re
+from collections import defaultdict
 from datetime import datetime
 from typing import Any, ClassVar, Literal
 
 import httpx
 import orjson
-from pydantic import Field, NonNegativeFloat, PositiveFloat
+from pydantic import Field, NonNegativeFloat, NonNegativeInt, PositiveFloat
 from sortedcontainers import SortedDict
 from websockets.asyncio.client import ClientConnection
 
@@ -50,10 +51,22 @@ class KalshiConfig(VenueConfig):
     maker_fee_rate: NonNegativeFloat = Field(
         0.0, description="Quadratic maker fee coefficient (series-dependent)"
     )
+    near_money: dict[str, NonNegativeInt] = Field(
+        {},
+        description="Strike ladders: series -> n, subscribe only to each event's strikes still in play "
+        "(YES bid < 99¢ and ask > 1¢) plus n either side, e.g. {KXBTCD = 2}; other series get every market",
+    )
 
 
 def _ts(iso: str) -> int:
     return int(datetime.fromisoformat(iso.replace("Z", "+00:00")).timestamp() * 1000)
+
+
+def in_play(m: dict[str, Any]) -> bool:
+    """A market whose price still says either outcome can happen: not quoted at 99¢+ or 1¢-, and
+    not an empty book (Kalshi lists those as bid 0, ask 1)."""
+    bid, ask = float(m.get("yes_bid_dollars") or 0), float(m.get("yes_ask_dollars") or 0)
+    return bid < 0.99 and ask > 0.01 and not (bid == 0 and ask >= 1)
 
 
 def market_of(m: dict[str, Any], series: str, cfg: KalshiConfig) -> Market:
@@ -77,6 +90,10 @@ class Kalshi(VenueFeed):
     Books are rebuilt from the snapshot and deltas Kalshi sends (bids only on each side: YES
     asks are 1 − NO bids) and emitted when the top book_depth levels change. A sequence gap is
     reported as a Status event keyed "<feed>:seq_gap", since books may be wrong until the next snapshot.
+
+    A wide strike ladder (KXBTCD lists dozens of strikes an hour) can be followed near the money only
+    (near_money): discovery still records every market, but only the strikes in play and their
+    neighbors get books and trades.
     """
 
     kind = "kalshi"
@@ -91,6 +108,7 @@ class Kalshi(VenueFeed):
         self.signer: KalshiSigner | None = None
         # transport state
         self._next_poll: dict[str, int] = {}
+        self._followed: dict[str, set[str]] = {}  # near_money series -> tickers subscribed so far
         self._ws: ClientConnection | None = None
         self._sids: dict[str, int] = {}
         self._cmd = 0
@@ -159,21 +177,51 @@ class Kalshi(VenueFeed):
                 "min_close_ts": (now - int(self.config.results_for_s * 1000)) // 1000,
                 "max_close_ts": (now + int(self.config.lookahead_s * 1000)) // 1000,
             }  # fmt: skip
+            listed: list[dict[str, Any]] = []
             while True:
                 resp = await client.get(f"{self.rest_url()}/markets", params=params)
                 resp.raise_for_status()
                 body = resp.json()
                 sink(self.rest("markets", body, series=series))
-                for m in body.get("markets", []):
-                    self.windows[m["ticker"]] = Window(m["ticker"], _ts(m["open_time"]), _ts(m["close_time"]),
-                                                       m.get("result") in ("yes", "no"))  # fmt: skip
+                listed += body.get("markets", [])
                 if not body.get("cursor"):
                     break
                 params["cursor"] = body["cursor"]
+            follow = self._near_money(series, listed)
+            for m in listed:
+                if follow is None or m["ticker"] in follow:
+                    self.windows[m["ticker"]] = Window(m["ticker"], _ts(m["open_time"]), _ts(m["close_time"]),
+                                                       m.get("result") in ("yes", "no"))  # fmt: skip
             waiting = any(_ts(m["open_time"]) <= now < _ts(m["close_time"]) and m.get("floor_strike") is None
-                          and m.get("strike_type") != "custom" for m in body.get("markets", []))  # fmt: skip
+                          and m.get("strike_type") != "custom" for m in listed)  # fmt: skip
             period = self.config.strike_poll_s if waiting else self.config.poll_s
             self._next_poll[series] = now + int(period * 1000)
+
+    def _near_money(self, series: str, markets: list[dict[str, Any]]) -> set[str] | None:
+        """Tickers to subscribe in a near_money series (None: not one, subscribe everything).
+
+        Per event, strikes sorted by value: the ones in play, plus n either side for the price to
+        move into between polls. A strike stays followed while it is listed, so a price moving back
+        and forth doesn't churn subscriptions; markets without a strike are always followed.
+        """
+        n = self.config.near_money.get(series)
+        if n is None:
+            return None
+        listed = {m["ticker"] for m in markets}
+        kept = self._followed[series] = self._followed.get(series, set()) & listed
+        ladders: dict[str, list[tuple[float, dict[str, Any]]]] = defaultdict(list)
+        for m in markets:
+            k = m.get("floor_strike") if m.get("floor_strike") is not None else m.get("cap_strike")
+            if k is None:
+                kept.add(m["ticker"])
+            else:
+                ladders[m.get("event_ticker") or m["ticker"]].append((float(k), m))
+        for rungs in ladders.values():
+            rungs.sort(key=lambda r: r[0])
+            live = [i for i, (_, m) in enumerate(rungs) if in_play(m)]
+            if live:
+                kept.update(m["ticker"] for _, m in rungs[max(0, live[0] - n) : live[-1] + n + 1])
+        return kept
 
     # --- parser ---
 

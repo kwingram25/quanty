@@ -124,6 +124,11 @@ For Kalshi and Polymarket US, your keys are in the project's `.env` (`quanty ini
 uv run quanty record --config feeds.toml --data data
 ```
 
+A Kalshi series that lists a wide ladder of strikes each hour (KXBTCD, BTC above $X, has dozens)
+can be followed near the money only: `near_money = { KXBTCD = 2 }` under `[feeds.kalshi]`
+subscribes to each hour's strikes still in play (YES bid under 99¢, ask over 1¢) and two either
+side. Every strike is still discovered and recorded; the others just get no books.
+
 Every message is stored exactly as received (`data/<feed>/<date>/<hour>.jsonl.gz`), with receive
 timestamps. Replays parse the same bytes in the same order, so a backtest on recordings sees what
 a live run would have seen:
