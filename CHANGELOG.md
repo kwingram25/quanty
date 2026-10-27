@@ -7,7 +7,7 @@ command line. A patch version (0.1.1) never does. Projects from `quanty init` de
 version (`quanty-py>=0.1.0,<0.2`), so moving to the next is your choice: raise the bound in
 `pyproject.toml`, then `quanty upgrade`.
 
-## 0.1.0 (unreleased)
+## 0.1.0 (2026-10-27)
 
 The first release.
 
