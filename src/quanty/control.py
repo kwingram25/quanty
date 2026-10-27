@@ -372,17 +372,37 @@ class Controller:
     def _reload(self) -> str:
         """Bring the running session in line with its experiment file: start instances it added,
         retire ones it dropped (no new entries; what they hold finishes), apply changed params
-        (dashboard edits still on top), brokers and live brokers' caps. New brokers, limits or feeds
-        need a restart."""
+        (dashboard edits still on top), brokers, live brokers' caps, simulated brokers' settings (for
+        orders from now on) and new simulated or shadow brokers. New live brokers, a broker changing
+        kind, limits and feeds need a restart."""
+        from quanty.brokers.sim import QueueModel, SimBroker
         from quanty.core.engine import Instance
-        from quanty.experiment import LiveBrokerConfig, strategy_class
+        from quanty.experiment import LiveBrokerConfig, make_broker, strategy_class
 
         if self.rebuild is None:
             raise ValueError("this session has no experiment file to reload (a demo?)")
         exp, strategies = self.rebuild()
         t, done = self.trader, []
+        fees = next((b.fees for b in t.brokers.values() if isinstance(b, SimBroker)), {})
         for name, cfg in exp.brokers.items():  # caps come from the file only, never the dashboard
             b = t.brokers.get(name)
+            if b is None:
+                if isinstance(cfg, LiveBrokerConfig):
+                    if any(exp.broker_of(s) == name for s in exp.instances):
+                        done.append(f"{name}: a new live broker; restart to use it")
+                    continue
+                t.add_broker(make_broker(name, cfg, fees))
+                done.append(f"{name}: added")
+                continue
+            if b.kind != cfg.kind:
+                done.append(f"{name}: is {b.kind} here and {cfg.kind} in the file; restart to change it")
+                continue
+            if isinstance(b, SimBroker) and not isinstance(cfg, LiveBrokerConfig):
+                queue = QueueModel(**cfg.queue.model_dump())
+                if (b.latency_ms, b.arrival, b.queue) != (cfg.latency_ms, cfg.arrival, queue):
+                    b.latency_ms, b.arrival, b.queue = cfg.latency_ms, cfg.arrival, queue
+                    done.append(f"{name}: settings from the file (orders from now on)")
+                continue
             caps = (cfg.max_qty, cfg.max_notional) if isinstance(cfg, LiveBrokerConfig) else None
             if caps is not None and isinstance(b, LiveBroker) and (b.max_qty, b.max_notional) != caps:
                 b.max_qty, b.max_notional = caps

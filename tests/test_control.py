@@ -429,7 +429,7 @@ def test_reloading_the_experiment_while_running(tmp_path: Path) -> None:
         + '[[instances]]\nid = "t_{size}"\nstrategy = "sized"\ngrid = { size = [2, 3] }\n'
     )
     r = params_cmd(c, store, "reload")
-    assert r["status"] == "done", r
+    assert r["status"] == "done", r["result"]
     assert {"t_2", "t_3"} <= set(engine.instances) and engine.instances["t_3"].strategy.params.size == 3
     s = engine.instances["s"].strategy.params
     assert s.size == 7 and s.side == "no"  # the file's change, and the dashboard edit on top
@@ -442,6 +442,43 @@ def test_reloading_the_experiment_while_running(tmp_path: Path) -> None:
     cid = store.submit("paper/acct", "resume", "t_2")
     c.tick()
     assert next(x for x in store.history("paper/acct") if x["id"] == cid)["status"] == "failed"
+
+
+def test_broker_settings_and_new_brokers_apply_on_reload(tmp_path: Path) -> None:
+    from quanty import experiment
+    from quanty.brokers.sim import QueueModel, SimBroker
+    from quanty.core import Book
+
+    exp = tmp_path / "main.toml"
+    first = '[[instances]]\nid = "s"\nstrategy = "sized"\nbroker = "sim"\n[brokers.sim]\nlatency_ms = 300\n'
+    maker = '[brokers.maker]\nkind = "sim"\n'
+    exp.write_text(first + maker)
+    strategies = {"sized": __import__(__name__)}
+    insts, spares = experiment.build_session(experiment.load(exp), strategies)
+    engine = Engine(
+        insts, ledger=Ledger(tmp_path / "l.sqlite"), clock_ms=None, strict=False, spare_brokers=spares
+    )
+    engine.books["m1"] = Book(ts=0, market_id="m1", bids=((0.98, 50.0),), asks=((0.99, 20.0),))
+    c = Controller(ControlStore(tmp_path / "control.sqlite"), "session/main", engine, can_arm=False)
+    c.rebuild = lambda: (experiment.load(exp), strategies)
+    exp.write_text(
+        first.replace("latency_ms = 300", "latency_ms = 600\nqueue = { credit_cancels = false }")
+        + '[brokers.slow]\nlatency_ms = 900\n\n[[instances]]\nid = "t"\nstrategy = "sized"\nbroker = "slow"\n'
+        + maker.replace('"sim"', '"shadow"')
+    )
+    cid = c.store.submit("session/main", "reload", "")
+    c.tick()
+    r = next(x for x in c.store.history("session/main") if x["id"] == cid)
+    assert r["status"] == "done", r["result"]
+    said = str(r["result"])
+    assert "sim: settings from the file" in said and "slow: added" in said and "t: started" in said
+    assert "maker: is sim here and shadow in the file; restart" in said
+    sim = engine.brokers["sim"]
+    assert isinstance(sim, SimBroker) and sim.latency_ms == 600
+    assert sim.queue == QueueModel(credit_cancels=False)
+    slow = engine.instances["t"].broker
+    assert isinstance(slow, SimBroker) and slow.name == "slow" and slow.latency_ms == 900
+    assert slow._latest["m1"].asks == ((0.99, 20.0),)  # it has the open markets' books already
 
 
 def test_caps_set_in_the_file_reach_the_running_session_on_reload(

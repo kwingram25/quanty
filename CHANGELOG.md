@@ -9,6 +9,9 @@ version (`quanty-py>=0.1.0,<0.2`), so moving to the next is your choice: raise t
 
 ## Unreleased
 
+- Reload (`quanty reload`, or the dashboard) applies simulated brokers' settings (latency, queue
+  model) to orders from then on, and adds new simulated or shadow brokers, so a strategy can be
+  given its own fill model without a restart. A new broker starts with each open market's book.
 - Fix: `quanty backtest --data` and `quanty replay` parse recordings with the project's
   `feeds.toml` (or `--feeds`/`--config`), not built-in defaults, which dropped every market outside
   the default series (Polymarket US 5m, Kalshi series other than KXBTC15M). The dashboard's

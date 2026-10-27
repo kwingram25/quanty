@@ -516,6 +516,16 @@ class Engine:
         )  # the dashboard: its kind now
         return sorted(busy)
 
+    def add_broker(self, broker: Broker) -> None:
+        """Add a broker to a running session, for instances to start on or switch onto. It's given
+        each market's latest book, so it can fill from the next order rather than the next book."""
+        if broker.name in self._brokers:
+            raise ValueError(f"there is already a broker {broker.name!r}")
+        self._brokers[broker.name] = broker
+        broker.attach(self)
+        for book in self.books.values():
+            broker.on_event(book)
+
     def add_instance(self, inst: Instance) -> None:
         """Start another instance in a running session (a paper twin, a new variant). It sees the
         markets already open; its broker must be one of this session's."""
