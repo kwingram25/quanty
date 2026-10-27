@@ -140,8 +140,9 @@ side. Every strike is still discovered and recorded; the others just get no book
 channel, about once a second) instead of full order books: far fewer messages, for strategies that
 only take the best price.
 
-To cap disk use, `keep_days` under `[recording]` in `feeds.toml` deletes recordings older than
-that, checked hourly by whatever is recording (a busy Kalshi feed writes several GB a day):
+`keep_days` under `[recording]` in `feeds.toml` deletes recordings older than that, checked hourly
+by whatever is recording (a busy Kalshi feed writes several GB a day). `quanty init` sets 30;
+remove it to keep everything:
 
 ```toml
 [recording]

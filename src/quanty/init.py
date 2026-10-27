@@ -208,7 +208,7 @@ def _feeds(a: Answers) -> str:
         "# Venues and series this project connects to. `quanty feeds list` shows every feed kind.",
         "",
         "[recording]",
-        "# keep_days = 30   # delete recordings older than this (a busy Kalshi feed records GBs a day)",
+        "keep_days = 30   # delete recordings older than this (a busy Kalshi feed records GBs a day)",
         "",
     ]
     if "kalshi" in a.venues:
