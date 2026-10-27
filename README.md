@@ -27,22 +27,26 @@ takes a few seconds while it starts.
 
 ## Try it
 
+With [uv](https://docs.astral.sh/uv/), nothing to install first (quanty is `quanty-py` on PyPI;
+the `quanty` there is an unrelated project):
+
 ```sh
-git clone https://github.com/kwingram25/quanty && cd quanty
-uv sync
-uv run quanty demo --ui        # backtest four variants on synthetic markets, open the dashboard
-uv run quanty demo --live      # or watch them paper trade in real time, with the controls
+uvx --from quanty-py quanty demo --ui     # backtest four variants on synthetic markets, open the dashboard
+uvx --from quanty-py quanty demo --live   # or watch them paper trade in real time, with the controls
 ```
 
 No keys, no setup. To start your own project, with a strategy skeleton, configs, API keys and the
 files to deploy it:
 
 ```sh
-uv run quanty init my-quanty          # a few questions; --yes for the defaults
-cd my-quanty && uv run quanty list    # works there too: the first run sets everything up
+uvx --from quanty-py quanty init my-quanty   # a few questions; --yes for the defaults
+cd my-quanty && uv run quanty list           # the project depends on quanty-py: the first run installs it
+uv run quanty server root@your-server        # a fresh Ubuntu server: Docker, firewall, swap, updates
 uv run quanty keys root@your-server --file .env.server   # the server's own API keys, once
-uv run quanty deploy root@your-server # to a server with Docker: trader + dashboard, restarted on failure
+uv run quanty deploy root@your-server        # trader + dashboard, restarted on failure
 ```
+
+(`pip install quanty-py` works too, for the `quanty` command without uv; projects use uv.)
 
 [Getting started](docs/getting-started.md) goes step by step from experiments to recording real data,
 paper trading, shadow trading and live trading; [Deploying](docs/deploying.md) covers servers.
@@ -129,6 +133,7 @@ paper trading, shadow trading and live trading; [Deploying](docs/deploying.md) c
 ## Development
 
 ```sh
+git clone https://github.com/kwingram25/quanty && cd quanty
 uv sync
 uv run pytest && uv run ruff check && uv run mypy
 pre-commit install   # gitleaks, ruff, private-name guard

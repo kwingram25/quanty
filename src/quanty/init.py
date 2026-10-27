@@ -676,9 +676,12 @@ The image installs quanty from `vendor/` if this project vendors a wheel, otherw
 DOCKERFILE = """FROM python:3.12-slim
 COPY --from=ghcr.io/astral-sh/uv:0.13.1 /uv /usr/local/bin/uv
 WORKDIR /app
-# quanty: the wheel in vendor/ when the project vendors one, else what pyproject.toml asks of PyPI
+# quanty and its dependencies at the versions uv.lock pins (quanty from PyPI, or the project's
+# vendored wheel), the same as `uv run` here; without a lock yet, what pyproject.toml allows
 COPY . .
-RUN if ls vendor/quanty*.whl >/dev/null 2>&1; then uv pip install --system vendor/quanty*.whl; \\
+RUN if [ -f uv.lock ]; then uv export --frozen --no-emit-project --no-dev --no-hashes -q -o /tmp/req.txt \\
+    && uv pip install --system -r /tmp/req.txt; \\
+    elif ls vendor/quanty*.whl >/dev/null 2>&1; then uv pip install --system vendor/quanty*.whl; \\
     else uv pip install --system -r pyproject.toml; fi
 # this image's copy of the project is replaced on every deploy: the dashboard offers to copy
 # edited params for the experiment file instead of writing them here

@@ -3,12 +3,12 @@
 `quanty init` creates a project folder that runs the same on your laptop and on a server:
 
 ```sh
-uv run quanty init my-quanty     # strategy, feeds.toml, experiments/main.toml, .env, Docker and deploy files
+uvx --from quanty-py quanty init my-quanty   # strategy, feeds.toml, experiments/main.toml, .env, Docker and deploy files
 ```
 
 Inside the project, `uv run quanty …` works with nothing installed first: the project's
-`pyproject.toml` points at quanty (`quanty-py` from PyPI, or a wheel in `vendor/` for a project made
-from a quanty checkout), and the first `uv run` sets up `.venv/`.
+`pyproject.toml` depends on quanty (`quanty-py` from PyPI, the exact version pinned in `uv.lock`),
+and the first `uv run` sets up `.venv/`.
 
 ## Where it can run
 
@@ -129,10 +129,10 @@ from anywhere instead, see [below](#reaching-the-dashboard-from-anywhere).
 
 ### Getting quanty into the image
 
-The Dockerfile installs quanty from the wheel in `vendor/` if the project vendors one (`quanty init`
-does when run from a quanty source checkout), otherwise the version `pyproject.toml` asks for from
-PyPI (`quanty-py`). To move to a newer quanty, `uv run quanty upgrade` in the project (for a vendored
-one, from a checkout: `uv run --project ~/code/quanty quanty upgrade`), commit, and deploy again.
+The Dockerfile installs the quanty `pyproject.toml` asks for from PyPI (`quanty-py`), or the wheel
+in `vendor/` for a project that vendors one (`quanty init` does when run from a quanty source
+checkout). To move to a newer quanty: `uv run quanty upgrade` in the project, commit, and deploy
+again (for a vendored project, from the checkout: `uv run --project ~/code/quanty quanty upgrade`).
 
 ### Editing strategies on a server
 
@@ -198,8 +198,8 @@ error message is the authority.
 
 **Privately, from your own devices (a phone too): Tailscale.** It joins the server and your devices
 in a private network; nothing opens to the internet, and there's no domain or certificate to run. On
-the server (Ubuntu), install it from Tailscale's repository (https://tailscale.com/download/linux),
-then:
+the server, `uv run quanty server root@203.0.113.7 --tailscale` sets it up (step 1). By hand
+(Ubuntu): install it from Tailscale's repository (https://tailscale.com/download/linux), then:
 
 ```sh
 tailscale up --hostname=quanty-paper            # prints a link: approve the server in your account
@@ -231,8 +231,10 @@ which stays unpublished beyond the server itself. Then `docker compose up -d`.
 
 ## Without Docker
 
-Install quanty on the server (`uv tool install /path/to/quanty`, or from the wheel) and run the two
-commands under a process supervisor (or one: `quanty paper … --ui` serves the dashboard too). With
+Copy the project to the server (with its own `.env`), install [uv](https://docs.astral.sh/uv/) there,
+and in the project folder run `uv sync --frozen`: it installs the quanty version `uv.lock` pins into
+the project's `.venv/`. Then run the two commands under a process supervisor (or one:
+`quanty paper … --ui` serves the dashboard too). The trader records its feeds itself here. With
 systemd, one unit each:
 
 ```ini
@@ -240,7 +242,7 @@ systemd, one unit each:
 [Service]
 WorkingDirectory=/srv/my-quanty
 EnvironmentFile=/srv/my-quanty/.env
-ExecStart=/usr/local/bin/quanty paper experiments/main.toml --feeds feeds.toml --data data
+ExecStart=/srv/my-quanty/.venv/bin/quanty paper experiments/main.toml --feeds feeds.toml --data data
 Restart=on-failure
 User=quanty
 
@@ -248,8 +250,9 @@ User=quanty
 WantedBy=multi-user.target
 ```
 
-and the same with `ExecStart=/usr/local/bin/quanty ui --data data` for `quanty-ui.service`. Then
-`systemctl enable --now quanty-trader quanty-ui`.
+and the same with `ExecStart=/srv/my-quanty/.venv/bin/quanty ui --data data` for
+`quanty-ui.service`. Then `systemctl enable --now quanty-trader quanty-ui`. After copying a change
+(or `uv run quanty upgrade` at home), `uv sync --frozen` again and `systemctl restart quanty-trader`.
 
 ## Before going live
 

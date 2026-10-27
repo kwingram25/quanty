@@ -98,6 +98,8 @@ def test_deploy_files(tmp_path: Path) -> None:
     )
     cloud = (tmp_path / "My Bot" / "deploy" / "cloud-init.yaml").read_text()
     assert cloud.startswith("#cloud-config\n") and "get.docker.com" in cloud and "ufw --force enable" in cloud
+    docker = (tmp_path / "My Bot" / "Dockerfile").read_text()
+    assert "uv export --frozen" in docker  # the image installs what uv.lock pins, as `uv run` does
     do = (tmp_path / "My Bot" / "deploy" / "digitalocean.tf").read_text()
     # the volume goes where `quanty deploy` puts data/ (~/<folder>/data), and is kept from destroy
     assert "/root/${local.project}/data" in do and "prevent_destroy = true" in do
