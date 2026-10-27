@@ -168,6 +168,23 @@ been run on a Fly account yet: if a `fly` command disagrees with it, Fly's error
 
 ## Reaching the dashboard from anywhere
 
+**Privately, from your own devices (a phone too): Tailscale.** It joins the server and your devices
+in a private network; nothing opens to the internet, and there's no domain or certificate to run. On
+the server (Ubuntu), install it from Tailscale's repository (https://tailscale.com/download/linux),
+then:
+
+```sh
+tailscale up --hostname=quanty-paper            # prints a link: approve the server in your account
+tailscale serve --bg --https=443 http://127.0.0.1:8765
+```
+
+With MagicDNS and HTTPS Certificates on in the Tailscale admin console (DNS), the dashboard is at
+`https://<hostname>.<your-tailnet>.ts.net` from any device signed in to your account, and nowhere
+else. The dashboard stays on the server's 127.0.0.1 and the firewall unchanged. Set a password
+anyway (below), so a signed-in device that's lost doesn't open it.
+
+**Publicly, from any browser: HTTPS with a domain.**
+
 The dashboard has an optional login. Set a password (only a salted hash is stored) in the server's
 keys file, and send it:
 
