@@ -283,6 +283,9 @@ class Kalshi(VenueFeed):
             events.append(Status(ts=raw.t, key=f"{self.name}:seq_gap", text=gap))
         return events
 
+    def carries_data(self, text: str) -> bool:
+        return '"cfbenchmarks_value' in text[:80]  # the index channels; everything else is markets
+
     def _seq_gap(self, text: str) -> str:
         """Description of a sequence gap on an order book subscription, or ""."""
         m = _BOOK_SEQ.match(text)

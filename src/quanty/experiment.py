@@ -127,6 +127,9 @@ class Experiment(ConfigModel):
     # paper/live sessions: replay this much of the recent recordings first (orders off), so models
     # and signals that need history (an index's last hours) start warm instead of cold
     warmup_s: NonNegativeInt = 0
+    # what the warm-up replays: everything, or "data" only (index values and data feeds; no books),
+    # which is all most models need and many times faster on a busy venue's recordings
+    warmup_events: Literal["all", "data"] = "all"
     limits: Limits = Limits()
     brokers: dict[str, BrokerConfig] = Field(default_factory=_default_brokers, min_length=1)
     instances: list[InstanceSpec] = Field(min_length=1)

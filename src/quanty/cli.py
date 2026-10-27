@@ -873,11 +873,19 @@ def _warm_and_restore(
     if exp.warmup_s:
         end = int(time.time() * 1000)
         typer.echo(
-            f"warming up: replaying the last {exp.warmup_s / 3600:g} h of recordings in {data}/ (orders off)"
+            f"warming up: replaying the last {exp.warmup_s / 3600:g} h of recordings in {data}/ (orders off"
+            + (", data only)" if exp.warmup_events == "data" else ")")
         )
         n = 0
         with trader.warming():
-            for ev in Replay(load_feeds(feeds, None), data, end - exp.warmup_s * 1000, end):
+            replay = Replay(
+                load_feeds(feeds, None),
+                data,
+                end - exp.warmup_s * 1000,
+                end,
+                data_only=exp.warmup_events == "data",
+            )
+            for ev in replay:
                 trader.advance(ev.ts)
                 trader.process(ev)
                 n += 1

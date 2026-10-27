@@ -28,6 +28,7 @@ class Replay:
     start: int
     end: int
     strict: bool = False
+    data_only: bool = False  # only messages that can hold data (index values): a fast model warm-up
     errors: dict[str, int] = field(default_factory=dict)
     health: dict[str, FeedHealth] = field(init=False)
 
@@ -41,6 +42,8 @@ class Replay:
                 health.on_link(item)
                 self.feeds[item.feed].on_link(item)
                 yield Status(ts=item.t, key=f"{item.feed}:link", text=item.state)
+                continue
+            if self.data_only and not self.feeds[item.feed].carries_data(item.text):
                 continue
             try:
                 events = self.feeds[item.feed].parse(item)

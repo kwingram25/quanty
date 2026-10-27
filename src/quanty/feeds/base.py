@@ -85,6 +85,12 @@ class Feed(ABC):
         order by one feed instance; on_link is called for connection changes in the same order.
         """
 
+    def carries_data(self, text: str) -> bool:
+        """Whether a raw message can hold data (an index value, a price) rather than only market
+        structure (books, trades, discovery): a cheap text test, so a warm-up that only needs data
+        skips the rest unparsed. Data feeds hold nothing else."""
+        return True
+
     def on_link(self, link: Link) -> None:  # noqa: B027 - optional hook
         """A connection change, in stream order: reset state that a new connection re-sends."""
 
