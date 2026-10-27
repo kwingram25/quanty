@@ -98,6 +98,11 @@ def test_deploy_files(tmp_path: Path) -> None:
     )
     cloud = (tmp_path / "My Bot" / "deploy" / "cloud-init.yaml").read_text()
     assert cloud.startswith("#cloud-config\n") and "get.docker.com" in cloud and "ufw --force enable" in cloud
+    do = (tmp_path / "My Bot" / "deploy" / "digitalocean.tf").read_text()
+    # the volume goes where `quanty deploy` puts data/ (~/<folder>/data), and is kept from destroy
+    assert "/root/${local.project}/data" in do and "prevent_destroy = true" in do
+    assert "*.tfstate*" in (tmp_path / "My Bot" / "deploy" / ".gitignore").read_text()
+    assert "deploy/" in (tmp_path / "My Bot" / ".dockerignore").read_text().split()
 
 
 def test_project_guides_for_assistants(tmp_path: Path) -> None:
@@ -142,7 +147,10 @@ def test_upgrade_refreshes_marked_files_and_keeps_your_own(
     readme.write_text(readme.read_text() + "\nstale\n")  # an older template's text
     compose.write_text("services: {}  # my own compose, its generated line deleted\n")
     strategy.write_text(strategy.read_text() + "\n# my edge\n")
-    (dest / ".dockerignore").write_text(".env\ndata/\n.git/\n__pycache__/\n.venv/\n")  # from before marks
+    (dest / ".dockerignore").write_text(
+        ".env\ndata/\n.git/\n__pycache__/\n.venv/\ndeploy/\n"
+    )  # from before marks
+    (dest / "deploy" / "digitalocean.tf").unlink()  # a project from before it
     root = Path(__file__).parents[1]
     what, refreshed, kept = upgrade(dest, root)
     assert what.startswith("quanty ") and len(list((dest / "vendor").glob("quanty_py-*.whl"))) == 1
@@ -150,6 +158,7 @@ def test_upgrade_refreshes_marked_files_and_keeps_your_own(
     assert "README.md" in refreshed and "stale" not in readme.read_text()
     assert ".dockerignore" in refreshed and MARK in (dest / ".dockerignore").read_text()  # adopted
     assert kept == ["compose.yaml"] and "my own compose" in compose.read_text()
+    assert "deploy/digitalocean.tf" in refreshed  # new templates arrive too
     assert strategy.read_text().endswith("# my edge\n")  # strategies are never touched
     with pytest.raises(ValueError, match="isn't a quanty checkout"):
         upgrade(dest, tmp_path)

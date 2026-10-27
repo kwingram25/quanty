@@ -20,7 +20,18 @@ from typing import Any
 
 from quanty.version import DEPLOYED_MARK
 
-EXCLUDE = ("data/", ".venv/", ".git/", "__pycache__/", ".DS_Store", ".env", ".env.*", DEPLOYED_MARK)
+EXCLUDE = (
+    "data/",
+    ".venv/",
+    ".git/",
+    "__pycache__/",
+    ".DS_Store",
+    ".env",
+    ".env.*",
+    ".terraform/",
+    "*.tfstate*",
+    DEPLOYED_MARK,
+)
 KEY_NAMES = ("KALSHI_KEY_ID", "KALSHI_SECRET_KEY", "POLYMARKET_KEY_ID", "POLYMARKET_SECRET_KEY")
 
 

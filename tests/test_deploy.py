@@ -17,6 +17,7 @@ def test_commands_never_touch_data(tmp_path: Path) -> None:
     mkdir, rsync, remote = commands("root@srv", tmp_path / "bot", "/mnt/vol/bot")
     assert mkdir == ["ssh", "root@srv", "mkdir -p /mnt/vol/bot"]
     assert "--exclude=data/" in rsync and "--delete" in rsync and rsync[-1] == "root@srv:/mnt/vol/bot/"
+    assert "--exclude=*.tfstate*" in rsync  # OpenTofu's state stays home
     steps = remote[2].split(" && ")
     assert steps[0] == "cd /mnt/vol/bot" and steps.index(
         "docker compose run --rm --entrypoint quanty trader doctor"

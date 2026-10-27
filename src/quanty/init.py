@@ -8,6 +8,7 @@ my-quanty/
   strategies/<name>.py     a strategy skeleton aimed at the first series
   Dockerfile, compose.yaml trader + dashboard, persistent data, restart on failure
   deploy/cloud-init.yaml   server setup to paste as "user data" (Docker, firewall, swap, updates)
+  deploy/digitalocean.tf   the server, its volume, firewall and alerts on DigitalOcean (OpenTofu)
   fly.toml                 the same project on Fly.io (one machine, a volume for data/)
   vendor/                  a quanty wheel, when init runs from a source checkout
   pyproject.toml           so `uv run quanty ...` works here with nothing installed first
@@ -69,6 +70,8 @@ REFRESHED = (
     ".dockerignore",
     "compose.yaml",
     "deploy/cloud-init.yaml",
+    "deploy/digitalocean.tf",
+    "deploy/.gitignore",
     "README.md",
     "AGENTS.md",
 )
@@ -98,13 +101,15 @@ def _files(a: Answers, name: str) -> dict[str, str]:
     return {
         ".env": _env(a),
         ".gitignore": ".env\n.env.*\ndata/\n__pycache__/\n.venv/\n",
-        ".dockerignore": ".env\ndata/\n.git/\n__pycache__/\n.venv/\n",
+        ".dockerignore": ".env\ndata/\n.git/\n__pycache__/\n.venv/\ndeploy/\n",
         "feeds.toml": _feeds(a),
         "experiments/main.toml": _experiment(a),
         f"strategies/{a.strategy}.py": _strategy(a.strategy, first),
         "Dockerfile": DOCKERFILE,
         "compose.yaml": COMPOSE,
         "deploy/cloud-init.yaml": CLOUD_INIT,
+        "deploy/digitalocean.tf": DIGITALOCEAN,
+        "deploy/.gitignore": "# OpenTofu's; its state says what it made\n.terraform/\n*.tfstate*\n",
         "fly.toml": FLY.format(app=name),
         "README.md": _readme(a, name),
         "AGENTS.md": _agents(a, first),
@@ -634,11 +639,13 @@ A quanty project: your strategy, its configuration, and what's needed to deploy 
 
 ## Deploy
 
-Any Ubuntu server (a DigitalOcean Droplet, AWS EC2 or Lightsail, Hetzner, ...): create it with
-your SSH key, then set it up from this folder (Docker, firewall, swap, updates; `--tailscale` also
-serves the dashboard to your Tailscale devices), or paste `deploy/cloud-init.yaml` as its "user data"
-when creating it. Give the server API keys of its own (made for it at each venue, so they can be
-revoked alone) in `.env.server`, written like `.env`, then:
+Any Ubuntu server (a DigitalOcean Droplet, AWS EC2 or Lightsail, Hetzner, ...): create it with your
+SSH key, then set it up from this folder (Docker, firewall, swap, updates; `--tailscale` also serves
+the dashboard to your Tailscale devices), or paste `deploy/cloud-init.yaml` as its "user data" when
+creating it. On DigitalOcean, `deploy/digitalocean.tf` creates the server, a volume for `data/`, a
+firewall and alerts with OpenTofu (instructions at its top). Give the server API keys of its own
+(made for it at each venue, so they can be revoked alone) in `.env.server`, written like `.env`,
+then:
 
     uv run quanty server root@your-server --tailscale       # once; safe to run again
     uv run quanty keys root@your-server --file .env.server   # once; again to rotate them
@@ -767,6 +774,141 @@ primary_region = "iad"
   memory = "1gb"
   cpu_kind = "shared"
   cpus = 1
+"""
+
+DIGITALOCEAN = """# DigitalOcean with OpenTofu (or Terraform): a Droplet for this project, its data/
+# on a volume of its own (which outlives the Droplet), a cloud firewall with only SSH open,
+# monitoring, and email alerts on memory, CPU and disk. In deploy/, with a DigitalOcean token
+# (API > Tokens; read and write for droplet, block_storage, firewall, monitoring, tag and ssh_key)
+# in DIGITALOCEAN_TOKEN:
+#   cd deploy && tofu init
+#   tofu apply -var ssh_key="the name of your SSH key in DigitalOcean" -var alert_email=you@example.com
+# It prints the server's address; then uv run quanty server, keys and deploy as usual (README.md).
+# Variables can also go in deploy/terraform.tfvars (`region = "sfo3"`, ...). Its state, which says
+# what it made, is kept in deploy/: keep it (it isn't committed or deployed) to change or remove them.
+
+terraform {
+  required_providers {
+    digitalocean = { source = "digitalocean/digitalocean", version = "~> 2.0" }
+  }
+}
+
+variable "ssh_key" {
+  description = "The name of your SSH key in DigitalOcean (Settings > Security)"
+  type        = string
+}
+variable "alert_email" {
+  description = "Where alerts go; empty for none"
+  type        = string
+  default     = ""
+}
+variable "region" {
+  description = "Where the size is offered today: doctl compute size list -o json"
+  type        = string
+  default     = "nyc1"
+}
+variable "size" {
+  type    = string
+  default = "s-2vcpu-2gb"
+}
+variable "volume_gb" {
+  description = "Recordings grow by gigabytes a day; feeds.toml's keep_days bounds them"
+  type        = number
+  default     = 100
+}
+
+locals {
+  project = basename(abspath("${path.module}/..")) # quanty deploy's folder on the server
+  name    = trim(replace(lower(local.project), "/[^a-z0-9]+/", "-"), "-")
+}
+
+data "digitalocean_ssh_key" "login" {
+  name = var.ssh_key
+}
+
+resource "digitalocean_tag" "project" {
+  name = local.name
+}
+
+resource "digitalocean_volume" "data" {
+  name                    = "${local.name}-data"
+  region                  = var.region
+  size                    = var.volume_gb
+  initial_filesystem_type = "ext4"
+  description             = "data/ of ${local.project}: recordings and the ledger"
+  lifecycle {
+    prevent_destroy = true # delete this line before `tofu destroy` would remove your data
+  }
+}
+
+resource "digitalocean_droplet" "server" {
+  name       = local.name
+  region     = var.region
+  size       = var.size
+  image      = "ubuntu-24-04-x64"
+  ssh_keys   = [data.digitalocean_ssh_key.login.id]
+  monitoring = true
+  tags       = [digitalocean_tag.project.id]
+  volume_ids = [digitalocean_volume.data.id]
+  # first boot: cloud-init.yaml's setup, and the volume mounted where `quanty deploy` puts data/
+  user_data = join("", [file("${path.module}/cloud-init.yaml"), <<-EOT
+    mounts:
+      - - /dev/disk/by-id/scsi-0DO_Volume_${digitalocean_volume.data.name}
+        - /root/${local.project}/data
+        - ext4
+        - defaults,nofail,discard,noatime
+        - "0"
+        - "2"
+    EOT
+  ])
+  lifecycle {
+    ignore_changes = [user_data, image] # a newer template mustn't replace a running server
+  }
+}
+
+resource "digitalocean_firewall" "ssh_only" {
+  name        = local.name
+  droplet_ids = [digitalocean_droplet.server.id]
+  inbound_rule {
+    protocol         = "tcp"
+    port_range       = "22"
+    source_addresses = ["0.0.0.0/0", "::/0"]
+  }
+  dynamic "outbound_rule" {
+    for_each = ["tcp", "udp", "icmp"]
+    content {
+      protocol              = outbound_rule.value
+      port_range            = outbound_rule.value == "icmp" ? null : "1-65535"
+      destination_addresses = ["0.0.0.0/0", "::/0"]
+    }
+  }
+}
+
+locals {
+  alerts = var.alert_email == "" ? {} : {
+    memory = { type = "memory_utilization_percent", value = 90, what = "memory above 90%" }
+    cpu    = { type = "cpu", value = 80, what = "CPU above 80%" }
+    disk   = { type = "disk_utilization_percent", value = 80, what = "disk above 80%" }
+  }
+}
+
+resource "digitalocean_monitor_alert" "server" {
+  for_each    = local.alerts
+  description = "${local.name}: ${each.value.what}"
+  type        = "v1/insights/droplet/${each.value.type}"
+  compare     = "GreaterThan"
+  value       = each.value.value
+  window      = "5m"
+  enabled     = true
+  tags        = [digitalocean_tag.project.id]
+  alerts {
+    email = [var.alert_email]
+  }
+}
+
+output "server" {
+  value = "root@${digitalocean_droplet.server.ipv4_address}"
+}
 """
 
 # Claude Code: the dashboard's tools (`quanty mcp`, on the local dashboard; for a server's, add

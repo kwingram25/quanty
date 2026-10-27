@@ -45,12 +45,32 @@ Each step skips what's already done, so it's safe to run again. Or paste the pro
 `deploy/cloud-init.yaml` into the provider's **user data** field when creating the server, which
 does the same minus Tailscale on first boot.
 
-**DigitalOcean.** Create → Droplets. A New York or San Francisco region; Ubuntu 24.04; a Basic
-Droplet with 2 GB; your SSH key (or, instead of `quanty server`, paste `deploy/cloud-init.yaml` under *Advanced
-options*, *Add initialization scripts*). For data that outlives the Droplet, add a Volume while creating it with
-*Automatically format & mount*: it appears at `/mnt/<volume name>`, and you deploy onto it with
-`--to /mnt/<volume name>/my-quanty` in step 2. Optionally add a Cloud Firewall allowing only SSH
-in. You log in as `root`.
+**DigitalOcean.** The project's `deploy/digitalocean.tf` creates it all with
+[OpenTofu](https://opentofu.org) (`brew install opentofu`; Terraform works too): a 2 GB Droplet
+with Ubuntu 24.04 and your SSH key, a volume for `data/` that outlives the Droplet (100 GB, mounted
+where `quanty deploy` puts `data/`), a Cloud Firewall allowing only SSH in, monitoring, and email
+alerts on memory, CPU and disk. Make a token (API → Tokens, custom scopes: read and write for
+droplet, block_storage, firewall, monitoring, tag and ssh_key), then:
+
+```sh
+export DIGITALOCEAN_TOKEN=...       # or read it from a password manager
+cd deploy && tofu init
+tofu apply -var ssh_key="my laptop" -var alert_email=you@example.com   # your key's name in DigitalOcean
+```
+
+It prints `server = root@<address>` for step 2. `region`, `size` and `volume_gb` are variables too
+(`-var region=sfo2`, or in `deploy/terraform.tfvars`). Not every region offers every size at any
+moment (`doctl compute size list -o json` shows where each is). OpenTofu keeps what it made in
+`deploy/terraform.tfstate`. That file is never committed or deployed; keep it, because it's how
+`tofu apply` changes the server later, or `tofu destroy` removes it. The volume refuses
+`tofu destroy` until you delete its `prevent_destroy` line, so the ledger isn't lost by accident.
+
+By hand instead: Create → Droplets, a New York or San Francisco region, Ubuntu 24.04, a Basic
+Droplet with 2 GB, your SSH key (or, instead of `quanty server`, paste `deploy/cloud-init.yaml`
+under *Advanced options*, *Add initialization scripts*). For data that outlives the Droplet, add a
+Volume while creating it with *Automatically format & mount*: it appears at `/mnt/<volume name>`,
+and you deploy onto it with `--to /mnt/<volume name>/my-quanty` in step 2. Optionally add a Cloud
+Firewall allowing only SSH in. You log in as `root`.
 
 **AWS EC2.** Launch instance in `us-east-1` (or another US region): Ubuntu Server 24.04 LTS,
 `t3.small`, your key pair, a security group allowing SSH from your IP only, 30 GB gp3 storage (or
