@@ -116,6 +116,7 @@ class Kalshi(VenueFeed):
         self._followed: dict[str, set[str]] = {}  # near_money series -> tickers subscribed so far
         self._ws: ClientConnection | None = None
         self._sids: dict[str, int] = {}
+        self._subscribed: frozenset[str] = frozenset()  # markets the open subscriptions cover
         self._cmd = 0
         # parser state
         self._markets: dict[str, Market] = {}
@@ -134,6 +135,7 @@ class Kalshi(VenueFeed):
 
     def subscribe_messages(self, ids: frozenset[str]) -> list[str]:
         self._sids = {}
+        self._subscribed = ids
         msgs = [
             self._command("subscribe", {"channels": [ch], "market_tickers": sorted(tickers)})
             for ch, tickers in self._by_channel(ids).items()
@@ -169,15 +171,40 @@ class Kalshi(VenueFeed):
         return True
 
     async def update_in_place(self, added: frozenset[str], removed: frozenset[str]) -> bool:
+        """Add and remove markets on the open subscriptions. A subscription is never left with no
+        markets: Kalshi then sends every market it lists (for the ticker channel, about 1,000
+        messages a second). One that would empty is unsubscribed; one not open is a resubscribe."""
         ws = self._ws
-        adds, drops = self._by_channel(added), self._by_channel(removed)
-        if ws is None or any((adds[ch] or drops[ch]) and ch not in self._sids for ch in self.channels):
-            return False  # a channel it needs isn't open on this connection: resubscribe instead
+        if ws is None:
+            return False
+        now = (self._subscribed | added) - removed
+        before, after = self._by_channel(self._subscribed), self._by_channel(now)
+        cmds: list[tuple[str, dict[str, Any]]] = []
+        closing: list[str] = []
         for ch in self.channels:
-            for action, tickers in (("add_markets", adds[ch]), ("delete_markets", drops[ch])):
+            adds, drops = after[ch] - before[ch], before[ch] - after[ch]
+            if not adds and not drops:
+                continue
+            sid = self._sids.get(ch)
+            if sid is None:
+                return False  # not open on this connection: resubscribe instead
+            if not after[ch]:
+                cmds.append(("unsubscribe", {"sids": [sid]}))
+                closing.append(ch)
+                continue
+            for action, tickers in (("add_markets", adds), ("delete_markets", drops)):  # adds first
                 if tickers:
-                    params = {"sid": self._sids[ch], "market_tickers": sorted(tickers), "action": action}
-                    await ws.send(self._command("update_subscription", params))
+                    cmds.append(
+                        (
+                            "update_subscription",
+                            {"sid": sid, "market_tickers": sorted(tickers), "action": action},
+                        )
+                    )
+        for cmd, params in cmds:
+            await ws.send(self._command(cmd, params))
+        for ch in closing:
+            del self._sids[ch]
+        self._subscribed = now
         return True
 
     async def discover(self, client: httpx.AsyncClient, sink: Sink) -> None:

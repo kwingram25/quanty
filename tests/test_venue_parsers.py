@@ -302,10 +302,17 @@ def test_kalshi_top_only_series_follow_the_ticker_channel_as_one_level_books() -
     for ch, sid in (("orderbook_delta", 1), ("trade", 2), ("ticker", 3)):
         k.keep(js.dumps({"type": "subscribed", "msg": {"channel": ch, "sid": sid}}))
     assert asyncio.run(k.update_in_place(frozenset({other}), frozenset({TK})))
-    sent = [js.loads(s)["params"] for s in ws.sent]
-    assert {(p["sid"], p["action"], tuple(p["market_tickers"])) for p in sent} == {
-        (3, "add_markets", (other,)),  # the ladder strike: ticker and trades
-        (2, "add_markets", (other,)),
-        (1, "delete_markets", (TK,)),  # the 15m market: book and trades
-        (2, "delete_markets", (TK,)),
-    }
+    sent = [(c["cmd"], c["params"]) for c in map(js.loads, ws.sent)]
+    assert sent == [
+        ("unsubscribe", {"sids": [1]}),  # the 15m market was the only book: never an empty subscription
+        ("update_subscription", {"sid": 2, "market_tickers": [other], "action": "add_markets"}),
+        ("update_subscription", {"sid": 2, "market_tickers": [TK], "action": "delete_markets"}),
+        ("update_subscription", {"sid": 3, "market_tickers": [other], "action": "add_markets"}),
+    ]
+    ws.sent.clear()
+    # the hour's strikes close before the next hour's are in play: the ticker would empty, which
+    # Kalshi takes as every market it lists; it's unsubscribed instead, and reopened by a resubscribe
+    assert asyncio.run(k.update_in_place(frozenset(), frozenset({ladder, other})))
+    assert [js.loads(m)["cmd"] for m in ws.sent] == ["unsubscribe", "unsubscribe"]  # trades and ticker
+    assert "delete_markets" not in "".join(ws.sent)
+    assert asyncio.run(k.update_in_place(frozenset({ladder}), frozenset())) is False  # none open: resubscribe
