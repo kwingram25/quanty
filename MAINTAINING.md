@@ -53,8 +53,8 @@ yanked on PyPI), never by re-uploading.
 https://quanty-demo.fly.dev runs `quanty demo --live --public`, the demo built for hosting:
 synthetic markets only, no keys and no account balances, a banner saying it's shared by everyone
 viewing it, and every few hours (`--reset-hours`, 6 by default) it exits so the host starts a fresh
-one. `demo.Dockerfile` and `fly.demo.toml` in this repo run it on Fly.io, on one shared-CPU machine kept
-running (about $3 a month), with 6 hours of history so each fresh start is quick. Every release deploys
+one. `demo.Dockerfile` and `fly.demo.toml` in this repo run it on Fly.io, on one machine with two shared CPUs
+kept running (a few dollars a month; one CPU's baseline couldn't keep up with the demo at 10x), with 6 hours of history so each fresh start is quick. Every release deploys
 it (the `demo` job in `release.yml`, after PyPI has the version), from the tagged commit, and checks it
 answers. It needs, once, a deploy token for the demo app alone in the repository's `demo` environment:
 

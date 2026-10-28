@@ -28,4 +28,4 @@ primary_region = "iad"
 [[vm]]
   memory = "512mb"
   cpu_kind = "shared"
-  cpus = 1
+  cpus = 2   # one ran out of its burst allowance within the hour at 10x, then crawled (6% of a core)
