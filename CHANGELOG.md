@@ -4,10 +4,15 @@ quanty is `quanty-py` on PyPI. Every release is a new minor version (0.2, 0.3, .
 0.x, a release may change what your project relies on, and says so here with what to do: the
 `Strategy` class and `ctx`, experiment and feeds files, the ledger's schema (migrated for you when a
 file is opened) and the command line. Projects from `quanty init` depend on one minor version
-(`quanty-py>=0.4.0,<0.5`), so moving to the next is your choice: raise the bound in
+(`quanty-py>=0.5.0,<0.6`), so moving to the next is your choice: raise the bound in
 `pyproject.toml`, then `quanty upgrade`.
 
-## Unreleased
+## 0.5.0 (2026-10-27)
+
+Upgrading from 0.4: change the bound to `quanty-py>=0.5.0,<0.6`, then `quanty upgrade` (it
+brings the recorder's `--take-over` into `compose.yaml`). Recordings made by 0.5 tag each message
+with its connection, and 0.4 skips the tagged lines: read them with 0.5, which reads older
+recordings as before.
 
 - Fix: Kalshi books went wrong for whole windows after the feed replaced its connection (each time a
   window was added, hourly at :30): the old connection, kept open a few seconds so nothing is
