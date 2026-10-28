@@ -37,6 +37,9 @@ class Raw:
     feed: str
     t: int  # receive time, epoch ms
     text: str
+    # the connection it came on (when it connected, epoch ms): a replaced connection overlaps its
+    # successor for seconds, both sending. None: not over a connection (REST), or recorded before this
+    conn: int | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -98,8 +101,8 @@ class Feed(ABC):
     def on_link(self, link: Link) -> None:  # noqa: B027 - optional hook
         """A connection change, in stream order: reset state that a new connection re-sends."""
 
-    def raw(self, text: str) -> Raw:
-        return Raw(self.name, now_ms(), text)
+    def raw(self, text: str, conn: int | None = None) -> Raw:
+        return Raw(self.name, now_ms(), text, conn)
 
     def link(self, state: Literal["up", "down"], detail: str = "") -> Link:
         return Link(self.name, now_ms(), state, detail)
@@ -167,6 +170,7 @@ class WebSocketFeed(Feed):
         async with connect(
             self.url(), additional_headers=self.headers(), max_size=None, open_timeout=10, close_timeout=2
         ) as ws:
+            conn = now_ms()  # this connection, on every message it brings
             for sub in subscriptions:
                 await ws.send(sub)
             sink(self.link("up"))
@@ -179,7 +183,7 @@ class WebSocketFeed(Feed):
                 if "\n" in text:  # JSON formatting only; one message per recorded line
                     text = text.replace("\r", "").replace("\n", "")
                 if self.keep(text):
-                    sink(self.raw(text))
+                    sink(self.raw(text, conn))
 
 
 class PollingConfig(FeedConfig):

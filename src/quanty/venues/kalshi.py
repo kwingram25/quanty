@@ -123,7 +123,10 @@ class Kalshi(VenueFeed):
         self._settled: set[str] = set()
         self._books: dict[str, tuple[SortedDict, SortedDict]] = {}  # ticker -> (yes bids, no bids)
         self._last_book: dict[str, Book] = {}
-        self._seq: dict[int, int] = {}
+        self._seq: dict[tuple[int | None, int], int] = {}  # (connection, sid) -> last seq
+        # ticker -> the connection its book's snapshot came on: a replaced connection overlaps its
+        # successor for seconds, both sending the same deltas, which would count twice
+        self._book_conn: dict[str, int | None] = {}
         self._trade_ids: dict[str, None] = {}
         self._ticker_marks = tuple(f'"{s}-' for s in self.config.series)  # tickers start "<series>-"
 
@@ -269,12 +272,13 @@ class Kalshi(VenueFeed):
         if link.state == "up":  # a new connection sends fresh snapshots
             self._books.clear()
             self._last_book.clear()
+            self._book_conn.clear()
             self._seq.clear()
 
     def parse(self, raw: Raw) -> list[Event]:
         text = raw.text
         gap = self._seq_gap(
-            text
+            text, raw.conn
         )  # every book message counts, including other series' (sequences are per subscription)
         # only this feed's series: skip other markets' books and trades before decoding them
         skip = "market_ticker" in text and not any(m in text for m in self._ticker_marks)
@@ -288,14 +292,14 @@ class Kalshi(VenueFeed):
     def carries_data(self, text: str) -> bool:
         return self.data_marker in text[:80]
 
-    def _seq_gap(self, text: str) -> str:
+    def _seq_gap(self, text: str, conn: int | None = None) -> str:
         """Description of a sequence gap on an order book subscription, or ""."""
         m = _BOOK_SEQ.match(text)
         if m is None:
             return ""
         kind, sid, seq = m[1], int(m[2]), int(m[3])
-        prev = self._seq.get(sid)
-        self._seq[sid] = seq
+        prev = self._seq.get((conn, sid))
+        self._seq[conn, sid] = seq
         # seq 1 starts a fresh subscription (also how a reconnect shows in recordings without link events)
         if kind == "orderbook_delta" and prev is not None and seq not in (1, prev + 1):
             return f"sid {sid}: seq {prev} -> {seq}; books may be stale until the next snapshot"
@@ -360,10 +364,13 @@ class Kalshi(VenueFeed):
                 SortedDict({round(float(p), 4): float(q) for p, q in body.get("yes_dollars_fp", [])}),
                 SortedDict({round(float(p), 4): float(q) for p, q in body.get("no_dollars_fp", [])}),
             )
+            self._book_conn[ticker] = raw.conn
         else:
             books = self._books.get(ticker)
             if books is None:
                 return []  # deltas before this connection's snapshot (e.g. a replay starting mid-stream)
+            if raw.conn is not None and self._book_conn.get(ticker) not in (None, raw.conn):
+                return []  # the connection being replaced, still sending: the book is its successor's
             side = books[0] if body["side"] == "yes" else books[1]
             p = round(float(body["price_dollars"]), 4)
             q = round(side.get(p, 0.0) + float(body["delta_fp"]), 6)

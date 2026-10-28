@@ -9,6 +9,12 @@ file is opened) and the command line. Projects from `quanty init` depend on one 
 
 ## Unreleased
 
+- Fix: Kalshi books went wrong for whole windows after the feed replaced its connection (each time a
+  window was added, hourly at :30): the old connection, kept open a few seconds so nothing is
+  missed, sent the same deltas as the new one, and both were applied. 3.8 million crossed books in
+  8 hours of BTC and XRP 15-minute markets, a quarter of their windows. Every message now carries
+  the connection it came on (`Raw.conn`, recorded as `"c"`), and a book follows its snapshot's.
+  Recordings from before read as they did.
 - Fix: the simulated queue counted contracts twice when a venue sent a book update before the
   trades that caused it: the level shrinking moved a resting order up (cancels ahead), then the
   trades moved it up again. Trades at its price within `match_trades_ms` (500 ms) of a shrink now

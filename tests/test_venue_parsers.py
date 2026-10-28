@@ -342,3 +342,34 @@ def test_a_data_only_replay_reads_index_values_and_skips_books_unparsed(tmp_path
         "IndexValue",
         "MarketTrade",
     }
+
+
+def test_kalshi_books_ignore_a_replaced_connection_still_sending() -> None:
+    # a subscription change replaces the connection, the old one kept open a few seconds: both send the
+    # same deltas, and each book follows the connection its snapshot came on
+    k = kalshi()
+    old, new = T0 - 60_000, T0
+    k.parse(
+        Raw("kalshi", T0 - 5, k_snapshot(TK, yes=[("0.40", "10")], no=[("0.55", "3")], seq=2_116_880), old)
+    )
+    k.on_link(Link("kalshi", T0, "up"))  # the new connection
+    (snap,) = k.parse(
+        Raw("kalshi", T0 + 1, k_snapshot(TK, yes=[("0.40", "10")], no=[("0.55", "3")], seq=2), new)
+    )
+    assert isinstance(snap, Book) and snap.asks == ((0.45, 3.0),)  # YES asks are 1 - NO bids
+    (book,) = k.parse(Raw("kalshi", T0 + 2, k_delta(TK, "no", "0.55", "2", seq=3), new))
+    assert isinstance(book, Book) and book.asks == ((0.45, 5.0),)
+    late = k.parse(
+        Raw("kalshi", T0 + 3, k_delta(TK, "no", "0.55", "2", seq=2_116_881), old)
+    )  # the same, again
+    assert late == []  # not counted twice (nor a gap: each connection has its own numbering)
+    (book,) = k.parse(Raw("kalshi", T0 + 4, k_delta(TK, "no", "0.55", "-5", seq=4), new))
+    assert isinstance(book, Book) and book.asks == ()  # the level is gone, as on the venue
+
+
+def test_recordings_keep_the_connection() -> None:
+    from quanty.feeds.recording import decode, encode
+
+    for item in (Raw("kalshi", T0, '{"type":"ok"}', 1_792_713_000_000), Raw("kalshi", T0, "plain text", 7)):
+        assert decode("kalshi", encode(item)) == item
+    assert decode("kalshi", encode(Raw("kalshi", T0, '{"a":1}'))) == Raw("kalshi", T0, '{"a":1}')  # none

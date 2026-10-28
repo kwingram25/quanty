@@ -3,6 +3,7 @@
 Layout: <root>/<feed>/<YYYY-MM-DD>/<HH>.jsonl.gz (UTC). One line per item:
 
     {"t":1792712242986,"m":<message>}               a message; JSON messages inline, others as a string
+    {"t":1792712242986,"c":1792712200000,"m":...}     ...that came over a connection (Raw.conn)
     {"t":1792712242990,"link":"down","detail":"..."}  a connection change
 
 Inline messages are sliced back out byte for byte, so parsers see exactly what was received.
@@ -46,22 +47,27 @@ def encode(item: Raw | Link) -> str:
     if isinstance(item, Link):
         return orjson.dumps({"t": item.t, "link": item.state, "detail": item.detail}).decode() + "\n"
     text = item.text
+    head = f'{{"t":{item.t},' if item.conn is None else f'{{"t":{item.t},"c":{item.conn},'
     if text[:1] in ("{", "[") and "\n" not in text:
         try:
             orjson.loads(text)
-            return f'{{"t":{item.t},"m":{text}}}\n'
+            return f'{head}"m":{text}}}\n'
         except orjson.JSONDecodeError:
             pass
-    return f'{{"t":{item.t},"m":{orjson.dumps(text).decode()}}}\n'
+    return f'{head}"m":{orjson.dumps(text).decode()}}}\n'
 
 
 def decode(feed: str, line: str) -> Raw | Link:
     comma = line.index(",", 5)
     t = int(line[5:comma])
     rest = line[comma + 1 :].rstrip("\n")
+    conn = None
+    if rest.startswith('"c":'):
+        end = rest.index(",", 4)
+        conn, rest = int(rest[4:end]), rest[end + 1 :]
     if rest.startswith('"m":'):
         body = rest[4:-1]
-        return Raw(feed, t, cast(str, orjson.loads(body)) if body.startswith('"') else body)
+        return Raw(feed, t, cast(str, orjson.loads(body)) if body.startswith('"') else body, conn)
     obj = orjson.loads(line)
     return Link(feed, t, cast(Literal["up", "down"], obj["link"]), obj.get("detail", ""))
 
