@@ -200,6 +200,45 @@ def test_a_session_leaves_a_feed_to_its_recorder_and_takes_over_when_it_stops(tm
     assert got == [(t, '{"by":"recorder"}'), (t + 61_000, '{"by":"session"}')]
 
 
+def test_a_take_over_recorder_records_beside_the_old_one_then_takes_over(tmp_path: Path) -> None:
+    from quanty.feeds.recording import handover_path, hour_path
+
+    t = 1_700_000_000_000
+    old, new = Recorder(tmp_path), Recorder(tmp_path, take_over=True)
+    old.write(Raw("kalshi", t, '{"by":"old"}', 1))
+    new.write(Raw("kalshi", t + 1, '{"by":"new"}', 2))  # no error: beside the old one
+    old.write(Raw("kalshi", t + 2, '{"by":"old"}', 1))
+    new.write(Raw("kalshi", t + 3, '{"by":"new"}', 2))
+    new.flush()
+    assert handover_path(hour_path(tmp_path, "kalshi", t)).exists()
+    with pytest.raises(RuntimeError, match="already recording kalshi"):  # one recorder beside at a time
+        Recorder(tmp_path, take_over=True).write(Raw("kalshi", t + 4, "{}"))
+    old.close()  # the deploy stops the old one
+    new.write(Raw("kalshi", t + 100, '{"by":"new"}', 2))  # within the poll: still beside
+    new.write(Raw("kalshi", t + 300, '{"by":"new"}', 2))  # taken over
+    new.close()
+    got = [(i.t, i.text, i.conn) for i in read(tmp_path, "kalshi", t, t + HOUR_MS) if isinstance(i, Raw)]
+    assert got == [  # both recorders' lines, one stream in time order
+        (t, '{"by":"old"}', 1),
+        (t + 1, '{"by":"new"}', 2),
+        (t + 2, '{"by":"old"}', 1),
+        (t + 3, '{"by":"new"}', 2),
+        (t + 100, '{"by":"new"}', 2),
+        (t + 300, '{"by":"new"}', 2),
+    ]
+
+
+def test_a_take_over_recorder_gives_up_if_the_old_one_never_stops(tmp_path: Path) -> None:
+    t = 1_700_000_000_000
+    old, new = Recorder(tmp_path), Recorder(tmp_path, take_over=True)
+    old.write(Raw("kalshi", t, "{}"))
+    new.write(Raw("kalshi", t, "{}"))
+    with pytest.raises(RuntimeError, match="already recording kalshi"):
+        new.write(Raw("kalshi", t + Recorder.TAKE_OVER_MAX_MS + 1, "{}"))
+    old.close()
+    new.close()
+
+
 def test_an_hours_data_lines_also_go_to_its_data_file(tmp_path: Path) -> None:
     from quanty.feeds.recording import data_path, hour_path
 

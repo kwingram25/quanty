@@ -6,8 +6,9 @@ The same command for the first deploy and every update. It runs, in order:
 2. `rsync` of the project, never .env, data/, .venv/ or .git/
 3. on the server: stop unless the server has its keys (.env, put there by `quanty keys`), record what
    was sent (the git commit, and whether it had uncommitted changes) in .quanty-deployed, build the
-   image, `quanty doctor` in it (stops here if anything fails), then `docker compose up -d`, which
-   restarts the trader and the dashboard on the new code
+   image, `quanty doctor` in it (stops here if anything fails), a recorder started with --take-over
+   replaced without a gap (handover), then `docker compose up -d`, which restarts the trader and the
+   dashboard on the new code
 
 data/ on the server (recordings, ledgers, the live order journal) and its .env are never sent or
 deleted: keys travel apart from code, once, with `quanty keys you@server --file .env.server`.
@@ -35,6 +36,35 @@ EXCLUDE = (
 KEY_NAMES = ("KALSHI_KEY_ID", "KALSHI_SECRET_KEY", "POLYMARKET_KEY_ID", "POLYMARKET_SECRET_KEY")
 
 
+def handover(wait_s: int = 120, settle_s: int = 10) -> str:
+    """Shell that replaces a recorder started with --take-over without a gap in the recordings. A
+    one-off recorder on the new image starts beside the running one (into the hour's handover file),
+    the recorder is recreated (the one-off takes over as the old one stops; the new one starts beside
+    it), then the one-off stops and the new recorder takes over. Each step waits for the recorder it
+    started to record beside the other (then settle_s, for its other feeds). Without --take-over, or
+    if the one-off isn't there within wait_s, `docker compose up -d` recreates the recorder, and
+    nothing is recorded while the new container starts."""
+    return (
+        "{ beside() { for i in $(seq "
+        + str(wait_s)
+        + '); do docker logs "$1" 2>&1 | grep -q "recording beside" && sleep '
+        + str(settle_s)
+        + " && return 0; sleep 1; done; return 1; };"
+        ' if [ -n "$(docker compose ps -q recorder 2>/dev/null)" ]'
+        " && grep -q -- --take-over compose.yaml; then"
+        " tmp=$(docker compose run -d --rm --no-deps recorder);"
+        ' if [ -n "$tmp" ] && beside "$tmp"; then'
+        " docker compose up -d --no-deps recorder;"
+        " tmp_id=$(docker inspect -f '{{.Id}}' \"$tmp\");"
+        ' new=$(docker compose ps -q recorder | grep -vx "$tmp_id" | head -n 1);'
+        ' beside "$new" || echo "the new recorder did not start beside the one-off" >&2;'
+        ' docker stop "$tmp" >/dev/null; echo "recorder handed over";'
+        ' else echo "the new recorder did not start beside the old one: recreating it" >&2;'
+        ' docker rm -f "$tmp" >/dev/null 2>&1; fi;'
+        " fi; true; }"
+    )
+
+
 def commands(
     host: str, project: Path, remote_dir: str, check: bool = True, stamp: dict[str, Any] | None = None
 ) -> list[list[str]]:
@@ -59,7 +89,7 @@ def commands(
     ]
     if check:
         steps.append("docker compose run --rm --entrypoint quanty trader doctor")
-    steps += ["docker compose up -d", "docker compose ps"]
+    steps += [handover(), "docker compose up -d", "docker compose ps"]
     return [
         ["ssh", host, f"mkdir -p {d}"],
         [*rsync, f"{project.resolve()}/", f"{host}:{remote_dir.rstrip('/')}/"],

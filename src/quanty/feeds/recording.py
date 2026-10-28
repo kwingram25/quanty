@@ -12,6 +12,10 @@ Files are append-only and safe to reopen after a restart (gzip members concatena
 Beside an hour's file, <HH>.data.jsonl.gz holds the same lines for just its messages that can hold
 data (a feed's data_marker: Kalshi's index values among its books), so a warm-up that only needs
 data reads megabytes rather than the hour's every message.
+
+<HH>.handover.jsonl.gz holds what a recorder started with take_over recorded while another still had
+the folder (a deploy's new container, before the old one stopped): reading merges it in by time, so
+the handover looks like a connection replaced mid-stream, which parsers already handle.
 """
 
 import fcntl
@@ -41,6 +45,11 @@ def data_path(path: Path) -> Path:
     """The hour's data file: its messages that can hold data (Feed.data_marker), all of them from the
     hour's start, for warm-ups that need only data. Not every hour has one (older recordings)."""
     return path.with_name(path.name.replace(".jsonl.gz", ".data.jsonl.gz"))
+
+
+def handover_path(path: Path) -> Path:
+    """The hour's handover file: lines from a take_over recorder before the folder's lock was free."""
+    return path.with_name(path.name.replace(".jsonl.gz", ".handover.jsonl.gz"))
 
 
 def encode(item: Raw | Link) -> str:
@@ -78,25 +87,38 @@ class Recorder:
     One recorder per feed folder: two processes appending to one compressed file interleave their
     writes and corrupt it, so each feed's folder is locked while recorded (released at exit, even a
     killed one). A second recorder of it is refused, or with share=True (a trading session) leaves
-    that feed to the other process, checking each minute whether it has stopped, to take over."""
+    that feed to the other process, checking each minute whether it has stopped, to take over. With
+    take_over (a deploy's new recorder) it records beside the other into the hour's handover file,
+    and takes the folder over within TAKE_OVER_POLL_MS of the other stopping (refused after
+    TAKE_OVER_MAX_MS: two recorders left running)."""
+
+    TAKE_OVER_POLL_MS = 200
+    TAKE_OVER_MAX_MS = 15 * 60_000
 
     def __init__(
-        self, root: Path, share: bool = False, data_markers: Mapping[str, str] | None = None
+        self,
+        root: Path,
+        share: bool = False,
+        data_markers: Mapping[str, str] | None = None,
+        take_over: bool = False,
     ) -> None:
         """data_markers: feed -> the text its messages that can hold data contain (Feed.data_marker);
         those are written to a small file beside each hour's too (data_path), for quick warm-ups."""
         self.root = root
         self.share = share
+        self.take_over = take_over
         self.data_markers = dict(data_markers or {})
         self._files: dict[str, tuple[Path, IO[str]]] = {}
         self._data: dict[str, IO[str] | None] = {}  # feed -> this hour's data file, if it has one
         self._locks: dict[str, IO[bytes]] = {}
         self._elsewhere: dict[str, int] = {}  # feed recorded by another process -> when to try again
+        self._beside: dict[str, tuple[Path, IO[str], IO[bytes]]] = {}  # take_over: handover file, its lock
+        self._waiting: dict[str, int] = {}  # take_over: feed -> when it started recording beside the other
 
-    def _lock(self, feed: str) -> None:
+    def _lock(self, feed: str, name: str = ".recording.lock") -> IO[bytes]:
         folder = self.root / feed
         folder.mkdir(parents=True, exist_ok=True)
-        fd = (folder / ".recording.lock").open("ab")
+        fd = (folder / name).open("ab")
         try:
             fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except OSError:
@@ -105,16 +127,28 @@ class Recorder:
                 f"another process is already recording {feed} into {self.root}/: run one recorder per "
                 "data folder (beside `quanty record`, start sessions with --no-record)"
             ) from None
-        self._locks[feed] = fd
+        return fd
 
     def write(self, item: Raw | Link) -> None:
         if item.feed not in self._locks:
             retry = self._elsewhere.get(item.feed)
             if retry is not None and item.t < retry:
+                if self.take_over:
+                    self._write_beside(item)
                 return  # another process records it
             try:
-                self._lock(item.feed)
+                self._locks[item.feed] = self._lock(item.feed)
             except RuntimeError:
+                if self.take_over:
+                    since = self._waiting.setdefault(item.feed, item.t)
+                    if item.t - since > self.TAKE_OVER_MAX_MS:
+                        raise
+                    if since == item.t:
+                        log.info("another recorder has this feed: recording beside it until it stops",
+                                 feed=item.feed, data=str(self.root))  # fmt: skip
+                    self._elsewhere[item.feed] = item.t + self.TAKE_OVER_POLL_MS
+                    self._write_beside(item)
+                    return
                 if not self.share:
                     raise
                 if retry is None:
@@ -123,7 +157,14 @@ class Recorder:
                 self._elsewhere[item.feed] = item.t + 60_000
                 return
             if self._elsewhere.pop(item.feed, None) is not None:
-                log.info("the other recorder stopped; this session records the feed now", feed=item.feed)
+                if self.take_over:
+                    self._waiting.pop(item.feed, None)
+                    if (beside := self._beside.pop(item.feed, None)) is not None:
+                        beside[1].close()
+                        beside[2].close()
+                    log.info("the other recorder stopped; recording the feed here now", feed=item.feed)
+                else:
+                    log.info("the other recorder stopped; this session records the feed now", feed=item.feed)
         path = hour_path(self.root, item.feed, item.t)
         cur = self._files.get(item.feed)
         if cur is None or cur[0] != path:
@@ -144,15 +185,38 @@ class Recorder:
         if d is not None and isinstance(item, Raw) and self.data_markers[item.feed] in item.text:
             d.write(line)
 
+    def _write_beside(self, item: Raw | Link) -> None:
+        """take_over, while another recorder has the feed: the hour's handover file instead."""
+        path = handover_path(hour_path(self.root, item.feed, item.t))
+        cur = self._beside.get(item.feed)
+        if cur is None or cur[0] != path:
+            if cur:
+                cur[1].close()
+            lock = cur[2] if cur else self._lock(item.feed, ".handover.lock")  # one recorder beside at a time
+            path.parent.mkdir(parents=True, exist_ok=True)
+            cur = (path, cast(IO[str], gzip.open(path, "at", compresslevel=6)), lock)  # noqa: SIM115
+            self._beside[item.feed] = cur
+        cur[1].write(encode(item))
+
+    def _open(self) -> list[IO[str]]:
+        return [
+            *(f for _, f in self._files.values()),
+            *(d for d in self._data.values() if d),
+            *(f for _, f, _ in self._beside.values()),
+        ]
+
     def flush(self) -> None:
-        for f in [*(f for _, f in self._files.values()), *(d for d in self._data.values() if d)]:
+        for f in self._open():
             f.flush()
 
     def close(self) -> None:
-        for f in [*(f for _, f in self._files.values()), *(d for d in self._data.values() if d)]:
+        for f in self._open():
             f.close()
+        for _, _, lock in self._beside.values():
+            lock.close()
         self._files.clear()
         self._data.clear()
+        self._beside.clear()
         for fd in self._locks.values():
             fd.close()  # releases the lock
         self._locks.clear()
@@ -171,17 +235,24 @@ def read(root: Path, feed: str, start: int, end: int, contains: str | None = Non
     this text (link changes included only if they have it), picked out before decoding."""
     for hour in hours(start, end):
         path = hour_path(root, feed, hour)
-        if not path.exists():
-            continue
+        side = handover_path(path)
         if contains is not None and data_path(path).exists():
             path = data_path(path)  # the same lines, without the rest of the hour to decompress
-        for line in _lines(path, contains):
-            try:
-                item = decode(feed, line)
-            except (ValueError, KeyError):  # a damaged line: a writer killed mid-write
-                continue
+        # a deploy's handover: two recorders' lines, merged as one stream
+        files = [_items(feed, p, contains) for p in (path, side) if p.exists()]
+        if not files:
+            continue
+        for item in heapq.merge(*files, key=lambda item: item.t) if len(files) > 1 else files[0]:
             if start <= item.t < end:
                 yield item
+
+
+def _items(feed: str, path: Path, contains: str | None) -> Iterator[Raw | Link]:
+    for line in _lines(path, contains):
+        try:
+            yield decode(feed, line)
+        except (ValueError, KeyError):  # a damaged line: a writer killed mid-write
+            continue
 
 
 def _lines(path: Path, contains: str | None) -> Iterator[str]:

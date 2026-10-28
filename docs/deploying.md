@@ -106,9 +106,11 @@ changes: commit first, and a run's commit names exactly what it ran.
 
 What runs, in three containers sharing `data/`, each restarted on failure and on reboot:
 
-- **recorder**: `quanty record --config feeds.toml`, writing the raw feeds into `data/` (for
-  warm-ups, backtests and `quanty pull --recordings`) and the feed health the dashboard shows. Set
-  `keep_days` under `[recording]` in `feeds.toml` so it deletes old recordings before the disk fills.
+- **recorder**: `quanty record --config feeds.toml --take-over`, writing the raw feeds into `data/`
+  (for warm-ups, backtests and `quanty pull --recordings`) and the feed health the dashboard shows.
+  Set `keep_days` under `[recording]` in `feeds.toml` so it deletes old recordings before the disk
+  fills. With `--take-over`, a deploy starts the new recorder beside the old one and stops the old
+  one only once the new one is connected, so the recordings have no gap.
 - **trader**: `quanty paper experiments/main.toml --feeds feeds.toml --no-record` (its own feed
   connections; the recorder records), or `quanty live … --arm` when
   the server's `.env` (its keys file) sets `QUANTY_MODE=live`. Recordings, ledgers and the order journal live in `data/`.

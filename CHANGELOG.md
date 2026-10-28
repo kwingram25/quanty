@@ -21,6 +21,12 @@ file is opened) and the command line. Projects from `quanty init` depend on one 
   count as what the shrink showed. Over a day of Polymarket US 5m windows this brings simulated
   fills closest to live ones (154 of 166 windows filled-or-not as live). `match_trades_ms = 0` in a
   broker's `queue` keeps the old count, to reproduce a simulator that has it.
+- `quanty deploy` replaces the recorder without a gap in the recordings: it used to stop the old
+  one, and nothing was recorded for the 20 seconds or so the new container took to start (more on
+  a busy server). `quanty record --take-over`, which projects' `compose.yaml` now uses, records
+  beside a running recorder into the hour's `<HH>.handover.jsonl.gz` and takes over when it
+  stops; reading merges that file in by time. A project gets this with `quanty upgrade` (it
+  refreshes `compose.yaml`), or by adding `"--take-over"` to the recorder's command itself.
 - The dashboard's open markets drop a market as its countdown ends, rather than at the next update
   (which a slow connection, or a sped-up demo, made seconds or a demo minute late).
 - A hosted demo's banner no longer makes a run's page taller than the window.

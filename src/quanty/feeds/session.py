@@ -62,13 +62,16 @@ class RecordSession:
         keep_days: float | None = None,
         warmup: Callable[[], None] | None = None,
         on_ready: Callable[[], Awaitable[None]] | None = None,
+        take_over: bool = False,
     ) -> None:
         """trader: an engine to drive with the live events (paper/shadow/live); None = record only.
         record: write the raw messages to disk (off when a separate recorder does, on its own core).
         keep_days: delete this session's recordings older than this, checked hourly (None: keep all).
         warmup: rebuilds the trader's state from recordings (Engine.warming), run in a thread while the
         feeds connect; live events meanwhile wait, then go through warming too (no orders on old
-        events), and on_ready (restoring positions, say) runs before the first live event trades."""
+        events), and on_ready (restoring positions, say) runs before the first live event trades.
+        take_over: a recorder another process still holds the folder for records beside it and takes
+        over when that one stops (a deploy's handover; see Recorder)."""
         self.trader = trader
         self.controller = controller  # applies UI commands to the trader (quanty.control)
         if controller is not None:
@@ -76,7 +79,7 @@ class RecordSession:
         self.feeds = dict(feeds)
         markers = {n: f.data_marker for n, f in self.feeds.items() if f.holds_data and f.data_marker}
         self.recorder = Recorder(
-            root, share=trader is not None, data_markers=markers
+            root, share=trader is not None, data_markers=markers, take_over=take_over
         )  # a session defers to a recorder
         self.record = record
         self.keep_days = keep_days

@@ -113,6 +113,14 @@ def record(
         float | None, typer.Option(help="Stop after this many seconds (default: run until Ctrl-C)")
     ] = None,
     window: Annotated[float, typer.Option(help="Seconds per health/metrics window")] = 60,
+    take_over: Annotated[
+        bool,
+        typer.Option(
+            "--take-over",
+            help="If another recorder has these feeds, record beside it and take over when it stops "
+            "(how `quanty deploy` replaces a recorder without a gap)",
+        ),
+    ] = False,
 ) -> None:
     """Record feeds to disk and track their health. Raw messages: <data>/<feed>/<date>/<hour>.jsonl.gz."""
     structlog.configure(logger_factory=structlog.PrintLoggerFactory(sys.stderr))
@@ -122,7 +130,9 @@ def record(
     except ValueError as exc:
         raise _fail(exc) from None
     data.mkdir(parents=True, exist_ok=True)
-    session = RecordSession(feeds, data, db or data / "quanty.sqlite", window_s=window, keep_days=keep)
+    session = RecordSession(
+        feeds, data, db or data / "quanty.sqlite", window_s=window, keep_days=keep, take_over=take_over
+    )
     typer.echo(f"recording {', '.join(feeds)} to {data}/ (Ctrl-C to stop)")
     try:
         asyncio.run(session.run(duration, on_window=print_windows))

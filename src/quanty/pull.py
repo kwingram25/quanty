@@ -93,7 +93,7 @@ def recordings_command(
         {
             time.strftime(f"*/%Y-%m-%d/%H{kind}.jsonl.gz", time.gmtime(t / 1000))
             for t in range(first, now + 1, 3_600_000)
-            for kind in ("", ".data")  # the hour, and its data file where it has one
+            for kind in ("", ".data", ".handover")  # the hour, its data file and handover file if any
         }
     )
     return [

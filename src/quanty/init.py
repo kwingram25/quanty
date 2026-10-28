@@ -703,7 +703,7 @@ services:
     build: .
     env_file: .env
     volumes: [./data:/app/data]
-    command: ["record", "--config", "feeds.toml", "--data", "data"]
+    command: ["record", "--config", "feeds.toml", "--data", "data", "--take-over"]
     restart: unless-stopped
 
   trader:
