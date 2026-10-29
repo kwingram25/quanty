@@ -425,7 +425,8 @@ class Engine:
 
     def restore(self) -> dict[str, int]:
         """Rebuild positions and realized (and daily) P&L from the run's recorded fills and
-        settlements: a restarted session knows what its instances hold. Returns what it found."""
+        settlements: a restarted session knows what its instances hold. Orders an earlier session
+        left open are marked canceled (nothing tracks them any more). Returns what it found."""
         from sqlalchemy import select
 
         from quanty.db.models import FillRow, SettlementRow
@@ -466,11 +467,15 @@ class Engine:
                 self._held_by[(iid, mid)] = broker
                 unplaceable += broker is None
         open_ = sum(1 for *_, p in self.portfolio.open_positions() if p.qty > 1e-9)
+        # orders an earlier session left resting: they lived in its brokers, which this session
+        # doesn't have (a live broker's journal cancels its own at the venue on start)
+        left = self.ledger.close_leftovers(self.instances, "left open when its session stopped")
         return {
             "fills": sum(1 for _, k, _ in rows if k == 0),
             "open": open_,
             "skipped": skipped,
             "live_without_broker": unplaceable,
+            "orders_closed": left,
         }
 
     def live_holdings(self) -> dict[str, dict[str, float]]:

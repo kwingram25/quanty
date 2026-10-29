@@ -4,12 +4,12 @@ Writes are buffered and flushed in bulk (fast backtests); `durable=True` flushes
 (live). Reads flush first, so they always see everything written.
 """
 
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from sqlalchemy import Executable, Result, case, func, insert, select
+from sqlalchemy import Executable, Result, case, func, insert, select, update
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.orm import Session
 
@@ -74,6 +74,22 @@ class Ledger:
             "kind": self._order_kind.get(o.id, self.kinds.get(o.instance, "sim")),
         }
         self._wrote()
+
+    def close_leftovers(self, instances: Iterable[str], reason: str) -> int:
+        """Mark these instances' orders that are still open or pending as canceled, with reason: a
+        session's orders live in its brokers, so ones left open by an earlier session (stopped with
+        orders resting) are finished. For a session starting, before it trades. Returns how many."""
+        self.commit()
+        with self.engine.begin() as conn:
+            res = conn.execute(
+                update(OrderRow)
+                .where(
+                    OrderRow.instance.in_(list(instances)),
+                    OrderRow.status.in_([OrderStatus.PENDING, OrderStatus.OPEN]),
+                )
+                .values(status=OrderStatus.CANCELED, reason=reason)
+            )
+        return res.rowcount
 
     def market(self, m: Market) -> None:
         d = m.describe()

@@ -1000,6 +1000,8 @@ def _restore(trader: Engine, ledger: Path) -> None:
         )
         assert trader.ledger is not None
         trader.ledger.log(trader.now, "session", "restored positions", got)
+    if got["orders_closed"]:
+        typer.echo(f"  {got['orders_closed']} order(s) the previous session left open marked canceled")
 
 
 def _demo_live(

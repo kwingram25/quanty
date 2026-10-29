@@ -7,6 +7,13 @@ file is opened) and the command line. Projects from `quanty init` depend on one 
 (`quanty-py>=0.5.0,<0.6`), so moving to the next is your choice: raise the bound in
 `pyproject.toml`, then `quanty upgrade`.
 
+## Unreleased
+
+- Fix: orders resting when a session stopped (a deploy, a restart) stayed "open" in the run's ledger
+  for good, since they lived only in that session's brokers. A session starting now marks what the
+  previous one left open as canceled ("left open when its session stopped"). Live orders were
+  already canceled at the venue on start, by the order journal; their ledger rows now say so too.
+
 ## 0.5.0 (2026-10-27)
 
 Upgrading from 0.4: change the bound to `quanty-py>=0.5.0,<0.6`, then `quanty upgrade` (it

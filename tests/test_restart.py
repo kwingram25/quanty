@@ -55,6 +55,32 @@ def test_a_restarted_session_knows_what_it_holds(tmp_path: Path) -> None:
     assert all(p.qty == 0 for *_, p in second.portfolio.open_positions())  # all settled by the end
 
 
+def test_a_restart_closes_the_orders_a_stopped_session_left_open(tmp_path: Path) -> None:
+    def session() -> Engine:
+        s = Hooks(book=lambda ctx, b: ctx.orders(M.id) or ctx.buy(M.id, Side.YES, 0.40, 10, tif=Tif.GTC))
+        return Engine([Instance("bid", s, SimBroker())], ledger=Ledger(tmp_path / "run.sqlite"))
+
+    def statuses() -> list[tuple[str, str]]:
+        ledger = Ledger(tmp_path / "run.sqlite")
+        rows = [(r.status, r.reason) for r in ledger.execute(select(OrderRow)).scalars()]
+        ledger.close()
+        return rows
+
+    first = session()
+    for ev in [
+        *opened(M),
+        *(book(t, [(0.39, 100)], [(0.45, 100)]) for t in (1, 2)),
+    ]:  # a bid under the ask: it rests
+        first.advance(ev.ts)
+        first.process(ev)
+    first.ledger.close()  # the session stops with it resting
+    assert statuses() == [("open", "")]
+    second = session()  # a new process, the same run
+    assert second.restore()["orders_closed"] == 1
+    second.ledger.close()
+    assert statuses() == [("canceled", "left open when its session stopped")]
+
+
 def test_warming_rebuilds_state_without_trading(tmp_path: Path) -> None:
     seen: list[str] = []
     s = Hooks(book=lambda ctx, b: seen.append(ctx.buy(M.id, Side.YES, 0.6, 10, tif=Tif.IOC).reason))
