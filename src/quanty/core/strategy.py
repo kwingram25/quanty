@@ -38,6 +38,8 @@ class Strategy[P: Params]:
         self.params = params
 
     def wants(self, market: Market) -> bool:
+        """Whether this strategy sees the market's events. Asked once per market (and again after
+        its params change), so answer from the market and the params only."""
         return not self.series or market.series in self.series
 
     def on_start(self, ctx: "Context") -> None: ...

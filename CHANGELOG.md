@@ -9,6 +9,13 @@ file is opened) and the command line. Projects from `quanty init` depend on one 
 
 ## Unreleased
 
+- Less CPU per message, for busy markets on small servers: Kalshi book updates rebuild only the side
+  that moved (no side's levels are kept by the ask they make, converted once), the recorder works
+  out an hour's file once instead of per message, and the engine asks each strategy whether it
+  wants a market once (again after its params change) instead of on every book and trade. A
+  backtest of 4.7 hours of BTC and XRP markets runs 22% faster with identical orders and fills;
+  the recorder's own work per message is 44% less. A strategy's `wants()` must now answer from
+  the market and its params alone (as the built-in ones do).
 - Fix: orders resting when a session stopped (a deploy, a restart) stayed "open" in the run's ledger
   for good, since they lived only in that session's brokers. A session starting now marks what the
   previous one left open as canceled ("left open when its session stopped"). Live orders were

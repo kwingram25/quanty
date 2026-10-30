@@ -127,9 +127,8 @@ class VenueFeed(WebSocketFeed):
 
 def top(levels: Any, n: int, reverse: bool) -> tuple[Level, ...]:
     """Best n (price, size) levels from a SortedDict of price -> size."""
-    keys = levels.keys()
-    picked = keys[-n:][::-1] if reverse else keys[:n]
-    return tuple((p, levels[p]) for p in picked)
+    items = levels.items()  # sliced in one go: no lookup per level
+    return tuple(items[-n:][::-1]) if reverse else tuple(items[:n])
 
 
 def same_book(a: Book | None, b: Book) -> bool:

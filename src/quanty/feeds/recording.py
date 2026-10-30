@@ -108,7 +108,7 @@ class Recorder:
         self.share = share
         self.take_over = take_over
         self.data_markers = dict(data_markers or {})
-        self._files: dict[str, tuple[Path, IO[str]]] = {}
+        self._files: dict[str, tuple[int, IO[str]]] = {}  # feed -> (the hour it's open for, its file)
         self._data: dict[str, IO[str] | None] = {}  # feed -> this hour's data file, if it has one
         self._locks: dict[str, IO[bytes]] = {}
         self._elsewhere: dict[str, int] = {}  # feed recorded by another process -> when to try again
@@ -165,9 +165,10 @@ class Recorder:
                     log.info("the other recorder stopped; recording the feed here now", feed=item.feed)
                 else:
                     log.info("the other recorder stopped; this session records the feed now", feed=item.feed)
-        path = hour_path(self.root, item.feed, item.t)
+        hour = item.t - item.t % HOUR_MS  # the path only when the hour changes: messages come by the thousand
         cur = self._files.get(item.feed)
-        if cur is None or cur[0] != path:
+        if cur is None or cur[0] != hour:
+            path = hour_path(self.root, item.feed, item.t)
             if cur:
                 cur[1].close()
             if (old := self._data.pop(item.feed, None)) is not None:
@@ -177,7 +178,7 @@ class Recorder:
             data = data_path(path)
             if item.feed in self.data_markers and (not path.exists() or data.exists()):
                 self._data[item.feed] = cast(IO[str], gzip.open(data, "at", compresslevel=6))  # noqa: SIM115
-            cur = (path, cast(IO[str], gzip.open(path, "at", compresslevel=6)))  # noqa: SIM115 - kept open for the hour
+            cur = (hour, cast(IO[str], gzip.open(path, "at", compresslevel=6)))  # noqa: SIM115 - kept open for the hour
             self._files[item.feed] = cur
         line = encode(item)
         cur[1].write(line)

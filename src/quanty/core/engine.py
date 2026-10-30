@@ -210,6 +210,7 @@ class Engine:
         code: the project's code version (quanty.version.project), recorded with each strategy."""
         self.code = dict(code or {})
         self.instances = {i.id: i for i in instances}
+        self._wanting: dict[str, tuple[Instance, ...]] = {}  # market -> the instances that want it
         if len(self.instances) != len(instances):
             raise ValueError("instance ids must be unique")
         self.ledger = ledger or Ledger()
@@ -539,6 +540,7 @@ class Engine:
         if self._brokers.get(inst.broker.name) is not inst.broker:
             raise ValueError(f"{inst.id}: broker {inst.broker.name!r} isn't one of this session's")
         self.instances[inst.id] = inst
+        self._wanting.clear()
         self._ctx[inst.id] = Context(self, inst)
         self.ledger.kinds[inst.id] = inst.broker.kind
         self.ledger.log(self.now, inst.id, "strategy", describe(inst, self.code))
@@ -551,6 +553,7 @@ class Engine:
         """Swap an instance's params while running; strategies see them from the next event."""
         inst = self.instances[instance_id]
         old, inst.strategy.params = inst.strategy.params, params
+        self._wanting.clear()  # which markets it wants can follow its params
         inst.strategy.on_params(self._ctx[instance_id], old)
 
     def halt(self, instance_id: str | None = None, reason: str = "") -> None:
@@ -676,9 +679,17 @@ class Engine:
         market = self.markets.get(market_id) if market_id is not None else None
         if market_id is not None and market is None:
             return  # data for a market we never saw open
-        for inst in self.instances.values():
-            if market is None or inst.strategy.wants(market):
-                self._guard(inst, call)
+        if market is None:
+            targets = tuple(self.instances.values())
+        else:  # asked once per market: books come by the thousand
+            cached = self._wanting.get(market.id)
+            if cached is None:
+                cached = self._wanting[market.id] = tuple(
+                    i for i in self.instances.values() if i.strategy.wants(market)
+                )
+            targets = cached
+        for inst in targets:
+            self._guard(inst, call)
 
     def _guard(self, inst: Instance, call: Call) -> None:
         try:

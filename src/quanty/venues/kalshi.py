@@ -121,7 +121,8 @@ class Kalshi(VenueFeed):
         # parser state
         self._markets: dict[str, Market] = {}
         self._settled: set[str] = set()
-        self._books: dict[str, tuple[SortedDict, SortedDict]] = {}  # ticker -> (yes bids, no bids)
+        # ticker -> (yes bids by price, no bids by the ask they make: 1 - price, converted once)
+        self._books: dict[str, tuple[SortedDict, SortedDict]] = {}
         self._last_book: dict[str, Book] = {}
         self._seq: dict[tuple[int | None, int], int] = {}  # (connection, sid) -> last seq
         # ticker -> the connection its book's snapshot came on: a replaced connection overlaps its
@@ -362,7 +363,9 @@ class Kalshi(VenueFeed):
         if msg["type"] == "orderbook_snapshot":
             self._books[ticker] = (
                 SortedDict({round(float(p), 4): float(q) for p, q in body.get("yes_dollars_fp", [])}),
-                SortedDict({round(float(p), 4): float(q) for p, q in body.get("no_dollars_fp", [])}),
+                SortedDict(
+                    {round(1 - round(float(p), 4), 4): float(q) for p, q in body.get("no_dollars_fp", [])}
+                ),
             )
             self._book_conn[ticker] = raw.conn
         else:
@@ -371,18 +374,22 @@ class Kalshi(VenueFeed):
                 return []  # deltas before this connection's snapshot (e.g. a replay starting mid-stream)
             if raw.conn is not None and self._book_conn.get(ticker) not in (None, raw.conn):
                 return []  # the connection being replaced, still sending: the book is its successor's
-            side = books[0] if body["side"] == "yes" else books[1]
+            yes = body["side"] == "yes"
+            side = books[0] if yes else books[1]
             p = round(float(body["price_dollars"]), 4)
+            if not yes:
+                p = round(1 - p, 4)  # the ask a NO bid makes
             q = round(side.get(p, 0.0) + float(body["delta_fp"]), 6)
             if q > 1e-6:
                 side[p] = q
             else:
                 side.pop(p, None)
-            n = self.config.book_depth  # each side's best levels are its highest prices
-            if len(side) >= n and p < side.keys()[-n]:
-                return []  # below the top book_depth levels: the book emitted doesn't change
+            n = self.config.book_depth  # the best levels: the highest bids, the lowest asks
+            if len(side) >= n and (p < side.keys()[-n] if yes else p > side.keys()[n - 1]):
+                return []  # outside the top book_depth levels: the book emitted doesn't change
         out: list[Event] = []
-        book = self._book(raw.t, body.get("ts_ms"), ticker)
+        changed = None if msg["type"] == "orderbook_snapshot" else body["side"]
+        book = self._book(raw.t, body.get("ts_ms"), ticker, changed)
         if not same_book(self._last_book.get(ticker), book):
             self._last_book[ticker] = book
             out.append(book)
@@ -407,13 +414,15 @@ class Kalshi(VenueFeed):
         self._last_book[ticker] = book
         return [book]
 
-    def _book(self, t: int, src: int | None, ticker: str) -> Book:
+    def _book(self, t: int, src: int | None, ticker: str, changed: str | None = None) -> Book:
+        """The book's top levels. changed: the one side a delta moved ("yes" or "no"); the other is
+        the last book's (books arrive at thousands a second, so rebuilding only what moved matters)."""
         yes, no = self._books[ticker]
         n = self.config.book_depth
-        asks = tuple((round(1 - p, 4), q) for p, q in top(no, n, reverse=True))
-        return Book(
-            ts=t, src_ts=src, market_id=f"{VENUE}:{ticker}", bids=top(yes, n, reverse=True), asks=asks
-        )
+        last = self._last_book.get(ticker) if changed else None
+        bids = last.bids if last is not None and changed == "no" else top(yes, n, reverse=True)
+        asks = last.asks if last is not None and changed == "yes" else top(no, n, reverse=False)
+        return Book(ts=t, src_ts=src, market_id=f"{VENUE}:{ticker}", bids=bids, asks=asks)
 
     def _parse_trade(self, raw: Raw, tr: dict[str, Any]) -> list[Event]:
         tid = tr.get("trade_id")
