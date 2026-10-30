@@ -58,9 +58,9 @@ class Replay:
                 self.errors[item.feed] = self.errors.get(item.feed, 0) + 1
                 if self.errors[item.feed] <= 3:
                     log.warning("parse error", feed=item.feed, t=item.t, error=repr(exc))
-                health.on_raw(item, None)
+                health.on_raw(item, None, self.feeds[item.feed].streamed(item.text))
                 continue
-            health.on_raw(item, events)
+            health.on_raw(item, events, self.feeds[item.feed].streamed(item.text))
             yield from events
 
     def windows(self) -> list[Window]:

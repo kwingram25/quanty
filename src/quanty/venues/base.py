@@ -67,6 +67,14 @@ class VenueFeed(WebSocketFeed):
         """Change subscriptions on the live connection; False = reconnect instead."""
         return False
 
+    def subscribes_without_markets(self) -> bool:
+        """Whether subscribe_messages has something to follow with no market wanted (an index): then
+        the connection stays up when the venue lists none, as in its maintenance window."""
+        return False
+
+    def streamed(self, text: str) -> bool:
+        return not text.startswith('{"rest":')  # REST polls are recorded beside the stream (rest())
+
     # --- shared ---
 
     def rest_url(self) -> str:
@@ -89,16 +97,17 @@ class VenueFeed(WebSocketFeed):
             try:
                 while True:
                     want = self.wanted(now_ms())
-                    if want != current:
+                    needed = bool(want) or self.subscribes_without_markets()
+                    if want != current or (conn is None and needed):
                         if (
                             conn is not None
-                            and want
+                            and needed
                             and await self.update_in_place(want - current, current - want)
                         ):
                             current = want
                         else:
                             old, conn = conn, None
-                            if want:
+                            if needed:
                                 subs = self.subscribe_messages(want)
                                 conn = asyncio.create_task(
                                     self.connect_forever(sink, functools.partial(list, subs))

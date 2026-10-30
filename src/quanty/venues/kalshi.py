@@ -164,6 +164,9 @@ class Kalshi(VenueFeed):
         self._cmd += 1
         return json.dumps({"id": self._cmd, "cmd": cmd, "params": params})
 
+    def subscribes_without_markets(self) -> bool:
+        return bool(self.config.index_ids)  # the models' index, between market listings too
+
     def on_connected(self, ws: ClientConnection) -> None:
         self._ws = ws
 
@@ -177,7 +180,9 @@ class Kalshi(VenueFeed):
     async def update_in_place(self, added: frozenset[str], removed: frozenset[str]) -> bool:
         """Add and remove markets on the open subscriptions. A subscription is never left with no
         markets: Kalshi then sends every market it lists (for the ticker channel, about 1,000
-        messages a second). One that would empty is unsubscribed; one not open is a resubscribe."""
+        messages a second). One that would empty is unsubscribed, a channel's first market (after a
+        spell with none, as in Kalshi's maintenance) subscribed here; one not yet confirmed is a
+        resubscribe."""
         ws = self._ws
         if ws is None:
             return False
@@ -190,8 +195,11 @@ class Kalshi(VenueFeed):
             if not adds and not drops:
                 continue
             sid = self._sids.get(ch)
+            if sid is None and not before[ch]:  # a first market for a channel this connection lacks
+                cmds.append(("subscribe", {"channels": [ch], "market_tickers": sorted(after[ch])}))
+                continue
             if sid is None:
-                return False  # not open on this connection: resubscribe instead
+                return False  # not confirmed on this connection yet: resubscribe instead
             if not after[ch]:
                 cmds.append(("unsubscribe", {"sids": [sid]}))
                 closing.append(ch)

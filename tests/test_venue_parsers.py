@@ -312,11 +312,18 @@ def test_kalshi_top_only_series_follow_the_ticker_channel_as_one_level_books() -
     ]
     ws.sent.clear()
     # the hour's strikes close before the next hour's are in play: the ticker would empty, which
-    # Kalshi takes as every market it lists; it's unsubscribed instead, and reopened by a resubscribe
+    # Kalshi takes as every market it lists; it's unsubscribed instead, and subscribed again when
+    # the next hour's strikes come (on the same connection)
     assert asyncio.run(k.update_in_place(frozenset(), frozenset({ladder, other})))
     assert [js.loads(m)["cmd"] for m in ws.sent] == ["unsubscribe", "unsubscribe"]  # trades and ticker
     assert "delete_markets" not in "".join(ws.sent)
-    assert asyncio.run(k.update_in_place(frozenset({ladder}), frozenset())) is False  # none open: resubscribe
+    ws.sent.clear()
+    assert asyncio.run(k.update_in_place(frozenset({ladder}), frozenset()))
+    sent = [(c["cmd"], c["params"]) for c in map(js.loads, ws.sent)]
+    assert sent == [
+        ("subscribe", {"channels": ["trade"], "market_tickers": [ladder]}),
+        ("subscribe", {"channels": ["ticker"], "market_tickers": [ladder]}),
+    ]
 
 
 def test_a_data_only_replay_reads_index_values_and_skips_books_unparsed(tmp_path: Path) -> None:

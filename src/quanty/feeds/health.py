@@ -44,6 +44,7 @@ class FeedHealth:
         self.config = config
         self.up: bool | None = None
         self.last_t: int | None = None
+        self.last_stream_t: int | None = None  # the last message from the stream, not a poll
         self._window_start = start
         self._reset()
 
@@ -52,14 +53,17 @@ class FeedHealth:
         self._messages = self._events = self._errors = self._negative = 0
         self._gaps = self._max_gap = self._reconnects = 0
 
-    def on_raw(self, raw: Raw, events: list[Event] | None) -> None:
-        """Record one message; events=None means it failed to parse."""
+    def on_raw(self, raw: Raw, events: list[Event] | None, streamed: bool = True) -> None:
+        """Record one message; events=None means it failed to parse. streamed=False: a poll recorded
+        beside the stream (Feed.streamed), which counts as a message but not as the stream alive."""
         expect = self.config.expect_every_s
-        if self.last_t is not None:
-            silence = raw.t - self.last_t
-            self._max_gap = max(self._max_gap, silence)
-            if expect is not None and silence > expect * 1000:
-                self._gaps += 1
+        if streamed:
+            if self.last_stream_t is not None:
+                silence = raw.t - self.last_stream_t
+                self._max_gap = max(self._max_gap, silence)
+                if expect is not None and silence > expect * 1000:
+                    self._gaps += 1
+            self.last_stream_t = raw.t
         self.last_t = raw.t
         self._messages += 1
         if events is None:
@@ -85,7 +89,8 @@ class FeedHealth:
         if self.last_t is None:
             return "waiting"
         expect = self.config.expect_every_s
-        if expect is not None and now - self.last_t > expect * 1000:
+        last = self.last_stream_t if self.last_stream_t is not None else self.last_t
+        if expect is not None and now - last > expect * 1000:
             return "stale"
         return "ok"
 

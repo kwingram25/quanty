@@ -109,7 +109,7 @@ class RecordSession:
                 self._logged_errors.add(item.feed)
                 log.error("parse error", feed=item.feed, error=repr(exc), message=item.text[:200])
             events = None
-        health.on_raw(item, events)
+        health.on_raw(item, events, self.feeds[item.feed].streamed(item.text))
         if events:
             self._drive(events)
 

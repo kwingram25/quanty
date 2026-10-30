@@ -91,6 +91,53 @@ def test_kalshi_discovers_paginates_and_updates_subscriptions_in_place() -> None
     assert [i.state for i in items if isinstance(i, Link)] == ["up"]
 
 
+def test_kalshi_keeps_its_index_when_no_market_is_listed() -> None:
+    # Kalshi's maintenance window lists no market for two hours: the index the models read stays up
+    received: list[list[dict[str, Any]]] = []
+
+    async def handler(ws: ServerConnection) -> None:
+        msgs: list[dict[str, Any]] = []
+        received.append(msgs)
+        async for text in ws:
+            cmd = json.loads(text)
+            msgs.append(cmd)
+            if cmd["cmd"] == "subscribe":
+                ch = cmd["params"]["channels"][0]
+                await ws.send(
+                    json.dumps(
+                        {"type": "subscribed", "id": cmd["id"], "msg": {"channel": ch, "sid": cmd["id"]}}
+                    )
+                )
+
+    async def go(markets: list[dict[str, Any]]) -> list[Raw | Link]:
+        received.clear()
+        async with serve(handler, "127.0.0.1", 0) as server:
+            port = server.sockets[0].getsockname()[1]
+            cfg = {"url": f"ws://127.0.0.1:{port}", "poll_s": 0.5, "index_ids": ["BRTI"], "keep_after_s": 0}
+            feed = feeds.make("kalshi", cfg)
+            assert isinstance(feed, Kalshi)
+            feed.transport = mock_rest(
+                lambda req: httpx.Response(200, json={"markets": markets, "cursor": ""})
+            )
+            feed.headers = lambda: {}  # type: ignore[method-assign]
+            return await run_for(feed, 3.5)
+
+    asyncio.run(go([]))  # none listed from the start: connected for the index alone
+    assert len(received) == 1
+    assert [c["params"] for c in received[0]] == [
+        {"channels": ["cfbenchmarks_value_5hz"], "index_ids": ["BRTI"]}
+    ]
+
+    # its market listed a moment later, then closing: subscribed, then unsubscribed, on one connection
+    now = now_ms()
+    items = asyncio.run(go([kalshi_market("KX-A", now - 15 * MIN, now + 2000)]))
+    assert len(received) == 1 and [i.state for i in items if isinstance(i, Link)] == ["up"]
+    cmds = [(c["cmd"], c["params"].get("channels", c["params"].get("sids"))) for c in received[0]]
+    assert cmds[0] == ("subscribe", ["cfbenchmarks_value_5hz"])
+    assert sorted(cmds[1:3]) == [("subscribe", ["orderbook_delta"]), ("subscribe", ["trade"])]
+    assert [c for c, _ in cmds[3:]] == ["unsubscribe", "unsubscribe"]
+
+
 def test_kalshi_near_money_follows_strikes_in_play_and_their_neighbors() -> None:
     now = now_ms()
     quotes = {"T1": (0.99, 1.0), "T2": (0.99, 1.0), "T3": (0.97, 0.98), "T4": (0.40, 0.45),

@@ -98,6 +98,11 @@ class Feed(ABC):
         skips the rest unparsed. Data feeds hold nothing else."""
         return True
 
+    def streamed(self, text: str) -> bool:
+        """Whether a raw message came on the feed's stream, not a poll recorded beside it: feed
+        health judges a feed's freshness by its stream, so polls can't hide a silent one."""
+        return True
+
     def on_link(self, link: Link) -> None:  # noqa: B027 - optional hook
         """A connection change, in stream order: reset state that a new connection re-sends."""
 

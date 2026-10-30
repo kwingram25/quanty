@@ -49,3 +49,14 @@ def test_no_cadence_never_stale() -> None:
     h.on_raw(Raw("f", 10**9, "m"), [])
     assert h.status(10**10) == "ok"
     assert h.window(10**10).gaps == 0
+
+
+def test_polls_beside_a_silent_stream_dont_keep_a_feed_fresh() -> None:
+    h = FeedHealth("f", FeedConfig(kind="x", expect_every_s=30), start=0)
+    h.on_raw(Raw("f", 0, "m"), [])
+    for t in range(10_000, 120_001, 10_000):  # a venue's REST polls, every 10 s; nothing on the stream
+        h.on_raw(Raw("f", t, '{"rest":"markets"}'), [], streamed=False)
+    assert h.status(120_000) == "stale"
+    assert h.window(120_000).messages == 13  # still counted as messages
+    h.on_raw(Raw("f", 121_000, "m"), [])
+    assert h.status(121_000) == "ok"

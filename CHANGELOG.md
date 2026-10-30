@@ -9,6 +9,13 @@ file is opened) and the command line. Projects from `quanty init` depend on one 
 
 ## Unreleased
 
+- Fix: Kalshi's index stopped when Kalshi listed no market (its weekly maintenance, Thursdays 3-5 AM
+  Eastern): the feed closed its connection, which carries `index_ids` too, so every strategy reading
+  the index stopped, including ones trading other venues. A feed with an index now keeps its
+  connection with no market listed, and subscribes markets on it again when they return (no
+  reconnect).
+- Feed health judges a venue feed by its stream: the REST polls recorded beside it no longer keep it
+  "ok" when the stream has gone quiet (`Feed.streamed`).
 - Less CPU per message, for busy markets on small servers: Kalshi book updates rebuild only the side
   that moved (no side's levels are kept by the ask they make, converted once), the recorder works
   out an hour's file once instead of per message, and the engine asks each strategy whether it
